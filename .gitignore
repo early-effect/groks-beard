@@ -1,0 +1,14 @@
+# Internal engineering design (not published)
+ROADMAP.md
+
+# Dependencies and build
+node_modules/
+dist/
+out/
+*.vsix
+.vscode-test/
+coverage/
+
+# OS / editor
+.DS_Store
+*.log

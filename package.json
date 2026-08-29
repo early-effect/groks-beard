@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "pnpm --filter @groks-beard/core test",
+    "test": "pnpm --filter @groks-beard/core test && pnpm --filter @groks-beard/acp test",
     "typecheck": "tsc -b"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@ import {
   HOST_MSG_HANDLED,
   HOST_MSG_TAGS,
   WEBVIEW_MSG_HANDLED,
-  WEBVIEW_MSG_TAGS
+  WEBVIEW_MSG_TAGS,
 } from "../src/protocol.ts"
 
 it("locks the closed HostMsg tag list", () => {
@@ -26,13 +26,13 @@ it("decodes a permission card and a send", () => {
     toolCallId: "c1",
     title: "Edit",
     options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
-    hasDiff: true
+    hasDiff: true,
   })
   expect(card._tag).toBe("permissionCard")
   const send = decodeWebviewMsg({
     _tag: "send",
     text: "hello",
-    chips: []
+    chips: [],
   })
   expect(send._tag).toBe("send")
 })
@@ -40,4 +40,16 @@ it("decodes a permission card and a send", () => {
 it("maps unknown stop reasons to unknown", () => {
   expect(displayStopReason("end_turn")).toBe("end_turn")
   expect(displayStopReason("tool_use")).toBe("unknown")
+})
+
+it("decodes a thoughtChunk host message", () => {
+  const msg = decodeHostMsg({
+    _tag: "thoughtChunk",
+    turnId: "turn_1",
+    text: "Considering the selection.\nThen I'll answer.\n",
+  })
+  expect(msg._tag).toBe("thoughtChunk")
+  if (msg._tag === "thoughtChunk") {
+    expect(msg.text).toContain("Then I'll answer.")
+  }
 })

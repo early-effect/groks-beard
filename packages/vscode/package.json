@@ -1,5 +1,8 @@
 {
   "name": "@groks-beard/vscode",
+  "displayName": "Grok's Beard",
+  "publisher": "early-effect",
+  "description": "Effect-first VS Code / Cursor client for Grok Build",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,10 +14,40 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "groks-beard",
+          "title": "Grok's Beard",
+          "icon": "media/beard.svg"
+        }
+      ]
+    },
+    "views": {
+      "groks-beard": [
+        {
+          "type": "webview",
+          "id": "groksBeard.chat",
+          "name": "Chat"
+        },
+        {
+          "id": "groksBeard.changes",
+          "name": "Grok Changes"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "groksBeard.open",
         "title": "Grok's Beard: Open"
+      },
+      {
+        "command": "groksBeard.cancel",
+        "title": "Grok's Beard: Cancel"
+      },
+      {
+        "command": "groksBeard.cycleMode",
+        "title": "Grok's Beard: Cycle Mode"
       },
       {
         "command": "groksBeard.addSelection",

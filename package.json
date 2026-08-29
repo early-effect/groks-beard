@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -b",
-    "test": "pnpm --filter @groks-beard/core test && pnpm --filter @groks-beard/acp test && pnpm --filter @groks-beard/vscode test",
+    "build": "tsc -b && pnpm --filter @groks-beard/webview bundle",
+    "test": "pnpm --filter @groks-beard/core test && pnpm --filter @groks-beard/acp test && pnpm --filter @groks-beard/webview test && pnpm --filter @groks-beard/vscode test",
     "typecheck": "tsc -b"
   },
   "devDependencies": {

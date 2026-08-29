@@ -22,11 +22,25 @@ rl.on("line", (line) => {
     reply({
       jsonrpc: "2.0",
       id: msg.id,
-      result: { protocolVersion: 1, agentCapabilities: { loadSession: true } }
+      result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
     })
     return
   }
   if (msg.method === "session/new") {
+    reply({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "sess_fake",
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "compact", description: "Compact context" },
+            { name: "always-approve", description: "Skip permission prompts" },
+          ],
+        },
+      },
+    })
     reply({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "sess_fake" } })
     return
   }
@@ -41,10 +55,32 @@ rl.on("line", (line) => {
       params: {
         sessionId: msg.params.sessionId,
         update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Considering the selection.\n" },
+        },
+      },
+    })
+    reply({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: msg.params.sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Then I'll answer.\n" },
+        },
+      },
+    })
+    reply({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: msg.params.sessionId,
+        update: {
           sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "ok" }
-        }
-      }
+          content: { type: "text", text: "ok" },
+        },
+      },
     })
     reply({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } })
     return
@@ -52,6 +88,6 @@ rl.on("line", (line) => {
   reply({
     jsonrpc: "2.0",
     id: msg.id,
-    error: { code: -32601, message: `Method not found: ${msg.method}` }
+    error: { code: -32601, message: `Method not found: ${msg.method}` },
   })
 })

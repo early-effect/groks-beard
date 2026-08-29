@@ -1,0 +1,32 @@
+{
+  "name": "@groks-beard/webview",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b && pnpm bundle",
+    "bundle": "node ./scripts/bundle.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@groks-beard/core": "workspace:*",
+    "dompurify": "^3.2.6",
+    "effect": "4.0.0-rc.112",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/dompurify": "^3.2.0",
+    "@types/markdown-it": "^14.1.2",
+    "esbuild": "^0.25.9",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

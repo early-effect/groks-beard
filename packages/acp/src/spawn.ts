@@ -1,5 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { connectBeardAcp, type BeardAcp } from "./client.js"
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
+import { type BeardAcp, type BeardClientHandlers, connectBeardAcp } from "./client.js"
 import { encodeNdjson } from "./ndjson.js"
 
 export const GROK_AGENT_STDIO_ARGS = ["agent", "stdio"] as const
@@ -17,17 +17,31 @@ export const spawnGrokAgentStdio = (input: {
   readonly cwd: string
   readonly env?: NodeJS.ProcessEnv
   readonly args?: ReadonlyArray<string>
+  readonly onSessionUpdate?: BeardClientHandlers["onSessionUpdate"]
+  readonly onPermission?: BeardClientHandlers["onPermission"]
+  readonly onTerminalCreate?: BeardClientHandlers["onTerminalCreate"]
+  readonly onExitPlanMode?: BeardClientHandlers["onExitPlanMode"]
+  readonly onAskUserQuestion?: BeardClientHandlers["onAskUserQuestion"]
+  readonly onElicit?: BeardClientHandlers["onElicit"]
 }): SpawnedAgent => {
   const args = input.args ?? GROK_AGENT_STDIO_ARGS
   const child = spawn(input.command, [...args], {
     cwd: input.cwd,
     env: input.env,
-    stdio: ["pipe", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe"],
   })
   const beard = connectBeardAcp({
     onOutgoing: (message) => {
       child.stdin.write(encodeNdjson(message))
-    }
+    },
+    ...(input.onSessionUpdate !== undefined ? { onSessionUpdate: input.onSessionUpdate } : {}),
+    ...(input.onPermission !== undefined ? { onPermission: input.onPermission } : {}),
+    ...(input.onTerminalCreate !== undefined ? { onTerminalCreate: input.onTerminalCreate } : {}),
+    ...(input.onExitPlanMode !== undefined ? { onExitPlanMode: input.onExitPlanMode } : {}),
+    ...(input.onAskUserQuestion !== undefined
+      ? { onAskUserQuestion: input.onAskUserQuestion }
+      : {}),
+    ...(input.onElicit !== undefined ? { onElicit: input.onElicit } : {}),
   })
   child.stdout.on("data", (chunk: Buffer) => {
     beard.transport.feedFromAgent(new Uint8Array(chunk))

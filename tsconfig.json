@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/acp" },
-    { "path": "./packages/vscode" }
+    { "path": "./packages/vscode" },
+    { "path": "./packages/webview" }
   ]
 }

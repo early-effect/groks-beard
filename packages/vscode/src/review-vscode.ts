@@ -6,6 +6,7 @@ import * as vscode from "vscode"
 import { CHANGE_INDEX_KEY, ChangeStore, type UndoApplyPorts } from "./change-store.js"
 import type { DiffOpenPlan } from "./diff-open.js"
 import { detectDiffEditor, type FollowAlongPlan, schemesFromTabInput } from "./follow-along.js"
+import { gitHeadText } from "./path-diff.js"
 import { ReviewHost } from "./review-host.js"
 import { BeardDocStore, ORIGINAL_SCHEME, PROPOSED_SCHEME, virtualDocRef } from "./virtual-docs.js"
 
@@ -172,6 +173,11 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
     },
     warn: (message) => {
       void vscode.window.showWarningMessage(message)
+    },
+    gitHead: (path) => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      if (root === undefined) return undefined
+      return gitHeadText(root, path)
     },
     activeScheme: () => vscode.window.activeTextEditor?.document.uri.scheme,
     inDiffEditor: () => {

@@ -84,6 +84,14 @@
       {
         "command": "groksBeard.undoAll",
         "title": "Grok's Beard: Undo All"
+      },
+      {
+        "command": "groksBeard.enableTuiBridge",
+        "title": "Grok's Beard: Enable TUI Bridge"
+      },
+      {
+        "command": "groksBeard.disableTuiBridge",
+        "title": "Grok's Beard: Disable TUI Bridge"
       }
     ],
     "menus": {
@@ -118,6 +126,11 @@
           "default": "",
           "description": "Absolute path to the grok binary. Empty means auto-discover."
         },
+        "groksBeard.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to Node for the MCP proxy. Never process.execPath (that is Code/Cursor)."
+        },
         "groksBeard.includeActiveFileByDefault": {
           "type": "boolean",
           "default": true,
@@ -146,6 +159,7 @@
   "dependencies": {
     "@groks-beard/acp": "workspace:*",
     "@groks-beard/core": "workspace:*",
+    "@groks-beard/mcp": "workspace:*",
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {

@@ -168,3 +168,11 @@ it("drops pending files when the permission is rejected", () => {
   review.onPermissionChoice("perm-1", "reject-once")
   expect(store.getFile("sess", "turn_1", "/tmp/a.ts")).toBeUndefined()
 })
+
+it("sidecar openFileDiff uses disk with a no Beard snapshot notice", async () => {
+  const { review, opened, warnings } = harness()
+  review.store.ingestSidecar({ files: [{ path: "/tmp/a.ts", kind: "modify" }] })
+  await review.openFileDiff("tui", "sidecar", "/tmp/a.ts")
+  expect(opened).toHaveLength(1)
+  expect(warnings).toContain("no Beard snapshot")
+})

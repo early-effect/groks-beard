@@ -141,6 +141,7 @@ export class ReviewHost {
   onPermissionChoice(requestId: string, optionId: string): void {
     const params = this.permissions.get(requestId)
     if (params === undefined) return
+    this.permissions.delete(requestId)
     if (isRejectPermissionKind(permissionOptionKind(params, optionId))) {
       const extracted = diffsFromToolCall(toolCallFromPermissionParams(params))
       this.store.dropToolCall(extracted.toolCallId)

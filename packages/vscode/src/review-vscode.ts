@@ -5,14 +5,9 @@ import { dirname, join } from "node:path"
 import * as vscode from "vscode"
 import { CHANGE_INDEX_KEY, ChangeStore, type UndoApplyPorts } from "./change-store.js"
 import type { DiffOpenPlan } from "./diff-open.js"
-import type { FollowAlongPlan } from "./follow-along.js"
+import { detectDiffEditor, type FollowAlongPlan, schemesFromTabInput } from "./follow-along.js"
 import { ReviewHost } from "./review-host.js"
-import {
-  BeardDocStore,
-  ORIGINAL_SCHEME,
-  PROPOSED_SCHEME,
-  virtualDocRef
-} from "./virtual-docs.js"
+import { BeardDocStore, ORIGINAL_SCHEME, PROPOSED_SCHEME, virtualDocRef } from "./virtual-docs.js"
 
 export class BeardContentProvider implements vscode.TextDocumentContentProvider {
   readonly onDidChange: vscode.Event<vscode.Uri>
@@ -46,7 +41,7 @@ export const executeDiffPlan = async (plan: DiffOpenPlan): Promise<void> => {
     const triples = plan.files.map((file) => [
       vscode.Uri.file(file.path),
       uriFromRef(file.original),
-      uriFromRef(file.proposed)
+      uriFromRef(file.proposed),
     ])
     await vscode.commands.executeCommand("vscode.changes", plan.title, triples)
     return
@@ -56,7 +51,7 @@ export const executeDiffPlan = async (plan: DiffOpenPlan): Promise<void> => {
       "vscode.diff",
       uriFromRef(file.original),
       uriFromRef(file.proposed),
-      `${plan.title}: ${file.path}`
+      `${plan.title}: ${file.path}`,
     )
   }
 }
@@ -69,7 +64,7 @@ export const applyFollowAlong = async (plan: FollowAlongPlan): Promise<void> => 
     await vscode.window.showTextDocument(uri, {
       preserveFocus: plan.preserveFocus,
       preview: true,
-      selection
+      selection,
     })
   }
 }
@@ -87,7 +82,7 @@ export const vscodeUndoPorts = (): UndoApplyPorts => ({
     const pick = await vscode.window.showWarningMessage(
       `${path} differs from the agent snapshot. Delete anyway?`,
       { modal: true },
-      "Delete"
+      "Delete",
     )
     return pick === "Delete"
   },
@@ -119,7 +114,7 @@ export const vscodeUndoPorts = (): UndoApplyPorts => ({
     }
     const ok = await vscode.workspace.applyEdit(edit)
     if (!ok) throw new Error("Workspace edit was not applied")
-  }
+  },
 })
 
 export const createReviewHost = (context: vscode.ExtensionContext): {
@@ -131,12 +126,13 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
   const docs = new BeardDocStore()
   const storageRoot = (context.storageUri ?? context.globalStorageUri)?.fsPath ?? join(
     context.extensionPath,
-    ".beard-changes"
+    ".beard-changes",
   )
   try {
     mkdirSync(storageRoot, { recursive: true })
-  } catch {
-    // Directory may already exist.
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    void vscode.window.showWarningMessage(`Grok Changes storage is not writable: ${message}`)
   }
   const store = new ChangeStore({
     storageRoot,
@@ -161,8 +157,8 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
       },
       mkdirp: (absPath) => {
         mkdirSync(absPath, { recursive: true })
-      }
-    }
+      },
+    },
   })
   const review = new ReviewHost(docs, store, {
     readDisk: readDiskText,
@@ -179,9 +175,15 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
     },
     activeScheme: () => vscode.window.activeTextEditor?.document.uri.scheme,
     inDiffEditor: () => {
-      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
-      return tab?.input instanceof vscode.TabInputTextDiff
-    }
+      const group = vscode.window.tabGroups.activeTabGroup
+      const schemes = group.tabs.flatMap((tab) => schemesFromTabInput(tab.input))
+      const editor = vscode.window.activeTextEditor
+      return detectDiffEditor({
+        tabInput: group.activeTab?.input,
+        schemesInActiveGroup: schemes,
+        ...(editor !== undefined ? { scheme: editor.document.uri.scheme } : {}),
+      })
+    },
   })
   const provider = new BeardContentProvider(docs)
   return { docs, store, review, provider }
@@ -189,10 +191,10 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
 
 export const registerVirtualDocs = (
   context: vscode.ExtensionContext,
-  provider: BeardContentProvider
+  provider: BeardContentProvider,
 ): void => {
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(ORIGINAL_SCHEME, provider),
-    vscode.workspace.registerTextDocumentContentProvider(PROPOSED_SCHEME, provider)
+    vscode.workspace.registerTextDocumentContentProvider(PROPOSED_SCHEME, provider),
   )
 }

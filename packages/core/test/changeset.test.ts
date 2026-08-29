@@ -6,6 +6,7 @@ import {
   FileChange,
   keepFile,
   lineDiffStats,
+  REGION_ONLY_REASON,
   resolveUndo,
   turnTitleFromPrompt,
   undoPlan,
@@ -105,6 +106,22 @@ it("Undo of move reverses when both paths are known", () => {
     }),
   )
   expect(plan._tag).toBe("moveReverse")
+})
+
+it("disables Undo when the sides are region-only", () => {
+  const plan = undoPlan(
+    change({
+      path: "/huge.ts",
+      kind: "modify",
+      additions: 1,
+      deletions: 1,
+      wholeFile: false,
+      toolCallId: "c",
+      oldSnapshot: "old-region",
+      newSnapshot: "new-region",
+    }),
+  )
+  expect(plan).toEqual({ _tag: "disabled", reason: REGION_ONLY_REASON })
 })
 
 it("disables Undo of move without fromPath", () => {

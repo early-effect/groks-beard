@@ -90,7 +90,7 @@
       "view/item/context": [
         {
           "command": "groksBeard.keepChange",
-          "when": "view == groksBeard.changes && viewItem == changeFile",
+          "when": "view == groksBeard.changes && viewItem =~ /^changeFile/",
           "group": "inline"
         },
         {

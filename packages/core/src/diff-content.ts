@@ -145,12 +145,15 @@ export const inferChangeKind = (input: {
   readonly fromPath?: string
   readonly oldText: string
   readonly newText: string
-  readonly oldTextWasNull: boolean
+  readonly diskExists?: boolean
+  readonly diskIsBefore?: boolean
 }): FileChange["kind"] => {
   if (input.fromPath !== undefined || input.toolKind === "move") return "move"
-  if (input.toolKind === "delete") return "delete"
-  if (input.newText === "" && !input.oldTextWasNull && input.oldText !== "") return "delete"
-  if (input.oldTextWasNull || (input.oldText === "" && input.newText !== "")) return "add"
+  if (input.toolKind === "delete") {
+    if (input.diskIsBefore === false && input.diskExists === true) return "modify"
+    return "delete"
+  }
+  if (input.oldText === "" && input.newText !== "") return "add"
   return "modify"
 }
 
@@ -175,9 +178,10 @@ export const reconstructToolDiffs = (input: {
 }): ReadonlyArray<ReconstructedFileDiff> => {
   const extracted = diffsFromToolCall(input.toolCall)
   return extracted.diffs.map((diff) => {
+    const diskText = input.diskText(diff.path)
     const sides = expandAcpDiff({
       diff,
-      diskText: input.diskText(diff.path),
+      diskText,
       diskIsBefore: input.diskIsBefore,
       replaceAll: extracted.replaceAll,
     })
@@ -185,7 +189,8 @@ export const reconstructToolDiffs = (input: {
       toolKind: extracted.kind,
       oldText: sides.oldText,
       newText: sides.newText,
-      oldTextWasNull: diff.oldTextWasNull,
+      diskExists: diskText !== undefined,
+      diskIsBefore: input.diskIsBefore,
       ...(extracted.fromPath !== undefined ? { fromPath: extracted.fromPath } : {}),
     })
     return {

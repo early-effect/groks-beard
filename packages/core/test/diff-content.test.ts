@@ -54,7 +54,7 @@ it("falls back to rawInput old_string/new_string/path", () => {
   expect(diffs[0]?.newText).toBe("bar\n")
 })
 
-it("treats null oldText as an add", () => {
+it("treats null oldText as an add when the file is missing", () => {
   const diffs = reconstructToolDiffs({
     toolCall: {
       toolCallId: "call_3",
@@ -69,12 +69,57 @@ it("treats null oldText as an add", () => {
   expect(diffs[0]?.newText).toBe("hello")
 })
 
-it("treats empty newText as a delete", () => {
+it("treats null oldText plus existing disk as a modify overwrite", () => {
+  const disk = "keep me\nplease\n"
+  const diffs = reconstructToolDiffs({
+    toolCall: {
+      toolCallId: "call_write",
+      kind: "edit",
+      content: [{ type: "diff", path: "/tmp/file.ts", oldText: null, newText: "replaced" }],
+    },
+    diskText: () => disk,
+    diskIsBefore: true,
+  })
+  expect(diffs[0]?.kind).toBe("modify")
+  expect(diffs[0]?.oldText).toBe(disk)
+  expect(diffs[0]?.newText).toBe("replaced")
+  const change = fileChangeFromReconstructed(diffs[0]!)
+  expect(change.oldSnapshot).toBe(disk)
+  expect(change.kind).toBe("modify")
+})
+
+it("uses toolKind delete, not empty newText, as the delete signal", () => {
   expect(inferChangeKind({
+    toolKind: "edit",
     oldText: "gone",
     newText: "",
-    oldTextWasNull: false,
+  })).toBe("modify")
+  expect(inferChangeKind({
+    toolKind: "delete",
+    oldText: "gone",
+    newText: "",
   })).toBe("delete")
+})
+
+it("classifies a post-write delete as modify when the path still exists", () => {
+  expect(inferChangeKind({
+    toolKind: "delete",
+    oldText: "body",
+    newText: "",
+    diskExists: true,
+    diskIsBefore: false,
+  })).toBe("modify")
+  const diffs = reconstructToolDiffs({
+    toolCall: {
+      toolCallId: "del",
+      kind: "delete",
+      status: "completed",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+    diskText: () => "",
+    diskIsBefore: false,
+  })
+  expect(diffs[0]?.kind).toBe("modify")
 })
 
 it("recovers original from a completed post-write update", () => {

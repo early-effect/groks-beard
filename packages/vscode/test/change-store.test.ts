@@ -1,6 +1,8 @@
 import { expect, it } from "@effect/vitest"
 import {
+  MAX_DIFF_EXPAND_BYTES,
   MISSING_SNAPSHOT_REASON,
+  REGION_ONLY_REASON,
   SNAPSHOT_BYTE_CAP,
   SNAPSHOT_FILE_CAP,
   type UndoMutation
@@ -249,6 +251,54 @@ it("disables Undo of move when fromPath is missing", async () => {
   expect(result).toEqual({ ok: false, path: "/to.ts", reason: "move target unknown" })
 })
 
+it("Keep still drops an overflow file that cannot Undo", () => {
+  const { store } = memory()
+  for (let i = 0; i < SNAPSHOT_FILE_CAP + 1; i++) {
+    store.ingestToolCall({
+      sessionId: "s1",
+      turnId: "turn_1",
+      title: "bulk",
+      diskIsBefore: true,
+      readDisk: () => "a",
+      toolCall: {
+        toolCallId: `c${i}`,
+        kind: "edit",
+        content: [{ type: "diff", path: `/f${i}.ts`, oldText: "a", newText: "b" }]
+      }
+    })
+  }
+  const overflowPath = `/f${SNAPSHOT_FILE_CAP}.ts`
+  expect(store.getFile("s1", "turn_1", overflowPath)?.snapshotStored).toBe(false)
+  store.keep("s1", "turn_1", overflowPath)
+  expect(store.getFile("s1", "turn_1", overflowPath)).toBeUndefined()
+  expect(store.getTurn("s1", "turn_1")?.files).toHaveLength(SNAPSHOT_FILE_CAP)
+})
+
+it("does not full-replace an oversize region-only file on Undo", async () => {
+  const { store } = memory()
+  const disk = "x".repeat(MAX_DIFF_EXPAND_BYTES + 1)
+  store.ingestToolCall({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "region",
+    diskIsBefore: true,
+    readDisk: () => disk,
+    toolCall: {
+      toolCallId: "c1",
+      kind: "edit",
+      content: [{ type: "diff", path: "/big.ts", oldText: "x", newText: "y" }]
+    }
+  })
+  const file = store.getFile("s1", "turn_1", "/big.ts")
+  expect(file?.wholeFile).toBe(false)
+  expect(file?.undoDisabledReason).toBe(REGION_ONLY_REASON)
+  const apply = applyPorts({ "/big.ts": disk })
+  const result = await store.undo("s1", "turn_1", "/big.ts", apply.ports)
+  expect(result).toEqual({ ok: false, path: "/big.ts", reason: REGION_ONLY_REASON })
+  expect(apply.applied).toEqual([])
+  expect(store.getFile("s1", "turn_1", "/big.ts")).toBeDefined()
+})
+
 it("indexes overflow files without snapshots and disables Undo", () => {
   const { store } = memory()
   for (let i = 0; i < SNAPSHOT_FILE_CAP + 1; i++) {
@@ -257,7 +307,7 @@ it("indexes overflow files without snapshots and disables Undo", () => {
       turnId: "turn_1",
       title: "bulk",
       diskIsBefore: true,
-      readDisk: () => undefined,
+      readDisk: () => "a",
       toolCall: {
         toolCallId: `c${i}`,
         kind: "edit",

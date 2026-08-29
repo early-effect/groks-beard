@@ -23,6 +23,7 @@ export class ChangeSet extends Schema.Class<ChangeSet>("ChangeSet")({
 export const SNAPSHOT_FILE_CAP = 32
 export const SNAPSHOT_BYTE_CAP = 16 * 1024 * 1024
 export const MISSING_SNAPSHOT_REASON = "missing snapshot"
+export const REGION_ONLY_REASON = "region only"
 
 export class FileChangeRecord extends Schema.Class<FileChangeRecord>("FileChangeRecord")({
   path: Schema.String,
@@ -105,11 +106,21 @@ export const fileChangeFromRecord = (
     ...(snapshots?.newText !== undefined ? { newSnapshot: snapshots.newText } : {}),
   })
 
+export const undoDisabledReasonFor = (
+  change: { readonly wholeFile: boolean },
+  snapshotStored: boolean,
+): string | undefined => {
+  if (!snapshotStored) return MISSING_SNAPSHOT_REASON
+  if (!change.wholeFile) return REGION_ONLY_REASON
+  return undefined
+}
+
 export const recordFromFileChange = (
   change: FileChange,
   stored: { readonly snapshotStored: boolean; readonly snapshotBytes: number },
-): FileChangeRecord =>
-  new FileChangeRecord({
+): FileChangeRecord => {
+  const undoDisabledReason = undoDisabledReasonFor(change, stored.snapshotStored)
+  return new FileChangeRecord({
     path: change.path,
     kind: change.kind,
     additions: change.additions,
@@ -119,8 +130,9 @@ export const recordFromFileChange = (
     snapshotStored: stored.snapshotStored,
     snapshotBytes: stored.snapshotBytes,
     ...(change.fromPath !== undefined ? { fromPath: change.fromPath } : {}),
-    ...(!stored.snapshotStored ? { undoDisabledReason: MISSING_SNAPSHOT_REASON } : {}),
+    ...(undoDisabledReason !== undefined ? { undoDisabledReason } : {}),
   })
+}
 
 export type UndoPlan =
   | { readonly _tag: "replace"; readonly path: string; readonly text: string }
@@ -181,6 +193,7 @@ const longestCommonSubsequence = (
 }
 
 export const undoPlan = (change: FileChange, diskNow?: string): UndoPlan => {
+  if (!change.wholeFile) return { _tag: "disabled", reason: REGION_ONLY_REASON }
   switch (change.kind) {
     case "modify": {
       if (change.oldSnapshot === undefined) return { _tag: "disabled", reason: "missing snapshot" }

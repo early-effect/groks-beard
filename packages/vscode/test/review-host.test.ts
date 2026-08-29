@@ -137,6 +137,22 @@ it("drops pending files when the turn is cancelled", () => {
   expect(store.getFile("sess", "turn_1", "/tmp/a.ts")).toBeUndefined()
 })
 
+it("keeps Allowed files in Changes when a later cancel arrives", () => {
+  const { review, store } = harness()
+  review.setTurn("sess", "turn_1", "edit")
+  review.rememberPermission("perm-1", {
+    sessionId: "sess",
+    toolCall: {
+      toolCallId: "call_1",
+      content: [{ type: "diff", path: "/tmp/a.ts", oldText: "old-token", newText: "new-token" }],
+    },
+    options: [{ optionId: "allow-once", kind: "allow_once" }],
+  })
+  review.onPermissionChoice("perm-1", "allow-once")
+  review.cancelPendingPermissions()
+  expect(store.getFile("sess", "turn_1", "/tmp/a.ts")).toBeDefined()
+})
+
 it("drops pending files when the permission is rejected", () => {
   const { review, store } = harness()
   review.setTurn("sess", "turn_1", "edit")

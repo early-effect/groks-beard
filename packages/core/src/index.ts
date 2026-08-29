@@ -1,4 +1,5 @@
 export * from "./changeset.js"
+export * from "./diff-content.js"
 export * from "./diff-expand.js"
 export * from "./errors.js"
 export * from "./plan-terminal.js"

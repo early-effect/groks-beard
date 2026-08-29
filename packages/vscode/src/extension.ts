@@ -7,6 +7,7 @@ import { ChatViewProvider } from "./chat-view.js"
 import { locateGrokCli } from "./cli-locator.js"
 import { ComposerState } from "./composer.js"
 import { missingCliMessage } from "./onboarding.js"
+import { maybePlaceViews, VIEW_PLACEMENT_KEY, type ViewPlacement } from "./view-placement.js"
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | undefined
 const composer = new ComposerState()
@@ -41,6 +42,14 @@ const activeChip = () => {
 export const activate = (context: vscode.ExtensionContext): void => {
   runtime = ManagedRuntime.make(Layer.empty)
   chat = new ChatViewProvider(context, composer, runtime)
+  const persisted = context.workspaceState.get<ViewPlacement>(VIEW_PLACEMENT_KEY)
+  void maybePlaceViews({
+    appName: vscode.env.appName,
+    persisted,
+    persist: (placement) => context.workspaceState.update(VIEW_PLACEMENT_KEY, placement),
+    moveViews: (viewIds, destinationId) =>
+      vscode.commands.executeCommand("vscode.moveViews", { viewIds, destinationId }),
+  })
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewId, chat, {
       webviewOptions: { retainContextWhenHidden: true },

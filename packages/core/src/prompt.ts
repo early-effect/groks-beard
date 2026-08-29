@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { truncateToByteCap as truncateUtf8, utf8ByteLength } from "./utf8.js"
+import { truncateToByteCap as truncateUtf8 } from "./utf8.js"
 
 export class PromptChip extends Schema.Class<PromptChip>("PromptChip")({
   path: Schema.String,
@@ -7,7 +7,7 @@ export class PromptChip extends Schema.Class<PromptChip>("PromptChip")({
   startLine: Schema.optionalKey(Schema.Int),
   endLine: Schema.optionalKey(Schema.Int),
   languageId: Schema.optionalKey(Schema.String),
-  source: Schema.Literals(["selection", "file", "active", "mention"])
+  source: Schema.Literals(["selection", "file", "active", "mention"]),
 }) {}
 
 export const CHIP_EMBED_BYTE_CAP = 32 * 1024
@@ -17,7 +17,7 @@ export const formatAtRef = (chip: PromptChip): string =>
     ? `@${chip.path}:${chip.startLine}-${chip.endLine}`
     : `@${chip.path}`
 
-export { utf8ByteLength }
+export { truncateKeepingUtf8Tail, utf8ByteLength } from "./utf8.js"
 
 export const truncateToByteCap = (text: string, cap: number = CHIP_EMBED_BYTE_CAP): string =>
   truncateUtf8(text, cap)
@@ -48,7 +48,7 @@ export const chipFromSelection = (input: {
     startLine: input.startLine,
     endLine: input.endLine,
     source: "selection",
-    ...(input.languageId !== undefined ? { languageId: input.languageId } : {})
+    ...(input.languageId !== undefined ? { languageId: input.languageId } : {}),
   })
 
 export const chipFromFile = (input: {
@@ -61,7 +61,7 @@ export const chipFromFile = (input: {
     path: workspaceRelativePath(input.absPath, input.workspaceRoot),
     absPath: input.absPath,
     source: input.source ?? "file",
-    ...(input.languageId !== undefined ? { languageId: input.languageId } : {})
+    ...(input.languageId !== undefined ? { languageId: input.languageId } : {}),
   })
 
 export const buildPromptText = (text: string, chips: ReadonlyArray<PromptChip>): string => {

@@ -25,3 +25,17 @@ export const truncateToByteCap = (text: string, cap: number): string => {
   }
   return text.slice(0, i)
 }
+
+export const truncateKeepingUtf8Tail = (text: string, cap: number): string => {
+  const total = utf8ByteLength(text)
+  if (total <= cap) return text
+  let skip = total - cap
+  let i = 0
+  while (i < text.length && skip > 0) {
+    const c = text.charCodeAt(i)
+    const size = c <= 0x7f ? 1 : c <= 0x7ff ? 2 : c >= 0xd800 && c <= 0xdbff ? 4 : 3
+    skip -= size
+    i += size === 4 ? 2 : 1
+  }
+  return text.slice(i)
+}

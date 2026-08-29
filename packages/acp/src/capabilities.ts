@@ -1,5 +1,5 @@
 import type { ClientCapabilities } from "@agentclientprotocol/sdk"
-import { isAtLeast, type GrokVersion } from "./version.js"
+import { type GrokVersion, isAtLeast } from "./version.js"
 
 export const FS_READ_FLOOR = { major: 1, minor: 0, patch: 4 } as const
 
@@ -12,9 +12,9 @@ export type CapabilityPolicy = {
 export const clientCapabilities = (policy: CapabilityPolicy): ClientCapabilities => {
   const caps: ClientCapabilities = {}
   const advertiseFsRead = !(
-    policy.versionVerified &&
-    policy.version !== undefined &&
-    isAtLeast(policy.version, FS_READ_FLOOR)
+    policy.versionVerified
+    && policy.version !== undefined
+    && isAtLeast(policy.version, FS_READ_FLOOR)
   )
   if (advertiseFsRead) {
     caps.fs = { readTextFile: true }
@@ -27,7 +27,7 @@ export const clientCapabilities = (policy: CapabilityPolicy): ClientCapabilities
 
 export const initializeParams = (
   policy: CapabilityPolicy,
-  extensionVersion: string
+  extensionVersion: string,
 ): {
   protocolVersion: 1
   clientCapabilities: ClientCapabilities
@@ -38,6 +38,20 @@ export const initializeParams = (
   clientInfo: {
     name: "groks-beard",
     title: "Grok's Beard",
-    version: extensionVersion
-  }
+    version: extensionVersion,
+  },
+})
+
+export const liveSpawnCapabilityPolicy = (
+  resolved: { readonly version: GrokVersion | undefined; readonly verified: boolean },
+): CapabilityPolicy => ({
+  version: resolved.version,
+  versionVerified: resolved.verified,
+  terminalHandlersReady: true,
+})
+
+export const fakeSpawnCapabilityPolicy = (): CapabilityPolicy => ({
+  version: undefined,
+  versionVerified: false,
+  terminalHandlersReady: false,
 })

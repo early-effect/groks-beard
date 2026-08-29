@@ -1,7 +1,11 @@
 import {
+  fakeSpawnCapabilityPolicy,
   GROK_AGENT_STDIO_ARGS,
   initializeAgent,
   killSpawnedAgent,
+  liveSpawnCapabilityPolicy,
+  readGrokVersionBanner,
+  resolveGrokVersion,
   type SpawnedAgent,
   spawnGrokAgentStdio,
 } from "@groks-beard/acp"
@@ -17,6 +21,7 @@ import { locateGrokCli } from "./cli-locator.js"
 import { ComposerState } from "./composer.js"
 import { dispatchWebviewMsg, type WebviewHandlers } from "./host-dispatch.js"
 import { missingCliMessage } from "./onboarding.js"
+import { createHostTerminalManager } from "./terminal-manager.js"
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = "groksBeard.chat"
@@ -182,16 +187,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const cwd = this.workspaceRoot() ?? process.cwd()
     const holder: { runtime?: ChatRuntime } = {}
     try {
-      const spawned = await this.spawn(cwd, holder)
+      const live = process.env.GROKS_BEARD_FAKE_AGENT !== "1"
+      const command = live ? await this.locateCli() : undefined
+      const policy = command !== undefined
+        ? liveSpawnCapabilityPolicy(
+          resolveGrokVersion(await readGrokVersionBanner(command), undefined, undefined),
+        )
+        : fakeSpawnCapabilityPolicy()
+      const spawned = await this.spawn(cwd, holder, command)
       this.spawned = spawned
       const version = String(
         (this.context.extension.packageJSON as { version?: string }).version ?? "0.0.0",
       )
-      await this.effectRuntime.runPromise(initializeAgent(spawned.beard.agent, {
-        version: undefined,
-        versionVerified: false,
-        terminalHandlersReady: false,
-      }, version))
+      await this.effectRuntime.runPromise(initializeAgent(spawned.beard.agent, policy, version))
       const runtime = new ChatRuntime({
         agent: spawned.beard.agent,
         post: (msg) => this.post(msg),
@@ -221,7 +229,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async spawn(cwd: string, holder: { runtime?: ChatRuntime }): Promise<SpawnedAgent> {
+  private async locateCli(): Promise<string> {
+    const cliPath = vscode.workspace.getConfiguration("groksBeard").get<string>("cliPath") ?? ""
+    return Effect.runPromise(locateGrokCli({
+      ...(cliPath !== "" ? { cliPath } : {}),
+      env: process.env as Record<string, string | undefined>,
+      exists: existsSync,
+      win: process.platform === "win32",
+    }))
+  }
+
+  private async spawn(
+    cwd: string,
+    holder: { runtime?: ChatRuntime },
+    command: string | undefined,
+  ): Promise<SpawnedAgent> {
     const handlers = {
       onSessionUpdate: (params: unknown) => holder.runtime?.onSessionUpdate(params),
       onPermission: (params: unknown, requestId: string) =>
@@ -235,7 +257,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       onElicit: (params: unknown, requestId: string) =>
         holder.runtime?.onElicit(params, requestId) ?? { action: "cancel" as const },
     }
-    if (process.env.GROKS_BEARD_FAKE_AGENT === "1") {
+    if (command === undefined) {
       const fixture = join(
         dirname(fileURLToPath(import.meta.url)),
         "../../acp/test/fixtures/fake-grok.mjs",
@@ -247,17 +269,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         ...handlers,
       })
     }
-    const cliPath = vscode.workspace.getConfiguration("groksBeard").get<string>("cliPath") ?? ""
-    const command = await Effect.runPromise(locateGrokCli({
-      ...(cliPath !== "" ? { cliPath } : {}),
-      env: process.env as Record<string, string | undefined>,
-      exists: existsSync,
-      win: process.platform === "win32",
-    }))
     return spawnGrokAgentStdio({
       command,
       cwd,
       args: [...GROK_AGENT_STDIO_ARGS],
+      terminal: createHostTerminalManager(cwd),
       ...handlers,
     })
   }

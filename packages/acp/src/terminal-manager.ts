@@ -7,6 +7,9 @@ import {
 } from "@groks-beard/core"
 import { type ChildProcess, spawn } from "node:child_process"
 
+export const TERM_GRACE_MS = 1000
+export const KILL_GRACE_MS = 500
+
 export type TerminalCreateParams = {
   readonly sessionId: string
   readonly command: string
@@ -43,9 +46,10 @@ export type SpawnFn = (
   options: {
     cwd?: string
     env?: NodeJS.ProcessEnv
-    stdio?: Array<"ignore" | "pipe">
+    stdio?: Array<"ignore" | "pipe"> | "ignore"
     windowsHide?: boolean
     shell?: boolean
+    detached?: boolean
   },
 ) => ChildProcess
 
@@ -56,7 +60,10 @@ type TerminalRecord = {
   exit?: TerminalExitStatus
   waiters: Array<(exit: TerminalExitStatus) => void>
   released: boolean
+  tearingDown: boolean
   limit?: number
+  termTimer?: ReturnType<typeof setTimeout>
+  killTimer?: ReturnType<typeof setTimeout>
 }
 
 export const resolveAgentShell = (
@@ -76,6 +83,66 @@ export const shellDialectFor = (shell: string, win: boolean): ShellDialect => {
   if (name === "powershell" || name === "pwsh") return "powershell"
   if (win && name !== "bash" && name !== "sh" && name !== "zsh") return "powershell"
   return "posix"
+}
+
+const psQuote = (value: string): string => `'${value.replace(/'/g, "''")}'`
+
+const cmdQuote = (value: string): string => {
+  if (!/[\s"&<>|^]/.test(value)) return value
+  return `"${value.replace(/"/g, '\\"')}"`
+}
+
+export const wrapSpawnInvocation = (input: {
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly shell: string
+  readonly dialect: ShellDialect
+  readonly win: boolean
+}): { readonly command: string; readonly args: ReadonlyArray<string> } => {
+  if (input.win) {
+    if (input.dialect === "cmd") {
+      const line = input.args.length === 0
+        ? input.command
+        : [cmdQuote(input.command), ...input.args.map(cmdQuote)].join(" ")
+      return { command: input.shell, args: ["/d", "/s", "/c", line] }
+    }
+    const script = input.args.length === 0
+      ? input.command
+      : `& ${psQuote(input.command)} ${input.args.map(psQuote).join(" ")}`
+    return {
+      command: input.shell,
+      args: ["-NoProfile", "-NonInteractive", "-Command", script],
+    }
+  }
+  if (input.args.length === 0) {
+    return { command: input.shell, args: ["-c", input.command] }
+  }
+  return { command: input.command, args: input.args }
+}
+
+export const killProcessTree = (
+  child: ChildProcess,
+  win: boolean,
+  force: boolean,
+  run: SpawnFn = spawn,
+): void => {
+  const pid = child.pid
+  if (pid === undefined) {
+    child.kill(force ? "SIGKILL" : "SIGTERM")
+    return
+  }
+  if (win) {
+    const args = force
+      ? ["/PID", String(pid), "/T", "/F"]
+      : ["/PID", String(pid), "/T"]
+    run("taskkill", args, { stdio: "ignore", windowsHide: true, shell: false })
+    return
+  }
+  try {
+    process.kill(-pid, force ? "SIGKILL" : "SIGTERM")
+  } catch {
+    child.kill(force ? "SIGKILL" : "SIGTERM")
+  }
 }
 
 const unknownTerminal = (terminalId: string): never => {
@@ -107,6 +174,7 @@ export class MemoryTerminalManager implements TerminalManager {
       truncated: false,
       waiters: [],
       released: false,
+      tearingDown: false,
     }
     this.terms.set(terminalId, record)
     if (this.autoExit) this.finish(terminalId, "", { exitCode: 0, signal: null })
@@ -117,8 +185,7 @@ export class MemoryTerminalManager implements TerminalManager {
     const record = this.terms.get(terminalId)
     if (record === undefined || record.released) return
     record.output = output
-    record.exit = exit
-    for (const waiter of record.waiters.splice(0)) waiter(exit)
+    settle(record, exit)
   }
 
   output(terminalId: string): TerminalOutputResult {
@@ -135,7 +202,8 @@ export class MemoryTerminalManager implements TerminalManager {
   }
 
   kill(terminalId: string): void {
-    this.finish(terminalId, this.require(terminalId).output, { exitCode: null, signal: "SIGTERM" })
+    const record = this.require(terminalId)
+    this.finish(terminalId, record.output, { exitCode: null, signal: "SIGTERM" })
   }
 
   release(terminalId: string): void {
@@ -167,6 +235,8 @@ export class ChildProcessTerminalManager implements TerminalManager {
   private readonly spawnFn: SpawnFn
   private readonly win: boolean
   private readonly shell: string
+  private readonly termGraceMs: number
+  private readonly killGraceMs: number
 
   constructor(options: {
     readonly cwd: string
@@ -174,6 +244,8 @@ export class ChildProcessTerminalManager implements TerminalManager {
     readonly shell?: string
     readonly win?: boolean
     readonly spawn?: SpawnFn
+    readonly termGraceMs?: number
+    readonly killGraceMs?: number
   }) {
     this.cwd = options.cwd
     this.env = options.env ?? process.env
@@ -184,6 +256,8 @@ export class ChildProcessTerminalManager implements TerminalManager {
     )
     this.shellDialect = shellDialectFor(this.shell, this.win)
     this.spawnFn = options.spawn ?? spawn
+    this.termGraceMs = options.termGraceMs ?? TERM_GRACE_MS
+    this.killGraceMs = options.killGraceMs ?? KILL_GRACE_MS
   }
 
   create(params: TerminalCreateParams): { terminalId: string } {
@@ -193,6 +267,7 @@ export class ChildProcessTerminalManager implements TerminalManager {
       truncated: false,
       waiters: [],
       released: false,
+      tearingDown: false,
       ...(params.outputByteLimit !== undefined && params.outputByteLimit !== null
         ? { limit: params.outputByteLimit }
         : {}),
@@ -205,13 +280,21 @@ export class ChildProcessTerminalManager implements TerminalManager {
     const cwd = params.cwd !== undefined && params.cwd !== null && params.cwd !== ""
       ? params.cwd
       : this.cwd
+    const invocation = wrapSpawnInvocation({
+      command: params.command,
+      args: params.args ?? [],
+      shell: this.shell,
+      dialect: this.shellDialect,
+      win: this.win,
+    })
     try {
-      const child = this.spawnFn(params.command, [...(params.args ?? [])], {
+      const child = this.spawnFn(invocation.command, [...invocation.args], {
         cwd,
         env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         shell: false,
+        detached: true,
       })
       record.child = child
       attachOutput(record, child)
@@ -221,6 +304,7 @@ export class ChildProcessTerminalManager implements TerminalManager {
       })
       child.on("close", (code, signal) => {
         settle(record, toExitStatus(code, signal))
+        if (record.released) this.terms.delete(terminalId)
       })
     } catch (error) {
       appendOutput(record, error instanceof Error ? error.message : String(error))
@@ -242,20 +326,37 @@ export class ChildProcessTerminalManager implements TerminalManager {
   }
 
   kill(terminalId: string): void {
-    const record = this.require(terminalId)
-    record.child?.kill()
+    this.beginTeardown(this.require(terminalId))
   }
 
   release(terminalId: string): void {
     const record = this.require(terminalId)
-    record.child?.kill()
-    if (record.exit === undefined) settle(record, { exitCode: null, signal: "SIGTERM" })
+    this.beginTeardown(record)
     record.released = true
-    this.terms.delete(terminalId)
+    if (record.exit !== undefined) this.terms.delete(terminalId)
   }
 
   dispose(): void {
     for (const id of [...this.terms.keys()]) this.release(id)
+  }
+
+  private beginTeardown(record: TerminalRecord): void {
+    if (record.exit !== undefined || record.tearingDown) return
+    record.tearingDown = true
+    const child = record.child
+    if (child === undefined) {
+      settle(record, { exitCode: null, signal: "SIGTERM" })
+      return
+    }
+    killProcessTree(child, this.win, false, this.spawnFn)
+    record.termTimer = setTimeout(() => {
+      if (record.exit !== undefined) return
+      killProcessTree(child, this.win, true, this.spawnFn)
+      record.killTimer = setTimeout(() => {
+        if (record.exit !== undefined) return
+        settle(record, { exitCode: null, signal: "SIGKILL" })
+      }, this.killGraceMs)
+    }, this.termGraceMs)
   }
 
   private require(terminalId: string): TerminalRecord {
@@ -266,13 +367,21 @@ export class ChildProcessTerminalManager implements TerminalManager {
 }
 
 const attachOutput = (record: TerminalRecord, child: ChildProcess): void => {
+  attachStream(record, child.stdout ?? undefined)
+  attachStream(record, child.stderr ?? undefined)
+}
+
+const attachStream = (
+  record: TerminalRecord,
+  stream: NodeJS.ReadableStream | undefined,
+): void => {
+  if (stream === undefined) return
   const decoder = new TextDecoder()
-  const onChunk = (chunk: Buffer) => {
-    appendOutput(record, decoder.decode(chunk, { stream: true }))
-  }
-  child.stdout?.on("data", onChunk)
-  child.stderr?.on("data", onChunk)
-  child.on("close", () => {
+  stream.on("data", (chunk: Buffer | string) => {
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk
+    appendOutput(record, decoder.decode(bytes, { stream: true }))
+  })
+  stream.on("end", () => {
     appendOutput(record, decoder.decode())
   })
 }
@@ -286,9 +395,17 @@ const appendOutput = (record: TerminalRecord, text: string): void => {
   }
 }
 
+const clearTeardownTimers = (record: TerminalRecord): void => {
+  if (record.termTimer !== undefined) clearTimeout(record.termTimer)
+  if (record.killTimer !== undefined) clearTimeout(record.killTimer)
+  delete record.termTimer
+  delete record.killTimer
+}
+
 const settle = (record: TerminalRecord, exit: TerminalExitStatus): void => {
   if (record.exit !== undefined) return
   record.exit = exit
+  clearTeardownTimers(record)
   for (const waiter of record.waiters.splice(0)) waiter(exit)
 }
 

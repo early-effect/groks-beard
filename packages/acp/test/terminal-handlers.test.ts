@@ -9,17 +9,25 @@ const feedCreate = (
   id: string,
   command: string,
   args?: ReadonlyArray<string>,
+  sessionId = "s",
 ) => {
   beard.transport.feedFromAgent(encodeNdjsonChunk([{
     jsonrpc: "2.0",
     id,
     method: "terminal/create",
     params: {
-      sessionId: "s",
+      sessionId,
       command,
       ...(args !== undefined ? { args } : {}),
     },
   }]))
+}
+
+const resultById = (results: Array<unknown>, id: string): Record<string, unknown> | undefined => {
+  const row = results.find((item) =>
+    typeof item === "object" && item !== null && "id" in item && (item as { id: unknown }).id === id
+  )
+  return row as Record<string, unknown> | undefined
 }
 
 it("runs create/output/wait/release and rejects mutating create while planActive", async () => {
@@ -77,6 +85,8 @@ it("runs create/output/wait/release and rejects mutating create while planActive
       && (row as { id: unknown }).id === "t-wait"
     ),
   ).toBe(true)
+  expect(resultById(results, "t-kill")?.result).toEqual({})
+  expect(resultById(results, "t-rel")?.result).toEqual({})
 
   beard.state.planActive = true
   beard.state.modeId = "plan"
@@ -87,12 +97,15 @@ it("runs create/output/wait/release and rejects mutating create while planActive
     && (row as { id: unknown }).id === "t-ls-plan"
   ) as { result?: { terminalId?: string }; error?: { code?: number } }
   expect(allowed.result?.terminalId).toMatch(/^mem-term-/)
-  feedCreate(beard, "t-rm", "rm", ["-rf", "/tmp/x"])
+  feedCreate(beard, "t-rm", "rm", ["-rf", "/tmp/x"], "parent")
+  feedCreate(beard, "t-rm-sub", "rm", ["-rf", "/tmp/y"], "subagent")
   await new Promise((resolve) => setTimeout(resolve, 20))
-  const blocked = results.find((row) =>
-    typeof row === "object" && row !== null && "id" in row && (row as { id: unknown }).id === "t-rm"
-  ) as { error?: { code?: number } }
-  expect(blocked.error?.code).toBe(PLAN_BLOCKED_CODE)
+  expect((resultById(results, "t-rm")?.error as { code?: number } | undefined)?.code).toBe(
+    PLAN_BLOCKED_CODE,
+  )
+  expect((resultById(results, "t-rm-sub")?.error as { code?: number } | undefined)?.code).toBe(
+    PLAN_BLOCKED_CODE,
+  )
   beard.terminal.dispose()
   beard.connection.close()
 })

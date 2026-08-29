@@ -6,6 +6,7 @@ import {
   MemoryTerminalManager,
   resolveAgentShell,
   shellDialectFor,
+  wrapSpawnInvocation,
 } from "../src/terminal-manager.ts"
 
 it("prefers GROK_SHELL then PowerShell on Windows", () => {
@@ -46,8 +47,39 @@ it("child process manager captures stdout without a PTY", async () => {
   terminal.release(created.terminalId)
 })
 
+it("wraps argv-less Unix and all Windows creates in the resolved shell", () => {
+  expect(wrapSpawnInvocation({
+    command: "ls",
+    args: [],
+    shell: "/bin/zsh",
+    dialect: "posix",
+    win: false,
+  })).toEqual({ command: "/bin/zsh", args: ["-c", "ls"] })
+  expect(wrapSpawnInvocation({
+    command: process.execPath,
+    args: ["-e", "0"],
+    shell: "/bin/zsh",
+    dialect: "posix",
+    win: false,
+  })).toEqual({ command: process.execPath, args: ["-e", "0"] })
+  expect(wrapSpawnInvocation({
+    command: "Get-ChildItem",
+    args: [],
+    shell: "powershell.exe",
+    dialect: "powershell",
+    win: true,
+  })).toEqual({
+    command: "powershell.exe",
+    args: ["-NoProfile", "-NonInteractive", "-Command", "Get-ChildItem"],
+  })
+})
+
 it("kills a running process and truncates from the start", async () => {
-  const terminal = new ChildProcessTerminalManager({ cwd: tmpdir() })
+  const terminal = new ChildProcessTerminalManager({
+    cwd: tmpdir(),
+    termGraceMs: 40,
+    killGraceMs: 40,
+  })
   const hanging = terminal.create({
     sessionId: "s",
     command: process.execPath,
@@ -69,4 +101,41 @@ it("kills a running process and truncates from the start", async () => {
   expect(output.output).toBe("def")
   expect(output.truncated).toBe(true)
   terminal.dispose()
+})
+
+it("SIGKILLs a child that ignores SIGTERM so wait_for_exit cannot hang", async () => {
+  const terminal = new ChildProcessTerminalManager({
+    cwd: tmpdir(),
+    termGraceMs: 40,
+    killGraceMs: 40,
+  })
+  const created = terminal.create({
+    sessionId: "s",
+    command: process.execPath,
+    args: ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+  })
+  const started = Date.now()
+  terminal.kill(created.terminalId)
+  const exit = await terminal.waitForExit(created.terminalId)
+  expect(Date.now() - started).toBeLessThan(2000)
+  expect(exit.signal === "SIGKILL" || exit.exitCode === null || exit.exitCode !== 0).toBe(true)
+  terminal.release(created.terminalId)
+})
+
+it("kills a bash -c grandchild when tearing down the process group", async () => {
+  const terminal = new ChildProcessTerminalManager({
+    cwd: tmpdir(),
+    termGraceMs: 40,
+    killGraceMs: 40,
+  })
+  const created = terminal.create({
+    sessionId: "s",
+    command: "bash",
+    args: ["-c", "sleep 30"],
+  })
+  const started = Date.now()
+  terminal.kill(created.terminalId)
+  await terminal.waitForExit(created.terminalId)
+  expect(Date.now() - started).toBeLessThan(2000)
+  terminal.release(created.terminalId)
 })

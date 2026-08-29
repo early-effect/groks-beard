@@ -22,6 +22,22 @@ it("rejects mutating shells", () => {
   expect(isReadOnlyCommand("find", [".", "-delete"])).toBe(false)
 })
 
+it("fails closed on awk and sed program bodies", () => {
+  expect(isReadOnlyCommand("awk", [String.raw`BEGIN{system("rm -rf /tmp/x")}`])).toBe(false)
+  expect(isReadOnlyCommand(String.raw`awk 'BEGIN{system("rm -rf /tmp/x")}'`)).toBe(false)
+  expect(isReadOnlyCommand("bash", ["-c", String.raw`awk 'BEGIN{system("rm")}'`])).toBe(false)
+  expect(isReadOnlyCommand("sed", ["e rm -rf /tmp/x"])).toBe(false)
+  expect(isReadOnlyCommand("sed", ["s/a/b/"])).toBe(false)
+})
+
+it("allows only listing git branch flags", () => {
+  expect(isReadOnlyCommand("git", ["branch"])).toBe(true)
+  expect(isReadOnlyCommand("git", ["branch", "-a"])).toBe(true)
+  expect(isReadOnlyCommand("git", ["branch", "--list"])).toBe(true)
+  expect(isReadOnlyCommand("git", ["branch", "--set-upstream-to=origin/main"])).toBe(false)
+  expect(isReadOnlyCommand("git", ["branch", "--unset-upstream"])).toBe(false)
+})
+
 it("treats bash -c scripts as the inner command", () => {
   expect(isReadOnlyCommand("bash", ["-c", "ls -la"])).toBe(true)
   expect(isReadOnlyCommand("bash", ["-c", "ls && git status"])).toBe(true)
@@ -33,9 +49,9 @@ it("blocks mutating commands only while planActive", () => {
   expect(shouldBlockTerminal("ls", [], true)).toBe(false)
 })
 
-it("connection-wide gate ignores session identity", () => {
+it("blocks mutating commands for any session while planActive", () => {
   expect(shouldBlockTerminal("rm", ["-rf", "a"], true)).toBe(true)
-  expect(shouldBlockTerminal("rm", ["-rf", "a"], true)).toBe(true)
+  expect(shouldBlockTerminal("ls", [], true)).toBe(false)
 })
 
 it("keeps the utf8 tail when truncating", () => {

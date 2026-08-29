@@ -101,9 +101,11 @@ export const connectBeardAcp = (handlers: BeardClientHandlers = {}): BeardAcp =>
     .onRequest("terminal/wait_for_exit", (ctx) => terminal.waitForExit(ctx.params.terminalId))
     .onRequest("terminal/kill", (ctx) => {
       terminal.kill(ctx.params.terminalId)
+      return {}
     })
     .onRequest("terminal/release", (ctx) => {
       terminal.release(ctx.params.terminalId)
+      return {}
     })
     .onRequest(
       "session/request_permission",

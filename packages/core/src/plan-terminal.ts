@@ -97,8 +97,6 @@ const READONLY_HEADS = new Set([
   "test",
   "git",
   "diff",
-  "sed",
-  "awk",
   "get-childitem",
   "gci",
   "get-content",
@@ -182,7 +180,30 @@ const FIND_WRITE = new Set([
   "-fls",
 ])
 
-const FD_WRITE = new Set(["-x", "--exec", "--exec-batch", "-x", "-X"])
+const FD_WRITE = new Set(["-x", "--exec", "--exec-batch", "-X"])
+
+const GIT_BRANCH_READONLY = new Set([
+  "-a",
+  "--all",
+  "-r",
+  "--remotes",
+  "-v",
+  "-vv",
+  "--verbose",
+  "--list",
+  "--show-current",
+  "--merged",
+  "--no-merged",
+  "--contains",
+  "--no-contains",
+  "--points-at",
+  "--color",
+  "--no-color",
+  "--column",
+  "--no-column",
+])
+
+const GIT_BRANCH_READONLY_PREFIXES = ["--format=", "--sort=", "--color=", "--column="]
 
 const isReadOnlyArgv = (
   command: string,
@@ -236,22 +257,12 @@ const isReadOnlyStage = (tokens: ReadonlyArray<string>, _dialect: ShellDialect):
   if (INTERPRETERS.has(head)) {
     return rest.length >= 1 && /^(-v|--version|--help|-h)$/i.test(rest[0] ?? "")
   }
+  if (head === "awk" || head === "sed") return false
   if (head === "find" && rest.some((token) => FIND_WRITE.has(token.toLowerCase()))) return false
   if (head === "fd" && rest.some((token) => FD_WRITE.has(token))) return false
   if (
-    head === "sed" && rest.some((token) => /^-.*i/.test(token) || token.startsWith("--in-place"))
-  ) {
-    return false
-  }
-  if (
     (head === "sort" || head === "tree")
     && rest.some((token) => token === "-o" || token === "--output" || token.startsWith("--output="))
-  ) {
-    return false
-  }
-  if (
-    head === "awk"
-    && rest.some((token) => token === "-i" || token.startsWith("-v") && token.includes("system"))
   ) {
     return false
   }
@@ -272,10 +283,10 @@ const isReadOnlyGit = (args: ReadonlyArray<string>): boolean => {
     return false
   }
   if (sub === "branch") {
-    return args.length === 1
-      || args.slice(1).every((token) =>
-        token.startsWith("-") && !["-d", "-D", "-m", "-M"].includes(token)
-      )
+    return args.length === 1 || args.slice(1).every((token) =>
+      GIT_BRANCH_READONLY.has(token)
+      || GIT_BRANCH_READONLY_PREFIXES.some((prefix) => token.startsWith(prefix))
+    )
   }
   if (sub === "remote") {
     const action = args.slice(1).find((token) => !token.startsWith("-"))

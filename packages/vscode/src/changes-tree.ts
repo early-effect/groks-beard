@@ -1,8 +1,8 @@
 import {
-  type ChangeSetRecord,
   changeSetLineStats,
+  type ChangeSetRecord,
   type FileChangeRecord,
-  formatLineStats
+  formatLineStats,
 } from "@groks-beard/core"
 import * as vscode from "vscode"
 import type { ChangeStore } from "./change-store.js"
@@ -16,8 +16,7 @@ export type ChangesNode =
     readonly path: string
   }
 
-export const turnNodeId = (sessionId: string, turnId: string): string =>
-  `${sessionId}::${turnId}`
+export const turnNodeId = (sessionId: string, turnId: string): string => `${sessionId}::${turnId}`
 
 export const fileNodeId = (sessionId: string, turnId: string, path: string): string =>
   `${sessionId}::${turnId}::${encodeURIComponent(path)}`
@@ -32,7 +31,7 @@ export const parseChangesNode = (id: string): ChangesNode | undefined => {
       type: "file",
       sessionId: parts[0],
       turnId: parts[1],
-      path: decodeURIComponent(parts.slice(2).join("::"))
+      path: decodeURIComponent(parts.slice(2).join("::")),
     }
   }
   return undefined
@@ -47,6 +46,9 @@ export const turnDescription = (set: ChangeSetRecord): string => {
   const stats = changeSetLineStats(set.files)
   return formatLineStats(stats.additions, stats.deletions)
 }
+
+export const turnAllowsUndo = (set: ChangeSetRecord): boolean =>
+  set.files.some((file) => file.undoDisabledReason === undefined)
 
 export const fileDescription = (file: FileChangeRecord): string => {
   const stats = formatLineStats(file.additions, file.deletions)
@@ -76,10 +78,12 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<string> {
       const set = this.store.getTurn(node.sessionId, node.turnId)
       const item = new vscode.TreeItem(
         set?.title ?? node.turnId,
-        vscode.TreeItemCollapsibleState.Expanded
+        vscode.TreeItemCollapsibleState.Expanded,
       )
       item.id = element
-      item.contextValue = "changeTurn"
+      item.contextValue = set !== undefined && !turnAllowsUndo(set)
+        ? "changeTurnNoUndo"
+        : "changeTurn"
       if (set !== undefined) item.description = turnDescription(set)
       return item
     }
@@ -93,7 +97,7 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<string> {
     item.command = {
       command: "groksBeard.openChangeDiff",
       title: "Open Diff",
-      arguments: [element]
+      arguments: [element],
     }
     return item
   }

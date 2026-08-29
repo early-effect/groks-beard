@@ -1,12 +1,13 @@
 import {
   type EditorOpenDiffArgs,
   EditorOpenDiffResult,
-  EditorOpenFilesResult,
+  type EditorOpenFilesArgs,
   type EditorRevealArgs,
   EditorRevealResult,
   type EditorShowChangesArgs,
   EditorShowChangesResult,
   EditorWorkspaceRootResult,
+  pageOpenFiles,
   preferPendingSelection,
   type PromptChip,
   type SelectionInput,
@@ -27,7 +28,12 @@ export type McpHostPorts = {
   ) => { readonly original: string; readonly proposed: string } | undefined
   readonly gitHead: (path: string) => string | undefined
   readonly disk: (path: string) => string | undefined
-  readonly openDiff: (path: string, original: string, proposed: string) => Promise<void>
+  readonly openDiff: (
+    path: string,
+    original: string,
+    proposed: string,
+    line?: number,
+  ) => Promise<void>
   readonly notice: (message: string) => void
   readonly showChanges: (
     title: string | undefined,
@@ -54,11 +60,12 @@ export const createMcpToolHost = (ports: McpHostPorts): McpToolHost => ({
       pendingText ?? (pending !== undefined ? live?.text : undefined),
     )
   },
-  openFiles: async () => {
+  openFiles: async (args: EditorOpenFilesArgs) => {
     const files = ports.openFiles()
-    return new EditorOpenFilesResult({
-      tabs: [...files.tabs],
+    return pageOpenFiles({
+      tabs: files.tabs,
       ...(files.active !== undefined ? { active: files.active } : {}),
+      ...(args.cursor !== undefined ? { cursor: args.cursor } : {}),
     })
   },
   reveal: async (args: EditorRevealArgs) => {
@@ -78,7 +85,11 @@ export const createMcpToolHost = (ports: McpHostPorts): McpToolHost => ({
       ...(disk !== undefined ? { disk } : {}),
     })
     if (!resolved.ok) return new EditorOpenDiffResult({ ok: false, reason: resolved.reason })
-    await ports.openDiff(resolved.path, resolved.original, resolved.proposed)
+    if (args.line !== undefined) {
+      await ports.openDiff(resolved.path, resolved.original, resolved.proposed, args.line)
+    } else {
+      await ports.openDiff(resolved.path, resolved.original, resolved.proposed)
+    }
     if (resolved.notice !== undefined) ports.notice(resolved.notice)
     return new EditorOpenDiffResult({ ok: true })
   },

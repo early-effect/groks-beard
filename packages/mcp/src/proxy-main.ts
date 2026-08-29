@@ -4,8 +4,7 @@ export const runMcpProxyMain = async (argv: ReadonlyArray<string>): Promise<void
   const workspace = parseWorkspaceArg(argv)
   if (workspace === undefined || workspace === "") {
     process.stderr.write("mcp-proxy: missing --workspace <absolute-path>\n")
-    process.exitCode = 2
-    return
+    process.exit(2)
   }
   const code = await runMcpProxy({
     workspace,
@@ -13,5 +12,5 @@ export const runMcpProxyMain = async (argv: ReadonlyArray<string>): Promise<void
     stdout: process.stdout,
     stderr: process.stderr,
   })
-  process.exitCode = code
+  process.exit(code)
 }

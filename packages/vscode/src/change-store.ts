@@ -207,7 +207,7 @@ export class ChangeStore {
     }>
   }): number {
     const files = input.files.map((file) => {
-      const stored = this.loadStoredByPath(file.path)
+      const stored = this.loadUsableUndoByPath(file.path)
       return new FileChangeRecord({
         path: file.path,
         kind: file.kind,
@@ -237,8 +237,33 @@ export class ChangeStore {
     readonly original: string
     readonly proposed: string
   } | undefined {
+    return this.loadStoredRecord(path, false)
+  }
+
+  loadUsableUndoByPath(path: string): {
+    readonly sessionId: string
+    readonly turnId: string
+    readonly original: string
+    readonly proposed: string
+  } | undefined {
+    return this.loadStoredRecord(path, true)
+  }
+
+  private loadStoredRecord(
+    path: string,
+    usableUndoOnly: boolean,
+  ): {
+    readonly sessionId: string
+    readonly turnId: string
+    readonly original: string
+    readonly proposed: string
+  } | undefined {
     for (const set of [...this.sets].sort((a, b) => b.createdAt - a.createdAt)) {
-      const record = set.files.find((file) => file.path === path && file.snapshotStored)
+      const record = set.files.find((file) => {
+        if (file.path !== path || !file.snapshotStored) return false
+        if (usableUndoOnly && file.undoDisabledReason !== undefined) return false
+        return true
+      })
       if (record === undefined) continue
       const change = this.loadChange(set.sessionId, set.turnId, path)
       if (change === undefined) continue
@@ -320,7 +345,7 @@ export class ChangeStore {
     ports: UndoApplyPorts,
   ): Promise<UndoApplyResult> {
     if (sessionId === SIDECAR_SESSION_ID) {
-      const stored = this.loadStoredByPath(path)
+      const stored = this.loadUsableUndoByPath(path)
       if (stored === undefined) return { ok: false, path, reason: SIDECAR_UNDO_REASON }
       const result = await this.undo(stored.sessionId, stored.turnId, path, ports)
       if (result.ok) this.keep(SIDECAR_SESSION_ID, SIDECAR_TURN_ID, path)
@@ -343,7 +368,10 @@ export class ChangeStore {
   ): Promise<UndoApplyResult> {
     const set = this.getTurn(sessionId, turnId)
     if (set === undefined) return { ok: true }
-    for (const file of [...set.files]) {
+    const files = sessionId === SIDECAR_SESSION_ID
+      ? set.files.filter((file) => file.undoDisabledReason === undefined)
+      : set.files
+    for (const file of [...files]) {
       const result = await this.undo(sessionId, turnId, file.path, ports)
       if (!result.ok) return result
     }

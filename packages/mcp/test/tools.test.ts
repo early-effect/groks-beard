@@ -66,3 +66,26 @@ it("rejects editor_open_diff without a path", async () => {
     showChanges: async () => ({ ok: true, shown: 1 }),
   })).rejects.toThrow(/invalid arguments/)
 })
+
+it("rejects editor_open_diff and editor_show_changes surplus file bodies", async () => {
+  const host = {
+    workspaceRoot: async () => ({ root: "/repo" }),
+    selection: async () => ({ truncated: false }),
+    openFiles: async () => ({ tabs: [] }),
+    reveal: async () => ({ ok: true }),
+    openDiff: async () => ({ ok: true }),
+    showChanges: async () => ({ ok: true, shown: 1 }),
+  }
+  await expect(dispatchMcpTool("editor_open_diff", {
+    path: "a.ts",
+    oldText: "x",
+    newText: "y",
+  }, host)).rejects.toThrow(/invalid arguments/)
+  await expect(dispatchMcpTool("editor_show_changes", {
+    files: [{ path: "a.ts", kind: "modify", oldText: "x" }],
+  }, host)).rejects.toThrow(/invalid arguments/)
+  const diff = MCP_TOOL_SPECS.find((spec) => spec.name === "editor_open_diff")
+  const shown = MCP_TOOL_SPECS.find((spec) => spec.name === "editor_show_changes")
+  expect(diff?.inputSchema.additionalProperties).toBe(false)
+  expect(shown?.inputSchema.additionalProperties).toBe(false)
+})

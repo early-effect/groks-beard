@@ -1,5 +1,6 @@
 import {
   EditorOpenDiffArgs,
+  EditorOpenFilesArgs,
   EditorRevealArgs,
   EditorShowChangesArgs,
   MCP_TOOL_NAMES,
@@ -16,6 +17,7 @@ export type McpJsonSchema = {
   readonly type: "object"
   readonly properties: Record<string, unknown>
   readonly required?: ReadonlyArray<string>
+  readonly additionalProperties?: boolean
 }
 
 export type McpToolSpec = {
@@ -36,6 +38,11 @@ const pathLine: McpJsonSchema = {
   required: ["path"],
 }
 
+const pathLineStrict: McpJsonSchema = {
+  ...pathLine,
+  additionalProperties: false,
+}
+
 export const MCP_TOOL_SPECS: ReadonlyArray<McpToolSpec> = [
   {
     name: "editor_workspace_root",
@@ -52,8 +59,14 @@ export const MCP_TOOL_SPECS: ReadonlyArray<McpToolSpec> = [
   },
   {
     name: "editor_open_files",
-    description: "List open editor tab paths and the active file. Paths only, no file bodies.",
-    inputSchema: emptyObject,
+    description:
+      "List open editor tab paths and the active file. Paths only, no file bodies. Pass cursor from nextCursor to page; results are capped and set truncated when more remain.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cursor: { type: "string", description: "Opaque cursor from a previous nextCursor." },
+      },
+    },
     annotations: MCP_ANNOTATIONS,
   },
   {
@@ -66,7 +79,7 @@ export const MCP_TOOL_SPECS: ReadonlyArray<McpToolSpec> = [
     name: "editor_open_diff",
     description:
       "Open a native diff for a path using a Beard snapshot, git HEAD, or disk. Paths only. Never send oldText or newText.",
-    inputSchema: pathLine,
+    inputSchema: pathLineStrict,
     annotations: MCP_ANNOTATIONS,
   },
   {
@@ -75,6 +88,7 @@ export const MCP_TOOL_SPECS: ReadonlyArray<McpToolSpec> = [
       "Show a path-only Grok Changes navigation tree. Does not write files, invent snapshots, or git-snapshot.",
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         title: { type: "string" },
         files: {
@@ -82,6 +96,7 @@ export const MCP_TOOL_SPECS: ReadonlyArray<McpToolSpec> = [
           minItems: 1,
           items: {
             type: "object",
+            additionalProperties: false,
             properties: {
               path: { type: "string" },
               kind: { type: "string", enum: ["add", "modify", "delete", "move"] },
@@ -101,11 +116,13 @@ export const mcpToolNames = (): ReadonlyArray<string> => MCP_TOOL_NAMES
 export type McpToolHost = {
   readonly workspaceRoot: () => Promise<unknown>
   readonly selection: () => Promise<unknown>
-  readonly openFiles: () => Promise<unknown>
+  readonly openFiles: (args: EditorOpenFilesArgs) => Promise<unknown>
   readonly reveal: (args: EditorRevealArgs) => Promise<unknown>
   readonly openDiff: (args: EditorOpenDiffArgs) => Promise<unknown>
   readonly showChanges: (args: EditorShowChangesArgs) => Promise<unknown>
 }
+
+const invalidArgs = (tool: string): Error => new Error(`${tool}: invalid arguments`)
 
 export const dispatchMcpTool = (
   tool: McpToolName,
@@ -119,24 +136,32 @@ export const dispatchMcpTool = (
     case "editor_selection":
       return host.selection()
     case "editor_open_files":
-      return host.openFiles()
+      try {
+        return host.openFiles(Schema.decodeUnknownSync(EditorOpenFilesArgs)(raw))
+      } catch {
+        return Promise.reject(invalidArgs(tool))
+      }
     case "editor_reveal":
       try {
         return host.reveal(Schema.decodeUnknownSync(EditorRevealArgs)(raw))
       } catch {
-        return Promise.reject(new Error(`${tool}: invalid arguments`))
+        return Promise.reject(invalidArgs(tool))
       }
     case "editor_open_diff":
       try {
-        return host.openDiff(Schema.decodeUnknownSync(EditorOpenDiffArgs)(raw))
+        return host.openDiff(
+          Schema.decodeUnknownSync(EditorOpenDiffArgs, { onExcessProperty: "error" })(raw),
+        )
       } catch {
-        return Promise.reject(new Error(`${tool}: invalid arguments`))
+        return Promise.reject(invalidArgs(tool))
       }
     case "editor_show_changes":
       try {
-        return host.showChanges(Schema.decodeUnknownSync(EditorShowChangesArgs)(raw))
+        return host.showChanges(
+          Schema.decodeUnknownSync(EditorShowChangesArgs, { onExcessProperty: "error" })(raw),
+        )
       } catch {
-        return Promise.reject(new Error(`${tool}: invalid arguments`))
+        return Promise.reject(invalidArgs(tool))
       }
   }
 }

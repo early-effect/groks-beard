@@ -6,7 +6,7 @@ import {
   type FileChange,
   fileChangeFromReconstructed,
   fileChangeFromRecord,
-  type FileChangeRecord,
+  FileChangeRecord,
   formatLineStats,
   MISSING_SNAPSHOT_REASON,
   type ReconstructedFileDiff,
@@ -22,6 +22,9 @@ import {
 import { Schema } from "effect"
 
 export const CHANGE_INDEX_KEY = "groksBeard.changeIndex"
+export const SIDECAR_SESSION_ID = "tui"
+export const SIDECAR_TURN_ID = "sidecar"
+export const SIDECAR_UNDO_REASON = "Undo needs an editor chat snapshot."
 
 export type ChangeStoreFs = {
   readonly read: (absPath: string) => string | undefined
@@ -71,6 +74,7 @@ export const snapshotRelPath = (
 
 export class ChangeStore {
   private sets: Array<ChangeSetRecord>
+  private sidecar: ChangeSetRecord | undefined
   private readonly listeners: Array<() => void> = []
 
   constructor(private readonly deps: ChangeStoreDeps) {
@@ -86,7 +90,9 @@ export class ChangeStore {
   }
 
   list(): ReadonlyArray<ChangeSetRecord> {
-    return [...this.sets].sort((a, b) => b.createdAt - a.createdAt)
+    const acp = [...this.sets].sort((a, b) => b.createdAt - a.createdAt)
+    if (this.sidecar === undefined || this.sidecar.files.length === 0) return acp
+    return [this.sidecar, ...acp]
   }
 
   pendingStats(): { readonly additions: number; readonly deletions: number } {
@@ -94,7 +100,7 @@ export class ChangeStore {
   }
 
   undoReason(): string | undefined {
-    for (const set of this.sets) {
+    for (const set of this.list()) {
       for (const file of set.files) {
         if (file.undoDisabledReason !== undefined) return file.undoDisabledReason
       }
@@ -110,6 +116,13 @@ export class ChangeStore {
   }
 
   getTurn(sessionId: string, turnId: string): ChangeSetRecord | undefined {
+    if (
+      this.sidecar !== undefined
+      && this.sidecar.sessionId === sessionId
+      && this.sidecar.turnId === turnId
+    ) {
+      return this.sidecar
+    }
     return this.sets.find((set) => set.sessionId === sessionId && set.turnId === turnId)
   }
 
@@ -186,7 +199,70 @@ export class ChangeStore {
     if (changed) this.persist()
   }
 
+  ingestSidecar(input: {
+    readonly title?: string
+    readonly files: ReadonlyArray<{
+      readonly path: string
+      readonly kind: FileChangeRecord["kind"]
+    }>
+  }): number {
+    const files = input.files.map((file) => {
+      const stored = this.loadStoredByPath(file.path)
+      return new FileChangeRecord({
+        path: file.path,
+        kind: file.kind,
+        additions: 0,
+        deletions: 0,
+        wholeFile: true,
+        toolCallId: "sidecar",
+        snapshotStored: false,
+        snapshotBytes: 0,
+        ...(stored === undefined ? { undoDisabledReason: SIDECAR_UNDO_REASON } : {}),
+      })
+    })
+    this.sidecar = new ChangeSetRecord({
+      sessionId: SIDECAR_SESSION_ID,
+      turnId: SIDECAR_TURN_ID,
+      title: input.title !== undefined && input.title !== "" ? input.title : "Grok Changes",
+      files,
+      createdAt: this.deps.now(),
+    })
+    this.notify()
+    return files.length
+  }
+
+  loadStoredByPath(path: string): {
+    readonly sessionId: string
+    readonly turnId: string
+    readonly original: string
+    readonly proposed: string
+  } | undefined {
+    for (const set of [...this.sets].sort((a, b) => b.createdAt - a.createdAt)) {
+      const record = set.files.find((file) => file.path === path && file.snapshotStored)
+      if (record === undefined) continue
+      const change = this.loadChange(set.sessionId, set.turnId, path)
+      if (change === undefined) continue
+      return {
+        sessionId: set.sessionId,
+        turnId: set.turnId,
+        original: change.oldSnapshot ?? "",
+        proposed: change.newSnapshot ?? "",
+      }
+    }
+    return undefined
+  }
+
   keep(sessionId: string, turnId: string, path: string): void {
+    if (sessionId === SIDECAR_SESSION_ID) {
+      if (this.sidecar === undefined) return
+      this.sidecar = new ChangeSetRecord({
+        ...this.sidecar,
+        files: this.sidecar.files.filter((row) => row.path !== path),
+      })
+      if (this.sidecar.files.length === 0) this.sidecar = undefined
+      this.notify()
+      return
+    }
     const set = this.getTurn(sessionId, turnId)
     if (set === undefined) return
     const file = set.files.find((row) => row.path === path)
@@ -202,6 +278,11 @@ export class ChangeStore {
   }
 
   keepAll(sessionId: string, turnId: string): void {
+    if (sessionId === SIDECAR_SESSION_ID) {
+      this.sidecar = undefined
+      this.notify()
+      return
+    }
     const set = this.getTurn(sessionId, turnId)
     if (set === undefined) return
     for (const file of set.files) this.removeSnapshots(set, file)
@@ -211,6 +292,7 @@ export class ChangeStore {
   }
 
   keepEvery(): void {
+    this.sidecar = undefined
     for (const set of [...this.sets]) {
       for (const file of set.files) this.removeSnapshots(set, file)
     }
@@ -237,6 +319,13 @@ export class ChangeStore {
     path: string,
     ports: UndoApplyPorts,
   ): Promise<UndoApplyResult> {
+    if (sessionId === SIDECAR_SESSION_ID) {
+      const stored = this.loadStoredByPath(path)
+      if (stored === undefined) return { ok: false, path, reason: SIDECAR_UNDO_REASON }
+      const result = await this.undo(stored.sessionId, stored.turnId, path, ports)
+      if (result.ok) this.keep(SIDECAR_SESSION_ID, SIDECAR_TURN_ID, path)
+      return result
+    }
     const change = this.loadChange(sessionId, turnId, path)
     if (change === undefined) return { ok: false, path, reason: MISSING_SNAPSHOT_REASON }
     const resolved = await resolveUndo(
@@ -357,8 +446,12 @@ export class ChangeStore {
     this.sets = this.sets.filter((set) => set.files.length > 0)
   }
 
+  private notify(): void {
+    for (const listener of this.listeners) listener()
+  }
+
   private persist(): void {
     this.deps.saveIndex(this.sets)
-    for (const listener of this.listeners) listener()
+    this.notify()
   }
 }

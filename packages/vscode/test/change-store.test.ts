@@ -451,3 +451,54 @@ it("Undo all stops on the first failure and reports the path", async () => {
   expect(store.getFile("s1", "turn_1", "/ok.ts")).toBeUndefined()
   expect(store.getFile("s1", "turn_1", "/gone.ts")).toBeDefined()
 })
+
+it("sidecar show_changes is path-only and disables Undo without an editor snapshot", async () => {
+  const { store, index } = memory()
+  const shown = store.ingestSidecar({
+    title: "TUI edits",
+    files: [{ path: "/tmp/a.ts", kind: "modify" }],
+  })
+  expect(shown).toBe(1)
+  const file = store.getFile("tui", "sidecar", "/tmp/a.ts")
+  expect(file?.snapshotStored).toBe(false)
+  expect(file?.undoDisabledReason).toBe("Undo needs an editor chat snapshot.")
+  expect(store.undoReason()).toBe("Undo needs an editor chat snapshot.")
+  expect(index()).toEqual([])
+  const result = await store.undo("tui", "sidecar", "/tmp/a.ts", applyPorts().ports)
+  expect(result).toEqual({
+    ok: false,
+    path: "/tmp/a.ts",
+    reason: "Undo needs an editor chat snapshot.",
+  })
+  store.keep("tui", "sidecar", "/tmp/a.ts")
+  expect(store.getFile("tui", "sidecar", "/tmp/a.ts")).toBeUndefined()
+})
+
+it("sidecar Undo uses an existing editor ACP snapshot and Keep drops only the sidecar row", async () => {
+  const { store, files } = memory()
+  store.ingestReconstructed({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "editor",
+    diffs: [{
+      path: "/tmp/a.ts",
+      oldText: "old",
+      newText: "new",
+      firstChangedLine: 0,
+      wholeFile: true,
+      kind: "modify",
+      toolCallId: "c1",
+    }],
+  })
+  store.ingestSidecar({
+    files: [{ path: "/tmp/a.ts", kind: "modify" }],
+  })
+  expect(store.getFile("tui", "sidecar", "/tmp/a.ts")?.undoDisabledReason).toBeUndefined()
+  const apply = applyPorts({ "/tmp/a.ts": "new" })
+  const result = await store.undo("tui", "sidecar", "/tmp/a.ts", apply.ports)
+  expect(result.ok).toBe(true)
+  expect(apply.applied).toEqual([{ _tag: "replace", path: "/tmp/a.ts", text: "old" }])
+  expect(store.getFile("tui", "sidecar", "/tmp/a.ts")).toBeUndefined()
+  expect(store.getFile("s1", "turn_1", "/tmp/a.ts")).toBeUndefined()
+  expect(files.size).toBe(0)
+})

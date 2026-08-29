@@ -10,9 +10,15 @@ import {
   ToolCallUpdate,
   updateFromParams,
 } from "@groks-beard/core"
-import { ChangeStore, type UndoApplyPorts, type UndoApplyResult } from "./change-store.js"
+import {
+  ChangeStore,
+  SIDECAR_SESSION_ID,
+  type UndoApplyPorts,
+  type UndoApplyResult,
+} from "./change-store.js"
 import { type DiffOpenPlan, diffTitle, planDiffOpen } from "./diff-open.js"
 import { type FollowAlongPlan, planFollowAlong } from "./follow-along.js"
+import { NO_BEARD_SNAPSHOT_NOTICE, resolvePathDiff } from "./path-diff.js"
 import { BeardDocStore } from "./virtual-docs.js"
 
 export type ReviewHostPorts = {
@@ -23,6 +29,7 @@ export type ReviewHostPorts = {
   readonly warn: (message: string) => void
   readonly activeScheme: () => string | undefined
   readonly inDiffEditor: () => boolean
+  readonly gitHead?: (path: string) => string | undefined
 }
 
 export class ReviewHost {
@@ -81,6 +88,10 @@ export class ReviewHost {
   }
 
   async openFileDiff(sessionId: string, turnId: string, path: string): Promise<void> {
+    if (sessionId === SIDECAR_SESSION_ID) {
+      await this.openResolvedPath(path)
+      return
+    }
     const change = this.store.loadChange(sessionId, turnId, path)
     if (change === undefined) {
       this.ports.warn("No pending change for that file.")
@@ -154,6 +165,38 @@ export class ReviewHost {
       this.store.dropToolCall(extracted.toolCallId)
     }
     this.permissions.clear()
+  }
+
+  async openResolvedPath(
+    path: string,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+    const beard = this.store.loadStoredByPath(path)
+    const disk = this.ports.readDisk(path)
+    const gitHead = this.ports.gitHead?.(path)
+    const resolved = resolvePathDiff({
+      path,
+      ...(beard !== undefined
+        ? { beard: { original: beard.original, proposed: beard.proposed } }
+        : {}),
+      ...(gitHead !== undefined ? { gitHead } : {}),
+      ...(disk !== undefined ? { disk } : {}),
+    })
+    if (!resolved.ok) {
+      this.ports.warn(resolved.reason)
+      return resolved
+    }
+    this.docs.setPair(path, resolved.original, resolved.proposed)
+    if (resolved.notice !== undefined) this.ports.warn(resolved.notice)
+    await this.openReconstructed([{
+      path,
+      oldText: resolved.original,
+      newText: resolved.proposed,
+      firstChangedLine: 0,
+      wholeFile: true,
+      kind: "modify",
+      toolCallId: "sidecar",
+    }], resolved.source === "disk" ? `${path} (${NO_BEARD_SNAPSHOT_NOTICE})` : path)
+    return { ok: true }
   }
 
   keep(sessionId: string, turnId: string, path: string): void {

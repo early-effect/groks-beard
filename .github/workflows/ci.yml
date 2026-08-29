@@ -21,5 +21,6 @@ jobs:
       - run: pnpm exec tsc -b
       - run: pnpm --filter @groks-beard/core test
       - run: pnpm --filter @groks-beard/acp test
+      - run: pnpm --filter @groks-beard/mcp test
       - run: pnpm --filter @groks-beard/vscode test
       - run: pnpm --filter @groks-beard/vscode test:electron

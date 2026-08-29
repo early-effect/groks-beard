@@ -39,9 +39,9 @@ pnpm exec tsc -b
 # then install the packaged VSIX into VS Code or Cursor
 ```
 
-Until then this repo is the design and the upcoming implementation. Open **Grok's Beard** with `Ctrl+;` / `Cmd+;`.
+Until the VSIX exists, `pnpm install && pnpm test` is the gate. Open **Grok's Beard** with `Ctrl+;` / `Cmd+;` once the host package lands.
 
-## Modules (planned)
+## Modules
 
 | Package | Role |
 | --- | --- |
@@ -51,7 +51,7 @@ Until then this repo is the design and the upcoming implementation. Open **Grok'
 | `@groks-beard/vscode` | Extension host, diffs, commands |
 | `@groks-beard/webview` | Chat UI (dumb renderer) |
 
-Stack: Effect 3, pnpm workspaces, vitest. The CLI owns tools, skills, MCP, memory, and compaction.
+Stack: Effect 4 RC, TypeScript 7, pnpm workspaces, vitest. The CLI owns tools, skills, MCP, memory, and compaction.
 
 ## License
 

@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+
+allowBuilds:
+  dprint: false
+  msgpackr-extract: false

@@ -108,7 +108,7 @@
         },
         {
           "command": "groksBeard.keepAll",
-          "when": "view == groksBeard.changes && viewItem == changeTurn",
+          "when": "view == groksBeard.changes && viewItem =~ /^changeTurn/",
           "group": "inline"
         },
         {

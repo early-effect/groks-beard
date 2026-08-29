@@ -102,11 +102,18 @@ export const vscodeMcpPorts = (
     if (open !== undefined) return open.getText()
     return readRange(path)
   },
-  openDiff: async (path, original, proposed) => {
+  openDiff: async (path, original, proposed, line) => {
     review.docs.setPair(path, original, proposed)
     const commands = await vscode.commands.getCommands(true)
     const plan: DiffOpenPlan = planDiffOpen(commands.includes("vscode.changes"), path, [path])
     await executeDiffPlan(plan)
+    if (line === undefined) return
+    const row = Math.max(line - 1, 0)
+    await vscode.window.showTextDocument(vscode.Uri.file(path), {
+      selection: new vscode.Range(row, 0, row, 0),
+      preview: true,
+      preserveFocus: true,
+    })
   },
   notice,
   showChanges: async (title, files) =>

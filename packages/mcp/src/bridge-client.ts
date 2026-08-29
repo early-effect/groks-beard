@@ -63,7 +63,8 @@ export const probeBridge = async (
 ): Promise<void> => {
   try {
     const socket = await connect(address)
-    socket.destroy()
+    socket.on("error", () => undefined)
+    socket.end()
   } catch {
     throw new McpEditorDown({ workspace })
   }
@@ -81,6 +82,7 @@ export const callBridge = async (
   } catch {
     throw new McpEditorDown({ workspace })
   }
+  socket.on("error", () => undefined)
   try {
     socket.write(encodeNdjson(encodeBridgeRequest(
       new BridgeRequest({

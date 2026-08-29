@@ -43,10 +43,16 @@ export class EditorSelectionResult
   })
 {}
 
+export class EditorOpenFilesArgs extends Schema.Class<EditorOpenFilesArgs>("EditorOpenFilesArgs")({
+  cursor: Schema.optionalKey(Schema.String),
+}) {}
+
 export class EditorOpenFilesResult
   extends Schema.Class<EditorOpenFilesResult>("EditorOpenFilesResult")({
     tabs: Schema.Array(Schema.String),
     active: Schema.optionalKey(Schema.String),
+    truncated: Schema.Boolean,
+    nextCursor: Schema.optionalKey(Schema.String),
   })
 {}
 
@@ -149,6 +155,63 @@ export const preferPendingSelection = (
   if (pending !== undefined) return editorSelectionFromChip(pending, pendingText ?? live?.text)
   if (live !== undefined) return editorSelectionFrom(live)
   return new EditorSelectionResult({ truncated: false })
+}
+
+const parseOpenFilesCursor = (cursor: string | undefined): number => {
+  if (cursor === undefined || cursor === "") return 0
+  const parsed = Number.parseInt(cursor, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) return 0
+  return parsed
+}
+
+export const pageOpenFiles = (input: {
+  readonly tabs: ReadonlyArray<string>
+  readonly active?: string
+  readonly cursor?: string
+  readonly capBytes?: number
+}): EditorOpenFilesResult => {
+  const cap = input.capBytes ?? SELECTION_TEXT_CAP_BYTES
+  const start = Math.min(parseOpenFilesCursor(input.cursor), input.tabs.length)
+  const rest = input.tabs.slice(start)
+  const encode = (
+    tabs: ReadonlyArray<string>,
+    truncated: boolean,
+    nextCursor: string | undefined,
+  ): string =>
+    JSON.stringify({
+      tabs,
+      truncated,
+      ...(input.active !== undefined ? { active: input.active } : {}),
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
+    })
+  const taken: Array<string> = []
+  for (let i = 0; i < rest.length; i++) {
+    const tab = rest[i]
+    if (tab === undefined) break
+    const trial = [...taken, tab]
+    const more = i + 1 < rest.length
+    const nextCursor = more ? String(start + trial.length) : undefined
+    if (utf8ByteLength(encode(trial, more, nextCursor)) > cap) {
+      if (taken.length === 0) {
+        return new EditorOpenFilesResult({
+          tabs: [],
+          truncated: true,
+          nextCursor: String(start + 1),
+          ...(input.active !== undefined ? { active: input.active } : {}),
+        })
+      }
+      break
+    }
+    taken.push(tab)
+  }
+  const consumed = start + taken.length
+  const truncated = consumed < input.tabs.length
+  return new EditorOpenFilesResult({
+    tabs: taken,
+    truncated,
+    ...(input.active !== undefined ? { active: input.active } : {}),
+    ...(truncated ? { nextCursor: String(consumed) } : {}),
+  })
 }
 
 export const selectionAtRef = (result: EditorSelectionResult): string | undefined => {

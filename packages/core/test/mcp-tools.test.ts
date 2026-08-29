@@ -5,6 +5,7 @@ import {
   editorSelectionFrom,
   EditorSelectionResult,
   EditorShowChangesArgs,
+  pageOpenFiles,
   preferPendingSelection,
   SELECTION_TEXT_CAP_BYTES,
 } from "../src/mcp-tools.ts"
@@ -59,6 +60,35 @@ it("decodes EditorOpenDiffArgs and EditorShowChangesArgs with optionalKey fields
   })
   expect("title" in shown).toBe(false)
   expect(shown.files).toHaveLength(1)
+})
+
+it("pages editor_open_files under the MCP byte cap and accepts an unknown cursor", () => {
+  const tabs = Array.from({ length: 40 }, (_, i) => `/repo/very/long/path/to/file-${i}.ts`)
+  const first = pageOpenFiles({ tabs, active: "/repo/very/long/path/to/file-0.ts", capBytes: 400 })
+  expect(first.truncated).toBe(true)
+  expect(first.tabs.length).toBeGreaterThan(0)
+  expect(first.tabs.length).toBeLessThan(tabs.length)
+  expect(first.nextCursor).toBeDefined()
+  expect(utf8ByteLength(JSON.stringify({
+    tabs: first.tabs,
+    truncated: first.truncated,
+    active: first.active,
+    ...(first.nextCursor !== undefined ? { nextCursor: first.nextCursor } : {}),
+  }))).toBeLessThanOrEqual(400)
+  const unknown = pageOpenFiles({
+    tabs,
+    active: "/repo/very/long/path/to/file-0.ts",
+    cursor: "not-a-cursor",
+    capBytes: 400,
+  })
+  expect(unknown.tabs[0]).toBe(tabs[0])
+  expect(unknown.tabs).toEqual(first.tabs)
+  const next = pageOpenFiles({
+    tabs,
+    cursor: first.nextCursor,
+    capBytes: 400,
+  })
+  expect(next.tabs[0]).not.toBe(first.tabs[0])
 })
 
 it("round-trips EditorSelectionResult through Schema", () => {

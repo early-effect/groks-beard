@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
+import { callBridge, probeBridge } from "../src/bridge-client.ts"
 import { listenBridge } from "../src/bridge-server.ts"
 import { parseWorkspaceArg, runMcpProxy } from "../src/mcp-stdio.ts"
 import { splitNdjson } from "../src/ndjson.ts"
@@ -103,7 +104,16 @@ it("scripted MCP client lists tools and calls editor_workspace_root over the pro
     expect(initMsg.result.capabilities.tools).toEqual({})
     stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`)
     const listed = readMessage(stdout)
-    stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`)
+    stdin.write(
+      `${
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/list",
+          params: { cursor: "unknown" },
+        })
+      }\n`,
+    )
     const listMsg = await listed as {
       result: { tools: Array<{ name: string; annotations: { readOnlyHint: boolean } }> }
     }
@@ -111,6 +121,8 @@ it("scripted MCP client lists tools and calls editor_workspace_root over the pro
     expect(names).toContain("editor_open_diff")
     expect(names).toContain("editor_show_changes")
     expect(names).not.toContain("editor_write")
+    expect(listMsg.result.tools).toHaveLength(6)
+    expect("nextCursor" in listMsg.result).toBe(false)
     expect(listMsg.result.tools.every((tool) => tool.annotations.readOnlyHint)).toBe(true)
     const called = readMessage(stdout)
     stdin.write(`${
@@ -129,6 +141,71 @@ it("scripted MCP client lists tools and calls editor_workspace_root over the pro
     expect(JSON.parse(payload)).toEqual({ root: workspace })
     stdin.end()
     expect(await running).toBe(0)
+  } finally {
+    await server.close()
+  }
+})
+
+it("replies with a JSON-RPC error and exits when the editor drops mid-session", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "beard-mcp-down-"))
+  const runtimeDir = tmpdir()
+  const address = socketAddress({ workspace, win: false, runtimeDir })
+  const server = await listenBridge(address, async () => ({ root: workspace }))
+  const stdin = new PassThrough()
+  const stdout = new PassThrough()
+  const stderr = new PassThrough()
+  let err = ""
+  stderr.on("data", (chunk) => {
+    err += String(chunk)
+  })
+  try {
+    const running = runMcpProxy({ workspace, stdin, stdout, stderr, runtimeDir })
+    const init = readMessage(stdout)
+    stdin.write(`${
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "t", version: "0" },
+        },
+      })
+    }\n`)
+    await init
+    await server.close()
+    const failed = readMessage(stdout)
+    stdin.write(`${
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "editor_workspace_root", arguments: {} },
+      })
+    }\n`)
+    const failMsg = await failed as { id: number; error?: { message: string } }
+    expect(failMsg.id).toBe(7)
+    expect(failMsg.error?.message).toContain("Enable TUI Bridge")
+    expect(await running).toBe(1)
+    expect(err).toContain(MCP_EDITOR_DOWN_MESSAGE)
+  } finally {
+    stdin.end()
+  }
+})
+
+it("survives a connect-and-close probe without taking down the bridge", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "beard-mcp-probe-"))
+  const address = socketAddress({ workspace, win: false, runtimeDir: tmpdir() })
+  const server = await listenBridge(address, async () => ({ root: workspace }))
+  try {
+    await probeBridge(address, workspace)
+    await probeBridge(address, workspace)
+    const result = await callBridge(address, workspace, {
+      id: "1",
+      tool: "editor_workspace_root",
+    })
+    expect(result).toEqual({ root: workspace })
   } finally {
     await server.close()
   }

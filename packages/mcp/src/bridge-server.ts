@@ -47,38 +47,47 @@ export const listenBridge = (
       }
     }
     const server = net.createServer((socket) => {
+      socket.on("error", () => undefined)
       let buffer = ""
       socket.setEncoding("utf8")
+      const writeLine = (value: unknown) => {
+        if (socket.destroyed || socket.writableEnded) return
+        try {
+          socket.write(encodeNdjson(value))
+        } catch {
+          // peer already gone
+        }
+      }
       const reply = async (line: string) => {
         let parsed: unknown
         try {
           parsed = JSON.parse(line)
         } catch {
-          socket.write(encodeNdjson(encodeBridgeResponse(
+          writeLine(encodeBridgeResponse(
             new BridgeResponse({
               id: "",
               ok: false,
               error: { message: "invalid json" },
             }),
-          )))
+          ))
           socket.end()
           return
         }
         try {
           const request = decodeBridgeRequest(parsed)
           const result = await handle(request)
-          socket.write(encodeNdjson(encodeBridgeResponse(
+          writeLine(encodeBridgeResponse(
             new BridgeResponse({
               id: request.id,
               ok: true,
               result,
             }),
-          )))
+          ))
         } catch (cause) {
           const tagged = typeof cause === "object" && cause !== null && "_tag" in cause
             ? String((cause as { _tag: unknown })._tag)
             : undefined
-          socket.write(encodeNdjson(encodeBridgeResponse(
+          writeLine(encodeBridgeResponse(
             new BridgeResponse({
               id: idOf(parsed),
               ok: false,
@@ -87,7 +96,7 @@ export const listenBridge = (
                 ...(tagged !== undefined ? { _tag: tagged } : {}),
               },
             }),
-          )))
+          ))
         }
         socket.end()
       }

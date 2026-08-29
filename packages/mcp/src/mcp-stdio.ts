@@ -132,6 +132,19 @@ export const handleMcpRequest = async (
   return jsonRpcError(id, -32601, `Method not found: ${method}`)
 }
 
+const stopStdin = (stdin: Readable): void => {
+  try {
+    stdin.pause()
+  } catch {
+    // already closed
+  }
+  try {
+    stdin.destroy()
+  } catch {
+    // already closed
+  }
+}
+
 export const runMcpProxy = (io: McpProxyIo): Promise<number> =>
   new Promise((resolve) => {
     const address = socketAddress({
@@ -141,9 +154,16 @@ export const runMcpProxy = (io: McpProxyIo): Promise<number> =>
       ...(io.tmpdir !== undefined ? { tmpdir: io.tmpdir } : {}),
     })
     const connect = io.connect
+    let settled = false
+    const finish = (code: number) => {
+      if (settled) return
+      settled = true
+      stopStdin(io.stdin)
+      resolve(code)
+    }
     const failDown = () => {
       io.stderr.write(`${MCP_EDITOR_DOWN_MESSAGE}\n`)
-      resolve(1)
+      finish(1)
     }
     void probeBridge(address, io.workspace, connect).then(
       () => {
@@ -154,14 +174,9 @@ export const runMcpProxy = (io: McpProxyIo): Promise<number> =>
           ...(connect !== undefined ? { connect } : {}),
         }
         let buffer = ""
-        let settled = false
-        const finish = (code: number) => {
-          if (settled) return
-          settled = true
-          resolve(code)
-        }
         io.stdin.setEncoding("utf8")
         io.stdin.on("data", (chunk: string | Buffer) => {
+          if (settled) return
           const split = splitNdjson(
             buffer,
             typeof chunk === "string" ? chunk : chunk.toString("utf8"),
@@ -181,10 +196,16 @@ export const runMcpProxy = (io: McpProxyIo): Promise<number> =>
               continue
             }
             void handleMcpRequest(msg, ctx).then((response) => {
-              if (response === undefined) return
+              if (settled || response === undefined) return
               io.stdout.write(encodeNdjson(response))
             }).catch((cause: unknown) => {
+              if (settled) return
               if (cause instanceof McpEditorDown) {
+                if (msg.id !== undefined) {
+                  io.stdout.write(
+                    encodeNdjson(jsonRpcError(msg.id, -32002, MCP_EDITOR_DOWN_MESSAGE)),
+                  )
+                }
                 failDown()
                 return
               }

@@ -23,6 +23,7 @@ it("falls back to tmpdir when XDG_RUNTIME_DIR is unset", () => {
     workspace,
     win: false,
     tmpdir: "/var/tmp",
+    env: {},
     realpath: (path) => path,
   })
   expect(address).toBe(`/var/tmp/groks-beard/${hashOf(workspace)}.sock`)

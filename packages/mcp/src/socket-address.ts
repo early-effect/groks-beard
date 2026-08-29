@@ -11,6 +11,7 @@ export type SocketAddressInput = {
   readonly win?: boolean
   readonly runtimeDir?: string
   readonly tmpdir?: string
+  readonly env?: Record<string, string | undefined>
   readonly realpath?: (path: string) => string
 }
 
@@ -36,8 +37,9 @@ export const socketAddress = (input: SocketAddressInput): string => {
   const win = input.win ?? process.platform === "win32"
   const hash = workspaceSocketHash(input.workspace, win, input.realpath)
   if (win) return `\\\\.\\pipe\\groks-beard-${hash}`
+  const env = input.env ?? process.env
   const runtime = input.runtimeDir
-    ?? process.env.XDG_RUNTIME_DIR
+    ?? env.XDG_RUNTIME_DIR
     ?? input.tmpdir
     ?? tmpdir()
   return join(runtime, "groks-beard", `${hash}.sock`)

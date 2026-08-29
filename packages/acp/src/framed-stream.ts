@@ -2,7 +2,12 @@ import type { AnyMessage, Stream } from "@agentclientprotocol/sdk"
 import { isJsonRpcRequest, isJsonRpcResponse, isSuccessResponse } from "./jsonrpc-line.js"
 import { COMMIT_BEFORE_CONTINUE } from "./methods.js"
 import { splitNdjson } from "./ndjson.js"
-import { commitMode, type SessionState } from "./session-state.js"
+import {
+  commitMode,
+  modeIdFromSessionResult,
+  modeIdFromSessionUpdateParams,
+  type SessionState,
+} from "./session-state.js"
 
 type Pending = {
   readonly method: string
@@ -18,7 +23,7 @@ export type FramedTransport = {
 
 export const createFramedTransport = (
   state: SessionState,
-  options: { readonly onOutgoing?: (message: AnyMessage) => void } = {}
+  options: { readonly onOutgoing?: (message: AnyMessage) => void } = {},
 ): FramedTransport => {
   const pending = new Map<string | number, Pending>()
   let buffer = ""
@@ -28,26 +33,25 @@ export const createFramedTransport = (
   const readable = new ReadableStream<AnyMessage>({
     start(controller) {
       readableController = controller
-    }
+    },
   })
 
   const writable = new WritableStream<AnyMessage>({
     write(message) {
       if (isJsonRpcRequest(message) && message.id !== null) {
-        const modeId =
-          message.method === "session/set_mode" &&
-            typeof message.params === "object" &&
-            message.params !== null &&
-            "modeId" in message.params
-            ? String((message.params as { modeId: unknown }).modeId)
-            : undefined
+        const modeId = message.method === "session/set_mode"
+            && typeof message.params === "object"
+            && message.params !== null
+            && "modeId" in message.params
+          ? String((message.params as { modeId: unknown }).modeId)
+          : undefined
         pending.set(message.id, {
           method: message.method,
-          ...(modeId !== undefined ? { modeId } : {})
+          ...(modeId !== undefined ? { modeId } : {}),
         })
       }
       options.onOutgoing?.(message)
-    }
+    },
   })
 
   const feedLine = (line: string): void => {
@@ -55,14 +59,19 @@ export const createFramedTransport = (
     if (isJsonRpcResponse(message) && message.id !== null) {
       const recorded = pending.get(message.id)
       pending.delete(message.id)
-      if (
-        recorded !== undefined &&
-        COMMIT_BEFORE_CONTINUE.has(recorded.method) &&
-        isSuccessResponse(message) &&
-        recorded.modeId !== undefined
-      ) {
-        commitMode(state, recorded.modeId)
+      if (recorded !== undefined && isSuccessResponse(message)) {
+        if (COMMIT_BEFORE_CONTINUE.has(recorded.method) && recorded.modeId !== undefined) {
+          commitMode(state, recorded.modeId)
+        } else if (recorded.method === "session/new" || recorded.method === "session/load") {
+          const modeId = modeIdFromSessionResult(message.result)
+          if (modeId !== undefined) commitMode(state, modeId)
+        }
       }
+    } else if ("method" in message && message.method === "session/update") {
+      const modeId = modeIdFromSessionUpdateParams(
+        "params" in message ? message.params : undefined,
+      )
+      if (modeId !== undefined) commitMode(state, modeId)
     }
     readableController?.enqueue(message)
   }
@@ -78,6 +87,6 @@ export const createFramedTransport = (
     close: (error) => {
       if (error !== undefined) readableController?.error(error)
       else readableController?.close()
-    }
+    },
   }
 }

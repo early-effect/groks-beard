@@ -22,3 +22,4 @@ jobs:
       - run: pnpm --filter @groks-beard/core test
       - run: pnpm --filter @groks-beard/acp test
       - run: pnpm --filter @groks-beard/vscode test
+      - run: pnpm --filter @groks-beard/vscode test:electron

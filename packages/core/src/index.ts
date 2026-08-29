@@ -1,6 +1,7 @@
 export * from "./changeset.js"
 export * from "./diff-expand.js"
 export * from "./errors.js"
+export * from "./plan-terminal.js"
 export * from "./prompt.js"
 export * from "./protocol.js"
 export * from "./questions.js"

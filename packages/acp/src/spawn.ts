@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
 import { type BeardAcp, type BeardClientHandlers, connectBeardAcp } from "./client.js"
 import { encodeNdjson } from "./ndjson.js"
+import type { TerminalManager } from "./terminal-manager.js"
 
 export const GROK_AGENT_STDIO_ARGS = ["agent", "stdio"] as const
 
@@ -23,6 +24,7 @@ export const spawnGrokAgentStdio = (input: {
   readonly onExitPlanMode?: BeardClientHandlers["onExitPlanMode"]
   readonly onAskUserQuestion?: BeardClientHandlers["onAskUserQuestion"]
   readonly onElicit?: BeardClientHandlers["onElicit"]
+  readonly terminal?: TerminalManager
 }): SpawnedAgent => {
   const args = input.args ?? GROK_AGENT_STDIO_ARGS
   const child = spawn(input.command, [...args], {
@@ -42,6 +44,7 @@ export const spawnGrokAgentStdio = (input: {
       ? { onAskUserQuestion: input.onAskUserQuestion }
       : {}),
     ...(input.onElicit !== undefined ? { onElicit: input.onElicit } : {}),
+    ...(input.terminal !== undefined ? { terminal: input.terminal } : {}),
   })
   child.stdout.on("data", (chunk: Buffer) => {
     beard.transport.feedFromAgent(new Uint8Array(chunk))
@@ -54,6 +57,15 @@ export const spawnGrokAgentStdio = (input: {
 }
 
 export const killSpawnedAgent = (spawned: SpawnedAgent): void => {
-  spawned.beard.connection.close()
+  try {
+    spawned.beard.terminal.dispose()
+  } catch {
+    /* still kill the grok process */
+  }
+  try {
+    spawned.beard.connection.close()
+  } catch {
+    /* still kill the grok process */
+  }
   spawned.child.kill()
 }

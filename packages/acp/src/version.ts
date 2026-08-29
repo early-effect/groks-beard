@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process"
+
 export type GrokVersion = {
   readonly major: number
   readonly minor: number
@@ -23,8 +25,7 @@ export type ResolvedVersion = {
   readonly verified: boolean
 }
 
-const BANNER =
-  /^grok\s+(\d+)\.(\d+)\.(\d+)(?:\s+\(([0-9a-f]+)\))?(?:\s+\[([^\]]+)\])?/i
+const BANNER = /^grok\s+(\d+)\.(\d+)\.(\d+)(?:\s+\(([0-9a-f]+)\))?(?:\s+\[([^\]]+)\])?/i
 
 export const parseGrokVersion = (stdout: string): GrokVersion | undefined => {
   const line = stdout.trim().split(/\r?\n/).find((row) => row.trim().length > 0) ?? ""
@@ -41,11 +42,14 @@ export const parseGrokVersion = (stdout: string): GrokVersion | undefined => {
     patch,
     ...(git !== undefined ? { git } : {}),
     ...(channel !== undefined ? { channel } : {}),
-    raw: line.trim()
+    raw: line.trim(),
   }
 }
 
-export const compareGrokVersion = (a: GrokVersion, b: Pick<GrokVersion, "major" | "minor" | "patch">): number => {
+export const compareGrokVersion = (
+  a: GrokVersion,
+  b: Pick<GrokVersion, "major" | "minor" | "patch">,
+): number => {
   if (a.major !== b.major) return a.major - b.major
   if (a.minor !== b.minor) return a.minor - b.minor
   return a.patch - b.patch
@@ -53,21 +57,61 @@ export const compareGrokVersion = (a: GrokVersion, b: Pick<GrokVersion, "major" 
 
 export const isAtLeast = (
   version: GrokVersion,
-  minimum: Pick<GrokVersion, "major" | "minor" | "patch">
+  minimum: Pick<GrokVersion, "major" | "minor" | "patch">,
 ): boolean => compareGrokVersion(version, minimum) >= 0
+
+export const readGrokVersionBanner = (
+  command: string,
+  options: {
+    readonly timeoutMs?: number
+    readonly env?: NodeJS.ProcessEnv
+    readonly args?: ReadonlyArray<string>
+  } = {},
+): Promise<string> =>
+  new Promise((resolve) => {
+    const child = spawn(command, [...(options.args ?? []), "--version"], {
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let out = ""
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve(out)
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      finish()
+    }, options.timeoutMs ?? 2000)
+    child.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString()
+    })
+    child.stderr?.on("data", (chunk: Buffer) => {
+      out += chunk.toString()
+    })
+    child.on("close", () => {
+      clearTimeout(timer)
+      finish()
+    })
+    child.on("error", () => {
+      clearTimeout(timer)
+      finish()
+    })
+  })
 
 export const resolveGrokVersion = (
   liveStdout: string,
   cache: VersionCache | undefined,
-  stat: BinaryStat | undefined
+  stat: BinaryStat | undefined,
 ): ResolvedVersion => {
   const live = parseGrokVersion(liveStdout)
   if (live !== undefined) return { version: live, verified: true }
   if (
-    cache !== undefined &&
-    stat !== undefined &&
-    cache.mtimeMs === stat.mtimeMs &&
-    cache.size === stat.size
+    cache !== undefined
+    && stat !== undefined
+    && cache.mtimeMs === stat.mtimeMs
+    && cache.size === stat.size
   ) {
     return { version: cache.version, verified: false }
   }

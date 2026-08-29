@@ -1,5 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { parseGrokVersion, resolveGrokVersion } from "../src/version.ts"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { parseGrokVersion, readGrokVersionBanner, resolveGrokVersion } from "../src/version.ts"
 
 it("parses the 1.0.13 banner", () => {
   const version = parseGrokVersion("grok 1.0.13 (5e9a58528b76) [stable]\n")
@@ -26,10 +28,16 @@ it("uses a matching cache only when live stdout is unparseable", () => {
   const resolved = resolveGrokVersion("", {
     version: cached,
     mtimeMs: 1,
-    size: 10
+    size: 10,
   }, { mtimeMs: 1, size: 10 })
   expect(resolved.verified).toBe(false)
   expect(resolved.version?.patch).toBe(13)
+})
+
+it("reads a version banner from the fake grok fixture", async () => {
+  const fixture = join(dirname(fileURLToPath(import.meta.url)), "fixtures/fake-grok.mjs")
+  const banner = await readGrokVersionBanner(process.execPath, { args: [fixture] })
+  expect(parseGrokVersion(banner)?.patch).toBe(13)
 })
 
 it("prefers a live parseable banner over cache", () => {
@@ -37,7 +45,7 @@ it("prefers a live parseable banner over cache", () => {
   const resolved = resolveGrokVersion("grok 1.0.13", {
     version: cached,
     mtimeMs: 1,
-    size: 10
+    size: 10,
   }, { mtimeMs: 1, size: 10 })
   expect(resolved.verified).toBe(true)
   expect(resolved.version?.patch).toBe(13)

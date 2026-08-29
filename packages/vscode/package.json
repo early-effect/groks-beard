@@ -92,7 +92,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:electron": "vitest run test/contributions.test.ts test/view-placement.test.ts"
   },
   "dependencies": {
     "@groks-beard/acp": "workspace:*",

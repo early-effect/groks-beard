@@ -128,6 +128,22 @@ it("classifies a post-write delete as modify when the path still exists", () => 
   expect(plan).toEqual({ _tag: "replace", path: "/gone.ts", text: "body" })
 })
 
+it("marks a completed missing-disk delete as a region stand-in", () => {
+  const diffs = reconstructToolDiffs({
+    toolCall: {
+      toolCallId: "del",
+      kind: "delete",
+      status: "completed",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+    diskText: () => undefined,
+    diskIsBefore: false,
+  })
+  expect(diffs[0]?.wholeFile).toBe(true)
+  expect(diffs[0]?.regionStandIn).toBe(true)
+  expect(diffs[0]?.oldText).toBe("body")
+})
+
 it("treats a completed delete with missing disk as a whole-file delete", () => {
   const diffs = reconstructToolDiffs({
     toolCall: {

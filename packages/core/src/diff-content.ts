@@ -37,6 +37,7 @@ export type ReconstructedFileDiff = {
   readonly kind: FileChange["kind"]
   readonly toolCallId: string
   readonly fromPath?: string
+  readonly regionStandIn?: boolean
 }
 
 const stringField = (record: Record<string, unknown>, key: string): string | undefined =>
@@ -204,21 +205,20 @@ export const reconstructToolDiffs = (input: {
   const extracted = diffsFromToolCall(input.toolCall)
   return extracted.diffs.map((diff) => {
     const diskText = input.diskText(diff.path)
-    const sides = completePostWriteSides(
-      expandAcpDiff({
-        diff,
-        diskText,
-        diskIsBefore: input.diskIsBefore,
-        replaceAll: extracted.replaceAll,
-      }),
-      {
-        diskIsBefore: input.diskIsBefore,
-        diskText,
-        oldRegion: diff.oldText,
-        newRegion: diff.newText,
-        toolKind: extracted.kind,
-      },
-    )
+    const expanded = expandAcpDiff({
+      diff,
+      diskText,
+      diskIsBefore: input.diskIsBefore,
+      replaceAll: extracted.replaceAll,
+    })
+    const sides = completePostWriteSides(expanded, {
+      diskIsBefore: input.diskIsBefore,
+      diskText,
+      oldRegion: diff.oldText,
+      newRegion: diff.newText,
+      toolKind: extracted.kind,
+    })
+    const regionStandIn = !expanded.wholeFile && sides.wholeFile
     const kind = inferChangeKind({
       toolKind: extracted.kind,
       oldText: sides.oldText,
@@ -236,6 +236,7 @@ export const reconstructToolDiffs = (input: {
       kind,
       toolCallId: extracted.toolCallId,
       ...(extracted.fromPath !== undefined ? { fromPath: extracted.fromPath } : {}),
+      ...(regionStandIn ? { regionStandIn: true } : {}),
     }
   })
 }

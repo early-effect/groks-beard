@@ -8,6 +8,7 @@ import {
   lineDiffStats,
   REGION_ONLY_REASON,
   resolveUndo,
+  shouldKeepExistingFileChange,
   turnTitleFromPrompt,
   undoPlan,
 } from "../src/changeset.ts"
@@ -122,6 +123,15 @@ it("disables Undo when a modify is region-only", () => {
     }),
   )
   expect(plan).toEqual({ _tag: "disabled", reason: REGION_ONLY_REASON })
+})
+
+it("keeps a stored whole-file row over a completed region stand-in", () => {
+  const existing = { wholeFile: true, snapshotStored: true }
+  expect(shouldKeepExistingFileChange(existing, { wholeFile: true, regionStandIn: true })).toBe(
+    true,
+  )
+  expect(shouldKeepExistingFileChange(existing, { wholeFile: false })).toBe(true)
+  expect(shouldKeepExistingFileChange(existing, { wholeFile: true })).toBe(false)
 })
 
 it("still recreates a delete when the snapshot is the ACP old body", () => {

@@ -117,8 +117,11 @@ export const undoDisabledReasonFor = (
 
 export const shouldKeepExistingFileChange = (
   existing: { readonly wholeFile: boolean; readonly snapshotStored: boolean },
-  incoming: { readonly wholeFile: boolean },
-): boolean => existing.snapshotStored && existing.wholeFile && !incoming.wholeFile
+  incoming: { readonly wholeFile: boolean; readonly regionStandIn?: boolean },
+): boolean =>
+  existing.snapshotStored
+  && existing.wholeFile
+  && (!incoming.wholeFile || incoming.regionStandIn === true)
 
 export const recordFromFileChange = (
   change: FileChange,

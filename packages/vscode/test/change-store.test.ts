@@ -164,6 +164,42 @@ it("Undo of add stays pending when the dirty confirm is cancelled", async () => 
   expect(store.getFile("s1", "turn_1", "/new.ts")).toBeDefined()
 })
 
+it("keeps an expanded permission-time original over a completed oldRegion stand-in", async () => {
+  const { store } = memory()
+  const original = "aaa\nbody\nccc\n"
+  store.ingestToolCall({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "delete",
+    diskIsBefore: true,
+    readDisk: () => original,
+    toolCall: {
+      toolCallId: "c1",
+      kind: "delete",
+      status: "pending",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+  })
+  expect(store.loadChange("s1", "turn_1", "/gone.ts")?.oldSnapshot).toBe(original)
+  store.ingestToolCall({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "delete",
+    diskIsBefore: false,
+    readDisk: () => undefined,
+    toolCall: {
+      toolCallId: "c1",
+      kind: "delete",
+      status: "completed",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+  })
+  const apply = applyPorts()
+  const result = await store.undo("s1", "turn_1", "/gone.ts", apply.ports)
+  expect(result.ok).toBe(true)
+  expect(apply.applied).toEqual([{ _tag: "create", path: "/gone.ts", text: original }])
+})
+
 it("keeps permission-time delete snapshots when the completed ingest is region-only", async () => {
   const { store } = memory()
   store.ingestToolCall({

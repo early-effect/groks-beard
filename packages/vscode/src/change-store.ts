@@ -141,7 +141,10 @@ export class ChangeStore {
       this.replaceSet(set)
     }
     for (const diff of input.diffs) {
-      this.upsertFile(set, fileChangeFromReconstructed(diff))
+      this.upsertFile(set, fileChangeFromReconstructed(diff), {
+        wholeFile: diff.wholeFile,
+        ...(diff.regionStandIn === true ? { regionStandIn: true } : {}),
+      })
       set = this.getTurn(input.sessionId, input.turnId) ?? set
     }
     this.persist()
@@ -282,9 +285,13 @@ export class ChangeStore {
     return { ok: true }
   }
 
-  private upsertFile(set: ChangeSetRecord, change: FileChange): void {
+  private upsertFile(
+    set: ChangeSetRecord,
+    change: FileChange,
+    incoming: { readonly wholeFile: boolean; readonly regionStandIn?: boolean } = change,
+  ): void {
     const existing = set.files.find((file) => file.path === change.path)
-    if (existing !== undefined && shouldKeepExistingFileChange(existing, change)) return
+    if (existing !== undefined && shouldKeepExistingFileChange(existing, incoming)) return
     if (existing?.snapshotStored === true) {
       this.removeSnapshots(set, existing)
     }

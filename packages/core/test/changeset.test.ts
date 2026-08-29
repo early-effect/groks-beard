@@ -108,7 +108,7 @@ it("Undo of move reverses when both paths are known", () => {
   expect(plan._tag).toBe("moveReverse")
 })
 
-it("disables Undo when the sides are region-only", () => {
+it("disables Undo when a modify is region-only", () => {
   const plan = undoPlan(
     change({
       path: "/huge.ts",
@@ -122,6 +122,21 @@ it("disables Undo when the sides are region-only", () => {
     }),
   )
   expect(plan).toEqual({ _tag: "disabled", reason: REGION_ONLY_REASON })
+})
+
+it("still recreates a delete when the snapshot is the ACP old body", () => {
+  const plan = undoPlan(
+    change({
+      path: "/gone.ts",
+      kind: "delete",
+      additions: 0,
+      deletions: 1,
+      wholeFile: false,
+      toolCallId: "c",
+      oldSnapshot: "body",
+    }),
+  )
+  expect(plan).toEqual({ _tag: "create", path: "/gone.ts", text: "body" })
 })
 
 it("disables Undo of move without fromPath", () => {

@@ -107,13 +107,18 @@ export const fileChangeFromRecord = (
   })
 
 export const undoDisabledReasonFor = (
-  change: { readonly wholeFile: boolean },
+  change: { readonly kind: FileChange["kind"]; readonly wholeFile: boolean },
   snapshotStored: boolean,
 ): string | undefined => {
   if (!snapshotStored) return MISSING_SNAPSHOT_REASON
-  if (!change.wholeFile) return REGION_ONLY_REASON
+  if (change.kind === "modify" && !change.wholeFile) return REGION_ONLY_REASON
   return undefined
 }
+
+export const shouldKeepExistingFileChange = (
+  existing: { readonly wholeFile: boolean; readonly snapshotStored: boolean },
+  incoming: { readonly wholeFile: boolean },
+): boolean => existing.snapshotStored && existing.wholeFile && !incoming.wholeFile
 
 export const recordFromFileChange = (
   change: FileChange,
@@ -193,9 +198,9 @@ const longestCommonSubsequence = (
 }
 
 export const undoPlan = (change: FileChange, diskNow?: string): UndoPlan => {
-  if (!change.wholeFile) return { _tag: "disabled", reason: REGION_ONLY_REASON }
   switch (change.kind) {
     case "modify": {
+      if (!change.wholeFile) return { _tag: "disabled", reason: REGION_ONLY_REASON }
       if (change.oldSnapshot === undefined) return { _tag: "disabled", reason: "missing snapshot" }
       return { _tag: "replace", path: change.path, text: change.oldSnapshot }
     }

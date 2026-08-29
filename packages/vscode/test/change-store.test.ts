@@ -5,7 +5,7 @@ import {
   REGION_ONLY_REASON,
   SNAPSHOT_BYTE_CAP,
   SNAPSHOT_FILE_CAP,
-  type UndoMutation
+  type UndoMutation,
 } from "@groks-beard/core"
 import { ChangeStore, type ChangeStoreFs, snapshotRelPath } from "../src/change-store.ts"
 
@@ -20,7 +20,7 @@ const memory = (now = 1) => {
     remove: (path) => {
       files.delete(path)
     },
-    mkdirp: () => undefined
+    mkdirp: () => undefined,
   }
   const store = new ChangeStore({
     storageRoot: "/store",
@@ -30,7 +30,7 @@ const memory = (now = 1) => {
     saveIndex: (next) => {
       index = next
     },
-    fs
+    fs,
   })
   return { store, files, index: () => index }
 }
@@ -48,8 +48,8 @@ const applyPorts = (disk: Record<string, string> = {}) => {
       confirmDirty: async () => confirm,
       apply: async (mutations: ReadonlyArray<UndoMutation>) => {
         applied.push(...mutations)
-      }
-    }
+      },
+    },
   }
 }
 
@@ -69,9 +69,9 @@ it("indexes a tool_call diff in always-approve without a permission card", () =>
         type: "diff",
         path: "/tmp/a.ts",
         oldText: "old-token",
-        newText: "new-token"
-      }]
-    }
+        newText: "new-token",
+      }],
+    },
   })
   const listed = store.list()
   expect(listed).toHaveLength(1)
@@ -93,8 +93,8 @@ it("Keep drops a path from pending and deletes snapshot files", () => {
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/a.ts", oldText: "a", newText: "b" }]
-    }
+      content: [{ type: "diff", path: "/a.ts", oldText: "a", newText: "b" }],
+    },
   })
   expect(files.size).toBeGreaterThan(0)
   store.keep("s1", "turn_1", "/a.ts")
@@ -113,8 +113,8 @@ it("Undo of modify applies a full-document replace and leaves the file out of pe
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/a.ts", oldText: "old", newText: "new" }]
-    }
+      content: [{ type: "diff", path: "/a.ts", oldText: "old", newText: "new" }],
+    },
   })
   const apply = applyPorts({ "/a.ts": "new" })
   const result = await store.undo("s1", "turn_1", "/a.ts", apply.ports)
@@ -134,8 +134,8 @@ it("Undo of add deletes the file", async () => {
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/new.ts", oldText: null, newText: "hello" }]
-    }
+      content: [{ type: "diff", path: "/new.ts", oldText: null, newText: "hello" }],
+    },
   })
   const apply = applyPorts({ "/new.ts": "hello" })
   const result = await store.undo("s1", "turn_1", "/new.ts", apply.ports)
@@ -154,14 +154,52 @@ it("Undo of add stays pending when the dirty confirm is cancelled", async () => 
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/new.ts", oldText: null, newText: "hello" }]
-    }
+      content: [{ type: "diff", path: "/new.ts", oldText: null, newText: "hello" }],
+    },
   })
   const apply = applyPorts({ "/new.ts": "dirty" })
   apply.setConfirm(false)
   const result = await store.undo("s1", "turn_1", "/new.ts", apply.ports)
   expect(result).toMatchObject({ ok: false, cancelled: true, path: "/new.ts" })
   expect(store.getFile("s1", "turn_1", "/new.ts")).toBeDefined()
+})
+
+it("keeps permission-time delete snapshots when the completed ingest is region-only", async () => {
+  const { store } = memory()
+  store.ingestToolCall({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "delete",
+    diskIsBefore: true,
+    readDisk: () => "body",
+    toolCall: {
+      toolCallId: "c1",
+      kind: "delete",
+      status: "pending",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+  })
+  expect(store.getFile("s1", "turn_1", "/gone.ts")?.wholeFile).toBe(true)
+  store.ingestToolCall({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "delete",
+    diskIsBefore: false,
+    readDisk: () => undefined,
+    toolCall: {
+      toolCallId: "c1",
+      kind: "delete",
+      status: "completed",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+  })
+  const file = store.getFile("s1", "turn_1", "/gone.ts")
+  expect(file?.wholeFile).toBe(true)
+  expect(file?.undoDisabledReason).toBeUndefined()
+  const apply = applyPorts()
+  const result = await store.undo("s1", "turn_1", "/gone.ts", apply.ports)
+  expect(result.ok).toBe(true)
+  expect(apply.applied).toEqual([{ _tag: "create", path: "/gone.ts", text: "body" }])
 })
 
 it("Undo of delete recreates from the old snapshot", async () => {
@@ -175,8 +213,8 @@ it("Undo of delete recreates from the old snapshot", async () => {
     toolCall: {
       toolCallId: "c1",
       kind: "delete",
-      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }]
-    }
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
   })
   const apply = applyPorts()
   const result = await store.undo("s1", "turn_1", "/gone.ts", apply.ports)
@@ -195,15 +233,15 @@ it("disables Undo of delete when the path exists with different content", async 
     toolCall: {
       toolCallId: "c1",
       kind: "delete",
-      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }]
-    }
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
   })
   const apply = applyPorts({ "/gone.ts": "someone else wrote this" })
   const result = await store.undo("s1", "turn_1", "/gone.ts", apply.ports)
   expect(result).toEqual({
     ok: false,
     path: "/gone.ts",
-    reason: "path exists with different content"
+    reason: "path exists with different content",
   })
   expect(store.getFile("s1", "turn_1", "/gone.ts")).toBeDefined()
 })
@@ -220,15 +258,15 @@ it("Undo of move writes the origin and deletes the destination", async () => {
       toolCallId: "c1",
       kind: "move",
       rawInput: { path: "/to.ts", from_path: "/from.ts", old_string: "x", new_string: "x" },
-      content: [{ type: "diff", path: "/to.ts", oldText: "x", newText: "x" }]
-    }
+      content: [{ type: "diff", path: "/to.ts", oldText: "x", newText: "x" }],
+    },
   })
   const apply = applyPorts()
   const result = await store.undo("s1", "turn_1", "/to.ts", apply.ports)
   expect(result.ok).toBe(true)
   expect(apply.applied).toEqual([
     { _tag: "create", path: "/from.ts", text: "x" },
-    { _tag: "delete", path: "/to.ts" }
+    { _tag: "delete", path: "/to.ts" },
   ])
 })
 
@@ -243,8 +281,8 @@ it("disables Undo of move when fromPath is missing", async () => {
     toolCall: {
       toolCallId: "c1",
       kind: "move",
-      content: [{ type: "diff", path: "/to.ts", oldText: "x", newText: "x" }]
-    }
+      content: [{ type: "diff", path: "/to.ts", oldText: "x", newText: "x" }],
+    },
   })
   const apply = applyPorts()
   const result = await store.undo("s1", "turn_1", "/to.ts", apply.ports)
@@ -263,8 +301,8 @@ it("Keep still drops an overflow file that cannot Undo", () => {
       toolCall: {
         toolCallId: `c${i}`,
         kind: "edit",
-        content: [{ type: "diff", path: `/f${i}.ts`, oldText: "a", newText: "b" }]
-      }
+        content: [{ type: "diff", path: `/f${i}.ts`, oldText: "a", newText: "b" }],
+      },
     })
   }
   const overflowPath = `/f${SNAPSHOT_FILE_CAP}.ts`
@@ -286,8 +324,8 @@ it("does not full-replace an oversize region-only file on Undo", async () => {
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/big.ts", oldText: "x", newText: "y" }]
-    }
+      content: [{ type: "diff", path: "/big.ts", oldText: "x", newText: "y" }],
+    },
   })
   const file = store.getFile("s1", "turn_1", "/big.ts")
   expect(file?.wholeFile).toBe(false)
@@ -311,8 +349,8 @@ it("indexes overflow files without snapshots and disables Undo", () => {
       toolCall: {
         toolCallId: `c${i}`,
         kind: "edit",
-        content: [{ type: "diff", path: `/f${i}.ts`, oldText: "a", newText: "b" }]
-      }
+        content: [{ type: "diff", path: `/f${i}.ts`, oldText: "a", newText: "b" }],
+      },
     })
   }
   const files = store.getTurn("s1", "turn_1")?.files ?? []
@@ -335,8 +373,8 @@ it("disables Undo when the byte cap would be exceeded", () => {
     toolCall: {
       toolCallId: "c1",
       kind: "edit",
-      content: [{ type: "diff", path: "/huge.ts", oldText: huge, newText: "y" }]
-    }
+      content: [{ type: "diff", path: "/huge.ts", oldText: huge, newText: "y" }],
+    },
   })
   const file = store.getFile("s1", "turn_1", "/huge.ts")
   expect(file?.snapshotStored).toBe(false)
@@ -357,7 +395,7 @@ it("Undo all stops on the first failure and reports the path", async () => {
         firstChangedLine: 0,
         wholeFile: true,
         kind: "modify",
-        toolCallId: "c1"
+        toolCallId: "c1",
       },
       {
         path: "/gone.ts",
@@ -366,9 +404,9 @@ it("Undo all stops on the first failure and reports the path", async () => {
         firstChangedLine: 0,
         wholeFile: true,
         kind: "delete",
-        toolCallId: "c2"
-      }
-    ]
+        toolCallId: "c2",
+      },
+    ],
   })
   const apply = applyPorts({ "/gone.ts": "different" })
   const result = await store.undoAll("s1", "turn_1", apply.ports)

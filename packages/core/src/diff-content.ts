@@ -157,6 +157,31 @@ export const inferChangeKind = (input: {
   return "modify"
 }
 
+const wholeFileSides = (oldText: string, newText: string): DiffSides => ({
+  oldText,
+  newText,
+  firstChangedLine: 0,
+  wholeFile: true,
+})
+
+const completePostWriteSides = (
+  sides: DiffSides,
+  input: {
+    readonly diskIsBefore: boolean
+    readonly diskText: string | undefined
+    readonly oldRegion: string
+    readonly newRegion: string
+    readonly toolKind: string
+  },
+): DiffSides => {
+  if (input.diskIsBefore || sides.wholeFile || input.newRegion !== "") return sides
+  if (input.diskText === "") return wholeFileSides(input.oldRegion, input.diskText)
+  if (input.toolKind === "delete" && input.diskText === undefined && input.oldRegion !== "") {
+    return wholeFileSides(input.oldRegion, "")
+  }
+  return sides
+}
+
 export const expandAcpDiff = (input: {
   readonly diff: AcpDiffBlock
   readonly diskText: string | undefined
@@ -179,12 +204,21 @@ export const reconstructToolDiffs = (input: {
   const extracted = diffsFromToolCall(input.toolCall)
   return extracted.diffs.map((diff) => {
     const diskText = input.diskText(diff.path)
-    const sides = expandAcpDiff({
-      diff,
-      diskText,
-      diskIsBefore: input.diskIsBefore,
-      replaceAll: extracted.replaceAll,
-    })
+    const sides = completePostWriteSides(
+      expandAcpDiff({
+        diff,
+        diskText,
+        diskIsBefore: input.diskIsBefore,
+        replaceAll: extracted.replaceAll,
+      }),
+      {
+        diskIsBefore: input.diskIsBefore,
+        diskText,
+        oldRegion: diff.oldText,
+        newRegion: diff.newText,
+        toolKind: extracted.kind,
+      },
+    )
     const kind = inferChangeKind({
       toolKind: extracted.kind,
       oldText: sides.oldText,

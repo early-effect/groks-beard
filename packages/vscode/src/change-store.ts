@@ -1,24 +1,25 @@
-import { Schema } from "effect"
 import {
   canStoreSnapshot,
   ChangeSetIndex,
-  ChangeSetRecord,
   changeSetLineStats,
+  ChangeSetRecord,
   type FileChange,
-  type FileChangeRecord,
-  fileChangeFromRecord,
   fileChangeFromReconstructed,
+  fileChangeFromRecord,
+  type FileChangeRecord,
   formatLineStats,
   MISSING_SNAPSHOT_REASON,
-  recordFromFileChange,
   type ReconstructedFileDiff,
   reconstructToolDiffs,
+  recordFromFileChange,
   resolveUndo,
+  shouldKeepExistingFileChange,
   snapshotBytesFor,
   storedSnapshotBudget,
   type UndoMutation,
-  type UndoResolution
+  type UndoResolution,
 } from "@groks-beard/core"
+import { Schema } from "effect"
 
 export const CHANGE_INDEX_KEY = "groksBeard.changeIndex"
 
@@ -46,7 +47,12 @@ export type UndoApplyPorts = {
 
 export type UndoApplyResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly path: string; readonly reason: string; readonly cancelled?: boolean }
+  | {
+    readonly ok: false
+    readonly path: string
+    readonly reason: string
+    readonly cancelled?: boolean
+  }
 
 const decodeIndex = (raw: unknown): Array<ChangeSetRecord> => {
   const decoded = Schema.decodeUnknownExit(ChangeSetIndex)(raw)
@@ -59,8 +65,9 @@ export const snapshotRelPath = (
   sessionId: string,
   turnId: string,
   filePath: string,
-  side: "old" | "new"
-): string => `${safeSegment(sessionId)}/${safeSegment(turnId)}/${encodeURIComponent(filePath)}.${side}`
+  side: "old" | "new",
+): string =>
+  `${safeSegment(sessionId)}/${safeSegment(turnId)}/${encodeURIComponent(filePath)}.${side}`
 
 export class ChangeStore {
   private sets: Array<ChangeSetRecord>
@@ -117,14 +124,16 @@ export class ChangeStore {
     readonly diffs: ReadonlyArray<ReconstructedFileDiff>
   }): void {
     if (input.diffs.length === 0) return
-    let set = this.sets.find((row) => row.sessionId === input.sessionId && row.turnId === input.turnId)
+    let set = this.sets.find((row) =>
+      row.sessionId === input.sessionId && row.turnId === input.turnId
+    )
     if (set === undefined) {
       set = new ChangeSetRecord({
         sessionId: input.sessionId,
         turnId: input.turnId,
         title: input.title === "" ? "Untitled" : input.title,
         files: [],
-        createdAt: this.deps.now()
+        createdAt: this.deps.now(),
       })
       this.sets.push(set)
     } else if (input.title !== "" && (set.title === "" || set.title === "Untitled")) {
@@ -149,13 +158,13 @@ export class ChangeStore {
     const diffs = reconstructToolDiffs({
       toolCall: input.toolCall,
       diskText: input.readDisk,
-      diskIsBefore: input.diskIsBefore
+      diskIsBefore: input.diskIsBefore,
     })
     this.ingestReconstructed({
       sessionId: input.sessionId,
       turnId: input.turnId,
       title: input.title,
-      diffs
+      diffs,
     })
     return diffs
   }
@@ -179,10 +188,12 @@ export class ChangeStore {
     if (set === undefined) return
     const file = set.files.find((row) => row.path === path)
     if (file !== undefined) this.removeSnapshots(set, file)
-    this.replaceSet(new ChangeSetRecord({
-      ...set,
-      files: set.files.filter((row) => row.path !== path)
-    }))
+    this.replaceSet(
+      new ChangeSetRecord({
+        ...set,
+        files: set.files.filter((row) => row.path !== path),
+      }),
+    )
     this.dropEmpty()
     this.persist()
   }
@@ -213,7 +224,7 @@ export class ChangeStore {
     const newText = this.deps.fs.read(this.snapshotAbs(set, record.path, "new"))
     return fileChangeFromRecord(record, {
       ...(oldText !== undefined ? { oldText } : {}),
-      ...(newText !== undefined ? { newText } : {})
+      ...(newText !== undefined ? { newText } : {}),
     })
   }
 
@@ -221,19 +232,23 @@ export class ChangeStore {
     sessionId: string,
     turnId: string,
     path: string,
-    ports: UndoApplyPorts
+    ports: UndoApplyPorts,
   ): Promise<UndoApplyResult> {
     const change = this.loadChange(sessionId, turnId, path)
     if (change === undefined) return { ok: false, path, reason: MISSING_SNAPSHOT_REASON }
     const resolved = await resolveUndo(
       change,
       ports.readDisk(path),
-      () => ports.confirmDirty(path)
+      () => ports.confirmDirty(path),
     )
     return this.finishUndo(sessionId, turnId, path, resolved, ports)
   }
 
-  async undoAll(sessionId: string, turnId: string, ports: UndoApplyPorts): Promise<UndoApplyResult> {
+  async undoAll(
+    sessionId: string,
+    turnId: string,
+    ports: UndoApplyPorts,
+  ): Promise<UndoApplyResult> {
     const set = this.getTurn(sessionId, turnId)
     if (set === undefined) return { ok: true }
     for (const file of [...set.files]) {
@@ -256,7 +271,7 @@ export class ChangeStore {
     turnId: string,
     path: string,
     resolved: UndoResolution,
-    ports: UndoApplyPorts
+    ports: UndoApplyPorts,
   ): Promise<UndoApplyResult> {
     if (resolved._tag === "disabled") return { ok: false, path, reason: resolved.reason }
     if (resolved._tag === "cancelled") {
@@ -269,25 +284,28 @@ export class ChangeStore {
 
   private upsertFile(set: ChangeSetRecord, change: FileChange): void {
     const existing = set.files.find((file) => file.path === change.path)
+    if (existing !== undefined && shouldKeepExistingFileChange(existing, change)) return
     if (existing?.snapshotStored === true) {
       this.removeSnapshots(set, existing)
     }
     const extra = snapshotBytesFor(change)
-    const budget = storedSnapshotBudget(this.sets.map((row) =>
-      row.sessionId === set.sessionId && row.turnId === set.turnId
-        ? new ChangeSetRecord({
-          ...row,
-          files: row.files.filter((file) => file.path !== change.path)
-        })
-        : row
-    ))
+    const budget = storedSnapshotBudget(
+      this.sets.map((row) =>
+        row.sessionId === set.sessionId && row.turnId === set.turnId
+          ? new ChangeSetRecord({
+            ...row,
+            files: row.files.filter((file) => file.path !== change.path),
+          })
+          : row
+      ),
+    )
     const storeBody = canStoreSnapshot(budget.files, budget.bytes, extra)
     if (storeBody) {
       this.writeSnapshots(set, change)
     }
     const record = recordFromFileChange(change, {
       snapshotStored: storeBody,
-      snapshotBytes: storeBody ? extra : 0
+      snapshotBytes: storeBody ? extra : 0,
     })
     const files = [...set.files.filter((file) => file.path !== change.path), record]
     this.replaceSet(new ChangeSetRecord({ ...set, files }))
@@ -297,7 +315,7 @@ export class ChangeStore {
     const dir = this.deps.join(
       this.deps.storageRoot,
       safeSegment(set.sessionId),
-      safeSegment(set.turnId)
+      safeSegment(set.turnId),
     )
     this.deps.fs.mkdirp(dir)
     if (change.oldSnapshot !== undefined) {
@@ -316,7 +334,7 @@ export class ChangeStore {
   private snapshotAbs(set: ChangeSetRecord, filePath: string, side: "old" | "new"): string {
     return this.deps.join(
       this.deps.storageRoot,
-      snapshotRelPath(set.sessionId, set.turnId, filePath, side)
+      snapshotRelPath(set.sessionId, set.turnId, filePath, side),
     )
   }
 

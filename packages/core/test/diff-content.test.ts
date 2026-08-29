@@ -11,6 +11,7 @@ import {
   SNAPSHOT_FILE_CAP,
   snapshotBytesFor,
   toolCallFromPermissionParams,
+  undoPlan,
 } from "../src/index.ts"
 
 it("reconstructs a permission-time region against disk", () => {
@@ -120,6 +121,31 @@ it("classifies a post-write delete as modify when the path still exists", () => 
     diskIsBefore: false,
   })
   expect(diffs[0]?.kind).toBe("modify")
+  expect(diffs[0]?.wholeFile).toBe(true)
+  expect(diffs[0]?.oldText).toBe("body")
+  expect(diffs[0]?.newText).toBe("")
+  const plan = undoPlan(fileChangeFromReconstructed(diffs[0]!))
+  expect(plan).toEqual({ _tag: "replace", path: "/gone.ts", text: "body" })
+})
+
+it("treats a completed delete with missing disk as a whole-file delete", () => {
+  const diffs = reconstructToolDiffs({
+    toolCall: {
+      toolCallId: "del",
+      kind: "delete",
+      status: "completed",
+      content: [{ type: "diff", path: "/gone.ts", oldText: "body", newText: "" }],
+    },
+    diskText: () => undefined,
+    diskIsBefore: false,
+  })
+  expect(diffs[0]?.kind).toBe("delete")
+  expect(diffs[0]?.wholeFile).toBe(true)
+  expect(undoPlan(fileChangeFromReconstructed(diffs[0]!))).toEqual({
+    _tag: "create",
+    path: "/gone.ts",
+    text: "body",
+  })
 })
 
 it("recovers original from a completed post-write update", () => {

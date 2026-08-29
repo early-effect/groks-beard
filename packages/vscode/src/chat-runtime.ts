@@ -13,6 +13,8 @@ import {
   hostMsgsFromSessionUpdate,
   permissionCardFromParams,
   PromptChip,
+  sessionIdFromParams,
+  turnTitleFromPrompt,
 } from "@groks-beard/core"
 import { Effect } from "effect"
 import { ComposerState } from "./composer.js"
@@ -31,6 +33,14 @@ export type ChatRuntimeDeps = {
   ) => Promise<ReadonlyArray<{ path: string; absPath: string }>>
   readonly openChanges?: (turnId?: string) => void
   readonly openDiff?: (requestId: string) => void
+  readonly onTurn?: (sessionId: string, turnId: string, title: string) => void
+  readonly rememberPermission?: (requestId: string, params: unknown) => void
+  readonly ingestUpdate?: (
+    params: unknown,
+    ctx: { readonly sessionId: string; readonly turnId: string; readonly title: string },
+  ) => void
+  readonly onPermissionChoice?: (requestId: string, optionId: string) => void
+  readonly onCancelPermissions?: () => void
 }
 
 export class ChatRuntime {
@@ -38,6 +48,7 @@ export class ChatRuntime {
   modeId = "normal"
   availableModes: Array<string> = [...DEFAULT_MODES]
   currentTurnId = "turn_0"
+  currentTurnTitle = "Untitled"
   private turnSeq = 0
   private running = false
   private readonly queue: Array<{ text: string; chips: ReadonlyArray<PromptChip> }> = []
@@ -76,6 +87,11 @@ export class ChatRuntime {
   }
 
   onSessionUpdate(params: unknown): void {
+    this.deps.ingestUpdate?.(params, {
+      sessionId: this.sessionId ?? sessionIdFromParams(params) ?? "",
+      turnId: this.currentTurnId,
+      title: this.currentTurnTitle,
+    })
     for (const msg of hostMsgsFromSessionUpdate(params, this.currentTurnId)) {
       if (msg._tag === "sessionMeta") {
         if (msg.modeId !== "") this.modeId = msg.modeId
@@ -94,6 +110,7 @@ export class ChatRuntime {
   }
 
   onPermission(params: unknown, requestId: string): Promise<PermissionOutcome> {
+    this.deps.rememberPermission?.(requestId, params)
     this.deps.post(permissionCardFromParams(params, requestId))
     return new Promise((resolve) => {
       this.pendingPerm.set(requestId, resolve)
@@ -162,6 +179,7 @@ export class ChatRuntime {
       resolve({ outcome: { outcome: "cancelled" } })
     }
     this.pendingPerm.clear()
+    this.deps.onCancelPermissions?.()
     const sessionId = this.sessionId
     if (sessionId !== undefined) {
       await Effect.runPromise(cancelSession(this.deps.agent, sessionId))
@@ -172,6 +190,7 @@ export class ChatRuntime {
     const resolve = this.pendingPerm.get(requestId)
     if (resolve === undefined) return
     this.pendingPerm.delete(requestId)
+    this.deps.onPermissionChoice?.(requestId, optionId)
     resolve({ outcome: { outcome: "selected", optionId } })
   }
 
@@ -256,16 +275,18 @@ export class ChatRuntime {
     })
   }
 
-  private nextTurnId(): string {
+  private nextTurnId(text: string): string {
     this.turnSeq += 1
     this.currentTurnId = `turn_${this.turnSeq}`
+    this.currentTurnTitle = turnTitleFromPrompt(text)
     return this.currentTurnId
   }
 
   private async runTurn(text: string, chips: ReadonlyArray<PromptChip>): Promise<void> {
     const sessionId = await this.ensureSession()
     for (const chip of chips) this.deps.composer.addChip(chip)
-    const turnId = this.nextTurnId()
+    const turnId = this.nextTurnId(text)
+    this.deps.onTurn?.(sessionId, turnId, this.currentTurnTitle)
     this.running = true
     this.deps.post({ _tag: "userMessage", turnId, text, chips: [...chips] })
     const active = this.deps.activeFile?.()

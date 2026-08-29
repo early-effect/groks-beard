@@ -1,3 +1,4 @@
+import { diffsFromRawInput } from "./diff-content.js"
 import type { HostMsg } from "./protocol.js"
 import {
   CurrentModeUpdate,
@@ -89,7 +90,7 @@ export const permissionCardFromParams = (
     toolCallId,
     title,
     options: permissionOptions(rec.options),
-    hasDiff: contentHasDiff(toolCall.content),
+    hasDiff: contentHasDiff(toolCall.content) || diffsFromRawInput(toolCall.rawInput).length > 0,
   }
 }
 

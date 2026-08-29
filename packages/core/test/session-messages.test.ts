@@ -73,3 +73,15 @@ it("builds a permission card with a diff flag", () => {
   expect(card.toolCallId).toBe("call_1")
   expect(card.options[0]?.optionId).toBe("allow-once")
 })
+
+it("flags a permission card as having a diff from rawInput", () => {
+  const card = permissionCardFromParams({
+    toolCall: {
+      toolCallId: "call_2",
+      title: "Edit",
+      rawInput: { path: "/tmp/file.ts", old_string: "old", new_string: "new" },
+    },
+    options: [],
+  }, "perm-2")
+  expect(card.hasDiff).toBe(true)
+})

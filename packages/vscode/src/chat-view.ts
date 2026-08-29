@@ -21,6 +21,7 @@ import { locateGrokCli } from "./cli-locator.js"
 import { ComposerState } from "./composer.js"
 import { dispatchWebviewMsg, type WebviewHandlers } from "./host-dispatch.js"
 import { missingCliMessage } from "./onboarding.js"
+import type { ReviewHost } from "./review-host.js"
 import { createHostTerminalManager } from "./terminal-manager.js"
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -36,6 +37,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly composer: ComposerState,
     private readonly effectRuntime: ManagedRuntime.ManagedRuntime<never, never>,
+    private readonly review: ReviewHost,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -213,6 +215,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         searchFiles: (query) => this.searchFiles(query),
         openChanges: () => {
           void vscode.commands.executeCommand("groksBeard.changes.focus")
+        },
+        openDiff: (requestId) => {
+          void this.review.openPermissionDiff(requestId)
+        },
+        onTurn: (sessionId, turnId, title) => {
+          this.review.setTurn(sessionId, turnId, title)
+        },
+        rememberPermission: (requestId, params) => {
+          this.review.rememberPermission(requestId, params)
+        },
+        ingestUpdate: (params, ctx) => {
+          this.review.ingestUpdate(params, ctx)
+        },
+        onPermissionChoice: (requestId, optionId) => {
+          this.review.onPermissionChoice(requestId, optionId)
+        },
+        onCancelPermissions: () => {
+          this.review.cancelPendingPermissions()
         },
       })
       holder.runtime = runtime

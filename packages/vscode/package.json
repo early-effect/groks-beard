@@ -60,8 +60,56 @@
       {
         "command": "groksBeard.copySelectionAsGrokRef",
         "title": "Grok's Beard: Copy Selection as Grok @ ref"
+      },
+      {
+        "command": "groksBeard.openDiff",
+        "title": "Grok's Beard: Open Diff"
+      },
+      {
+        "command": "groksBeard.openChangeDiff",
+        "title": "Grok's Beard: Open Change Diff"
+      },
+      {
+        "command": "groksBeard.keepChange",
+        "title": "Grok's Beard: Keep Change"
+      },
+      {
+        "command": "groksBeard.keepAll",
+        "title": "Grok's Beard: Keep All"
+      },
+      {
+        "command": "groksBeard.undoChange",
+        "title": "Grok's Beard: Undo Change"
+      },
+      {
+        "command": "groksBeard.undoAll",
+        "title": "Grok's Beard: Undo All"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "groksBeard.keepChange",
+          "when": "view == groksBeard.changes && viewItem == changeFile",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.undoChange",
+          "when": "view == groksBeard.changes && viewItem == changeFile",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.keepAll",
+          "when": "view == groksBeard.changes && viewItem == changeTurn",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.undoAll",
+          "when": "view == groksBeard.changes && viewItem == changeTurn",
+          "group": "inline"
+        }
+      ]
+    },
     "configuration": {
       "title": "Grok's Beard",
       "properties": {

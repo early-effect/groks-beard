@@ -6,7 +6,9 @@ import {
   FileChange,
   keepFile,
   lineDiffStats,
-  undoPlan
+  resolveUndo,
+  turnTitleFromPrompt,
+  undoPlan,
 } from "../src/changeset.ts"
 
 const change = (fields: ConstructorParameters<typeof FileChange>[0]) => new FileChange(fields)
@@ -26,7 +28,7 @@ it("Keep drops a path from the pending set", () => {
         wholeFile: true,
         toolCallId: "c1",
         oldSnapshot: "a",
-        newSnapshot: "b"
+        newSnapshot: "b",
       }),
       change({
         path: "/b.ts",
@@ -35,9 +37,9 @@ it("Keep drops a path from the pending set", () => {
         deletions: 0,
         wholeFile: true,
         toolCallId: "c2",
-        newSnapshot: "n"
-      })
-    ]
+        newSnapshot: "n",
+      }),
+    ],
   })
   expect(keepFile(set, "/a.ts").files.map((file) => file.path)).toEqual(["/b.ts"])
 })
@@ -52,8 +54,8 @@ it("Undo of modify replaces with the old snapshot", () => {
       wholeFile: true,
       toolCallId: "c",
       oldSnapshot: "old",
-      newSnapshot: "new"
-    })
+      newSnapshot: "new",
+    }),
   )
   expect(plan).toEqual({ _tag: "replace", path: "/a.ts", text: "old" })
 })
@@ -67,8 +69,8 @@ it("Undo of delete recreates the file", () => {
       deletions: 3,
       wholeFile: true,
       toolCallId: "c",
-      oldSnapshot: "body"
-    })
+      oldSnapshot: "body",
+    }),
   )
   expect(plan).toEqual({ _tag: "create", path: "/gone.ts", text: "body" })
 })
@@ -82,9 +84,9 @@ it("Undo of add deletes the file", () => {
       deletions: 0,
       wholeFile: true,
       toolCallId: "c",
-      newSnapshot: "hi"
+      newSnapshot: "hi",
     }),
-    "hi"
+    "hi",
   )
   expect(plan).toEqual({ _tag: "delete", path: "/new.ts", confirmIfDirty: false })
 })
@@ -99,8 +101,8 @@ it("Undo of move reverses when both paths are known", () => {
       deletions: 0,
       wholeFile: true,
       toolCallId: "c",
-      oldSnapshot: "x"
-    })
+      oldSnapshot: "x",
+    }),
   )
   expect(plan._tag).toBe("moveReverse")
 })
@@ -114,14 +116,36 @@ it("disables Undo of move without fromPath", () => {
       deletions: 0,
       wholeFile: true,
       toolCallId: "c",
-      oldSnapshot: "x"
-    })
+      oldSnapshot: "x",
+    }),
   )
   expect(plan).toEqual({ _tag: "disabled", reason: "move target unknown" })
 })
 
 it("counts line additions and deletions", () => {
   expect(lineDiffStats("a\nb\n", "a\nc\n")).toEqual({ additions: 1, deletions: 1 })
+})
+
+it("titles a turn from the first non-empty prompt line", () => {
+  expect(turnTitleFromPrompt("\n  Fix the parser  \nmore")).toBe("Fix the parser")
+})
+
+it("resolveUndo of add confirms when the buffer is dirty", async () => {
+  const file = change({
+    path: "/new.ts",
+    kind: "add",
+    additions: 1,
+    deletions: 0,
+    wholeFile: true,
+    toolCallId: "c",
+    newSnapshot: "hi",
+  })
+  const cancelled = await resolveUndo(file, "dirty", async () => false)
+  expect(cancelled._tag).toBe("cancelled")
+  const applied = await resolveUndo(file, "hi", async () => {
+    throw new Error("should not confirm")
+  })
+  expect(applied).toEqual({ _tag: "apply", mutations: [{ _tag: "delete", path: "/new.ts" }] })
 })
 
 it("Undo of a known modify snapshot returns the original bytes", () => {
@@ -135,9 +159,9 @@ it("Undo of a known modify snapshot returns the original bytes", () => {
         wholeFile: true,
         toolCallId: "c",
         oldSnapshot: oldText,
-        newSnapshot: newText
+        newSnapshot: newText,
       })
       return applyUndoToSnapshots(file) === oldText
-    })
+    }),
   )
 })

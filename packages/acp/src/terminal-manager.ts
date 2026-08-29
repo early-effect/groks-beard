@@ -216,7 +216,13 @@ export class MemoryTerminalManager implements TerminalManager {
   }
 
   dispose(): void {
-    for (const id of [...this.terms.keys()]) this.release(id)
+    for (const id of [...this.terms.keys()]) {
+      try {
+        this.release(id)
+      } catch {
+        this.terms.delete(id)
+      }
+    }
   }
 
   private require(terminalId: string): TerminalRecord {
@@ -337,7 +343,20 @@ export class ChildProcessTerminalManager implements TerminalManager {
   }
 
   dispose(): void {
-    for (const id of [...this.terms.keys()]) this.release(id)
+    for (const record of [...this.terms.values()]) {
+      try {
+        this.beginTeardown(record)
+      } catch {
+        try {
+          if (record.child !== undefined) {
+            killProcessTree(record.child, this.win, true, this.spawnFn)
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+      record.released = true
+    }
   }
 
   private beginTeardown(record: TerminalRecord): void {

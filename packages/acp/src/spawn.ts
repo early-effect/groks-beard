@@ -57,7 +57,15 @@ export const spawnGrokAgentStdio = (input: {
 }
 
 export const killSpawnedAgent = (spawned: SpawnedAgent): void => {
-  spawned.beard.terminal.dispose()
-  spawned.beard.connection.close()
+  try {
+    spawned.beard.terminal.dispose()
+  } catch {
+    /* still kill the grok process */
+  }
+  try {
+    spawned.beard.connection.close()
+  } catch {
+    /* still kill the grok process */
+  }
   spawned.child.kill()
 }

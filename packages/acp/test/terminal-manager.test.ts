@@ -1,6 +1,8 @@
 import { RequestError } from "@agentclientprotocol/sdk"
 import { expect, it } from "@effect/vitest"
+import { existsSync, readFileSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   ChildProcessTerminalManager,
   MemoryTerminalManager,
@@ -120,6 +122,63 @@ it("SIGKILLs a child that ignores SIGTERM so wait_for_exit cannot hang", async (
   expect(Date.now() - started).toBeLessThan(2000)
   expect(exit.signal === "SIGKILL" || exit.exitCode === null || exit.exitCode !== 0).toBe(true)
   terminal.release(created.terminalId)
+})
+
+it("dispose after release of a running child does not throw or leak", async () => {
+  const terminal = new ChildProcessTerminalManager({
+    cwd: tmpdir(),
+    termGraceMs: 40,
+    killGraceMs: 40,
+  })
+  const pidFile = join(tmpdir(), `beard-term-${process.pid}-${Date.now()}.pid`)
+  const created = terminal.create({
+    sessionId: "s",
+    command: process.execPath,
+    args: [
+      "-e",
+      `require("node:fs").writeFileSync(${
+        JSON.stringify(pidFile)
+      }, String(process.pid)); setInterval(() => {}, 1000)`,
+    ],
+  })
+  const pid = await new Promise<number>((resolve, reject) => {
+    const started = Date.now()
+    const poll = () => {
+      try {
+        if (existsSync(pidFile)) {
+          resolve(Number(readFileSync(pidFile, "utf8")))
+          return
+        }
+      } catch {
+        /* retry */
+      }
+      if (Date.now() - started > 2000) reject(new Error("child did not write pid"))
+      else setTimeout(poll, 20)
+    }
+    poll()
+  })
+  terminal.release(created.terminalId)
+  expect(() => terminal.output(created.terminalId)).toThrow(RequestError)
+  expect(() => terminal.dispose()).not.toThrow()
+  const dead = await new Promise<boolean>((resolve) => {
+    const started = Date.now()
+    const poll = () => {
+      try {
+        process.kill(pid, 0)
+        if (Date.now() - started > 2000) resolve(false)
+        else setTimeout(poll, 20)
+      } catch {
+        resolve(true)
+      }
+    }
+    poll()
+  })
+  expect(dead).toBe(true)
+  try {
+    unlinkSync(pidFile)
+  } catch {
+    /* ignore */
+  }
 })
 
 it("kills a bash -c grandchild when tearing down the process group", async () => {

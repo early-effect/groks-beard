@@ -1,2 +1,5 @@
 export * from "./cli-locator.js"
 export * from "./session-fs.js"
+export * from "./composer.js"
+export * from "./empty-sessions.js"
+export * from "./onboarding.js"

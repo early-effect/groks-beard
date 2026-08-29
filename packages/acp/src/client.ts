@@ -1,4 +1,9 @@
-import { client, type ClientConnection, type ClientContext } from "@agentclientprotocol/sdk"
+import {
+  client,
+  type AnyMessage,
+  type ClientConnection,
+  type ClientContext
+} from "@agentclientprotocol/sdk"
 import { Effect } from "effect"
 import { AcpError } from "@groks-beard/core"
 import { initializeParams, type CapabilityPolicy } from "./capabilities.js"
@@ -15,6 +20,7 @@ export type BeardAcp = {
 
 export const connectBeardAcp = (handlers: {
   readonly fake?: FakeGrokAgent
+  readonly onOutgoing?: (message: AnyMessage) => void
   readonly onTerminalCreate?: (command: string, state: SessionState) => void
   readonly onPermission?: (params: unknown) => {
     outcome: { outcome: "selected"; optionId: string } | { outcome: "cancelled" }
@@ -24,6 +30,7 @@ export const connectBeardAcp = (handlers: {
   let feedFromAgent: (bytes: Uint8Array) => void = () => undefined
   const transport = createFramedTransport(state, {
     onOutgoing: (message) => {
+      handlers.onOutgoing?.(message)
       if (handlers.fake === undefined) return
       const bytes = handlers.fake.encodeReplies(message)
       if (bytes.byteLength > 0) feedFromAgent(bytes)

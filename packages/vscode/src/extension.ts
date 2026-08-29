@@ -1,13 +1,100 @@
 import * as vscode from "vscode"
 import { Layer, ManagedRuntime } from "effect"
+import { existsSync } from "node:fs"
+import { chipFromFile, chipFromSelection, CliNotFound, formatAtRef } from "@groks-beard/core"
+import { ComposerState } from "./composer.js"
+import { locateGrokCli } from "./cli-locator.js"
+import { missingCliMessage } from "./onboarding.js"
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | undefined
+const composer = new ComposerState()
+
+const workspaceRoot = (): string | undefined =>
+  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+
+const activeChip = () => {
+  const editor = vscode.window.activeTextEditor
+  if (editor === undefined) return undefined
+  const sel = editor.selection
+  const absPath = editor.document.uri.fsPath
+  const root = workspaceRoot()
+  const languageId = editor.document.languageId
+  if (sel.isEmpty) {
+    return chipFromFile({
+      absPath,
+      source: "active",
+      ...(root !== undefined ? { workspaceRoot: root } : {}),
+      ...(languageId !== "" ? { languageId } : {})
+    })
+  }
+  return chipFromSelection({
+    absPath,
+    startLine: sel.start.line + 1,
+    endLine: sel.end.line + 1,
+    ...(root !== undefined ? { workspaceRoot: root } : {}),
+    ...(languageId !== "" ? { languageId } : {})
+  })
+}
 
 export const activate = (context: vscode.ExtensionContext): void => {
   runtime = ManagedRuntime.make(Layer.empty)
   context.subscriptions.push(
     vscode.commands.registerCommand("groksBeard.open", () => {
-      void vscode.window.showInformationMessage("Grok's Beard: chat host is not wired yet.")
+      const rt = runtime
+      if (rt === undefined) return
+      const cliPath = vscode.workspace.getConfiguration("groksBeard").get<string>("cliPath") ?? ""
+      void rt.runPromise(locateGrokCli({
+        ...(cliPath !== "" ? { cliPath } : {}),
+        env: process.env as Record<string, string | undefined>,
+        exists: existsSync,
+        win: process.platform === "win32"
+      })).then(
+        () => {
+          void vscode.window.showInformationMessage(
+            "Grok's Beard is ready. Use Add Selection to attach @path:lines."
+          )
+        },
+        (error: unknown) => {
+          const searched = error instanceof CliNotFound ? error.searched : ["PATH"]
+          void vscode.window.showErrorMessage(missingCliMessage(searched))
+        }
+      )
+    }),
+    vscode.commands.registerCommand("groksBeard.addSelection", () => {
+      const chip = activeChip()
+      if (chip === undefined) {
+        void vscode.window.showWarningMessage("No active editor.")
+        return
+      }
+      composer.addChip(chip)
+      composer.setPendingSelection(chip)
+      void vscode.window.showInformationMessage(`Added ${formatAtRef(chip)}`)
+    }),
+    vscode.commands.registerCommand("groksBeard.addFile", () => {
+      const editor = vscode.window.activeTextEditor
+      if (editor === undefined) {
+        void vscode.window.showWarningMessage("No active editor.")
+        return
+      }
+      const root = workspaceRoot()
+      const languageId = editor.document.languageId
+      const chip = chipFromFile({
+        absPath: editor.document.uri.fsPath,
+        source: "file",
+        ...(root !== undefined ? { workspaceRoot: root } : {}),
+        ...(languageId !== "" ? { languageId } : {})
+      })
+      composer.addChip(chip)
+      void vscode.window.showInformationMessage(`Added ${formatAtRef(chip)}`)
+    }),
+    vscode.commands.registerCommand("groksBeard.copySelectionAsGrokRef", async () => {
+      const chip = activeChip()
+      if (chip === undefined) {
+        void vscode.window.showWarningMessage("No active editor.")
+        return
+      }
+      composer.setPendingSelection(chip)
+      await vscode.env.clipboard.writeText(formatAtRef(chip))
     })
   )
 }

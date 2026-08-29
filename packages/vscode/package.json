@@ -15,8 +15,40 @@
       {
         "command": "groksBeard.open",
         "title": "Grok's Beard: Open"
+      },
+      {
+        "command": "groksBeard.addSelection",
+        "title": "Grok's Beard: Add Selection to Chat"
+      },
+      {
+        "command": "groksBeard.addFile",
+        "title": "Grok's Beard: Add File to Chat"
+      },
+      {
+        "command": "groksBeard.copySelectionAsGrokRef",
+        "title": "Grok's Beard: Copy Selection as Grok @ ref"
       }
     ],
+    "configuration": {
+      "title": "Grok's Beard",
+      "properties": {
+        "groksBeard.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the grok binary. Empty means auto-discover."
+        },
+        "groksBeard.includeActiveFileByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Attach the active editor as an @path chip when sending with no other chips."
+        },
+        "groksBeard.useCtrlEnterToSend": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, Enter inserts a newline and Ctrl/Cmd+Enter sends."
+        }
+      }
+    },
     "keybindings": [
       {
         "command": "groksBeard.open",

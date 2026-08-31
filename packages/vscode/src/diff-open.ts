@@ -16,15 +16,15 @@ export const hasChangesCommand = (commands: ReadonlyArray<string>): boolean =>
 export const planDiffOpen = (
   hasMultiDiff: boolean,
   title: string,
-  paths: ReadonlyArray<string>
+  paths: ReadonlyArray<string>,
 ): DiffOpenPlan => ({
   mode: hasMultiDiff ? "multi" : "pairwise",
   title,
   files: paths.map((path) => ({
     path,
     original: virtualDocRef(ORIGINAL_SCHEME, path),
-    proposed: virtualDocRef(PROPOSED_SCHEME, path)
-  }))
+    proposed: virtualDocRef(PROPOSED_SCHEME, path),
+  })),
 })
 
 export const diffTitle = (base: string, wholeFile: boolean): string =>

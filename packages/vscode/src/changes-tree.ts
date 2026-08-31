@@ -37,6 +37,22 @@ export const parseChangesNode = (id: string): ChangesNode | undefined => {
   return undefined
 }
 
+export const findPendingFile = (
+  store: ChangeStore,
+  absPath: string,
+): Extract<ChangesNode, { type: "file" }> | undefined => {
+  const normalize = (path: string) => path.replace(/\\/g, "/")
+  const want = normalize(absPath)
+  for (const set of store.list()) {
+    for (const file of set.files) {
+      if (file.path === absPath || normalize(file.path) === want) {
+        return { type: "file", sessionId: set.sessionId, turnId: set.turnId, path: file.path }
+      }
+    }
+  }
+  return undefined
+}
+
 const fileName = (path: string): string => {
   const parts = path.split(/[\\/]/)
   return parts[parts.length - 1] ?? path

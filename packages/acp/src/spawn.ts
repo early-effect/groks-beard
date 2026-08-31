@@ -5,6 +5,9 @@ import type { TerminalManager } from "./terminal-manager.js"
 
 export const GROK_AGENT_STDIO_ARGS = ["agent", "stdio"] as const
 
+export const grokAgentStdioArgs = (trustFolder = false): ReadonlyArray<string> =>
+  trustFolder ? ["--trust", ...GROK_AGENT_STDIO_ARGS] : GROK_AGENT_STDIO_ARGS
+
 export const assertNoYoloArgs = (args: ReadonlyArray<string>): boolean =>
   !args.includes("--always-approve") && !args.includes("--yolo") && !args.includes("--no-leader")
 
@@ -19,6 +22,7 @@ export const spawnGrokAgentStdio = (input: {
   readonly env?: NodeJS.ProcessEnv
   readonly args?: ReadonlyArray<string>
   readonly onSessionUpdate?: BeardClientHandlers["onSessionUpdate"]
+  readonly onMcpCatalogChanged?: BeardClientHandlers["onMcpCatalogChanged"]
   readonly onPermission?: BeardClientHandlers["onPermission"]
   readonly onTerminalCreate?: BeardClientHandlers["onTerminalCreate"]
   readonly onExitPlanMode?: BeardClientHandlers["onExitPlanMode"]
@@ -37,6 +41,9 @@ export const spawnGrokAgentStdio = (input: {
       child.stdin.write(encodeNdjson(message))
     },
     ...(input.onSessionUpdate !== undefined ? { onSessionUpdate: input.onSessionUpdate } : {}),
+    ...(input.onMcpCatalogChanged !== undefined
+      ? { onMcpCatalogChanged: input.onMcpCatalogChanged }
+      : {}),
     ...(input.onPermission !== undefined ? { onPermission: input.onPermission } : {}),
     ...(input.onTerminalCreate !== undefined ? { onTerminalCreate: input.onTerminalCreate } : {}),
     ...(input.onExitPlanMode !== undefined ? { onExitPlanMode: input.onExitPlanMode } : {}),

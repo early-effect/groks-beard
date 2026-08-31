@@ -1,5 +1,5 @@
-import { Effect } from "effect"
 import { CliNotFound, grokHome } from "@groks-beard/core"
+import { Effect } from "effect"
 
 export type LocateGrokInput = {
   readonly cliPath?: string
@@ -8,12 +8,14 @@ export type LocateGrokInput = {
   readonly win?: boolean
 }
 
-const join = (dir: string, name: string): string =>
-  `${dir.replace(/[\\/]+$/, "")}/${name}`
+const join = (dir: string, name: string): string => `${dir.replace(/[\\/]+$/, "")}/${name}`
 
 export const grokBinaryName = (win: boolean): string => (win ? "grok.exe" : "grok")
 
-export const resolveSpawnTarget = (candidate: string, exists: (path: string) => boolean): string => {
+export const resolveSpawnTarget = (
+  candidate: string,
+  exists: (path: string) => boolean,
+): string => {
   if (/\.(cmd|bat)$/i.test(candidate)) {
     const exe = candidate.replace(/\.(cmd|bat)$/i, ".exe")
     if (exists(exe)) return exe

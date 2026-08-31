@@ -50,6 +50,62 @@ const harness = () => {
   return { review, store, docs, opened, followed, warnings, disk }
 }
 
+it("does not follow or store edits outside the workspace", () => {
+  const files = new Map<string, string>()
+  let index: unknown = []
+  const store = new ChangeStore({
+    storageRoot: "/store",
+    now: () => 1,
+    join: (...parts) => parts.join("/"),
+    loadIndex: () => index,
+    saveIndex: (next) => {
+      index = next
+    },
+    inWorkspace: (path) => path.startsWith("/repo/"),
+    fs: {
+      read: (path) => files.get(path),
+      write: (path, text) => {
+        files.set(path, text)
+      },
+      remove: (path) => {
+        files.delete(path)
+      },
+      mkdirp: () => undefined,
+    },
+  })
+  const docs = new BeardDocStore()
+  const followed: Array<FollowAlongPlan> = []
+  const review = new ReviewHost(docs, store, {
+    readDisk: () => undefined,
+    hasChangesCommand: async () => true,
+    openDiffs: async () => undefined,
+    follow: (plan) => {
+      followed.push(plan)
+    },
+    warn: () => undefined,
+    activeScheme: () => undefined,
+    inDiffEditor: () => false,
+    inWorkspace: (path) => path.startsWith("/repo/"),
+  })
+  review.ingestUpdate({
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "c1",
+      kind: "edit",
+      status: "completed",
+      locations: [{ path: "/tmp/groks-beard-plan.md" }],
+      content: [{
+        type: "diff",
+        path: "/tmp/groks-beard-plan.md",
+        oldText: "",
+        newText: "# Plan\n",
+      }],
+    },
+  }, { sessionId: "s1", turnId: "turn_1", title: "plan" })
+  expect(store.pendingSummary().fileCount).toBe(0)
+  expect(followed).toEqual([])
+})
+
 it("opens a reconstructed multi-diff without resolving permission", async () => {
   const { review, opened, docs } = harness()
   review.setTurn("sess", "turn_1", "fix it")
@@ -96,6 +152,23 @@ it("falls back to pairwise diff when vscode.changes is missing", async () => {
   })
   await review.openPermissionDiff("perm-1")
   expect(opened[0]?.mode).toBe("pairwise")
+})
+
+it("does not open the editor for a read tool with locations", () => {
+  const { review, followed } = harness()
+  review.setTurn("sess", "turn_1", "look")
+  review.ingestUpdate({
+    sessionId: "sess",
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "c-read",
+      kind: "read",
+      status: "completed",
+      locations: [{ path: "/tmp/a.ts", line: 1 }],
+      title: "Read `/tmp/a.ts`",
+    },
+  }, { sessionId: "sess", turnId: "turn_1", title: "look" })
+  expect(followed).toEqual([])
 })
 
 it("fills Changes from a completed always-approve tool_call", () => {

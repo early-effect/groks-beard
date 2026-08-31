@@ -3,7 +3,9 @@ import {
   CurrentModeUpdate,
   decodeSessionUpdate,
   modeIdFromUpdate,
+  occupancyFromUnknown,
   textFromContent,
+  toolPayloadText,
   UnknownUpdate,
   UsageUpdate,
 } from "../src/session-update.ts"
@@ -44,4 +46,28 @@ it("decodes usage_update occupancy", () => {
     size: 128000,
   })
   expect(update).toBeInstanceOf(UsageUpdate)
+})
+
+it("formats tool payloads as text or pretty JSON", () => {
+  expect(toolPayloadText({ query: "metals", limit: 20 })).toContain('"query": "metals"')
+  expect(toolPayloadText([{ type: "content", content: { type: "text", text: "out" } }])).toBe("out")
+  expect(toolPayloadText({})).toBe("")
+})
+
+it("reads occupancy from used/size or nested usage", () => {
+  expect(occupancyFromUnknown({ used: 12, size: 100 })).toEqual({ used: 12, size: 100 })
+  expect(occupancyFromUnknown({ usage: { inputTokens: 20, context_window: 500 } })).toEqual({
+    used: 20,
+    size: 500,
+  })
+  expect(occupancyFromUnknown({ used: 10 }, 256)).toEqual({ used: 10, size: 256 })
+  expect(occupancyFromUnknown({
+    _meta: { totalTokens: 29183 },
+  }, 500000)).toEqual({ used: 29183, size: 500000 })
+  expect(occupancyFromUnknown({
+    update: {
+      sessionUpdate: "turn_completed",
+      usage: { inputTokens: 28559, totalTokens: 28776 },
+    },
+  }, 500000)).toEqual({ used: 28559, size: 500000 })
 })

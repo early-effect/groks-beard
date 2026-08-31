@@ -7,5 +7,5 @@ export const isJsonRpcRequest = (message: AnyMessage): message is AnyRequest =>
   "method" in message && "id" in message
 
 export const isSuccessResponse = (
-  message: AnyResponse
+  message: AnyResponse,
 ): message is AnyResponse & { result: unknown } => "result" in message

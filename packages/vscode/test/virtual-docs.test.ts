@@ -1,5 +1,10 @@
 import { expect, it } from "@effect/vitest"
-import { BeardDocStore, ORIGINAL_SCHEME, PROPOSED_SCHEME } from "../src/virtual-docs.ts"
+import {
+  BeardDocStore,
+  filePathFromEditorUri,
+  ORIGINAL_SCHEME,
+  PROPOSED_SCHEME,
+} from "../src/virtual-docs.ts"
 
 it("serves original and proposed bodies by absolute path", () => {
   const docs = new BeardDocStore()
@@ -7,6 +12,24 @@ it("serves original and proposed bodies by absolute path", () => {
   expect(docs.get(ORIGINAL_SCHEME, "/tmp/a.ts")).toBe("old")
   expect(docs.get(PROPOSED_SCHEME, "/tmp/a.ts")).toBe("new")
   expect(docs.get(ORIGINAL_SCHEME, "/missing.ts")).toBe("")
+})
+
+it("reads the real path from a beard virtual diff URI", () => {
+  expect(filePathFromEditorUri({
+    scheme: PROPOSED_SCHEME,
+    path: "/tmp/a.ts",
+    fsPath: "/tmp/a.ts",
+  })).toBe("/tmp/a.ts")
+  expect(filePathFromEditorUri({
+    scheme: ORIGINAL_SCHEME,
+    path: "/C:/Users/a.ts",
+    fsPath: "C:\\Users\\a.ts",
+  })).toBe("C:/Users/a.ts")
+  expect(filePathFromEditorUri({
+    scheme: "file",
+    path: "/tmp/a.ts",
+    fsPath: "/tmp/a.ts",
+  })).toBe("/tmp/a.ts")
 })
 
 it("normalizes backslashes so Windows paths still hit", () => {

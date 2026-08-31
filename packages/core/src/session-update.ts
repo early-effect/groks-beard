@@ -72,6 +72,11 @@ export class UsageUpdate extends Schema.Class<UsageUpdate>("UsageUpdate")({
   size: Schema.optionalKey(Schema.Number),
 }) {}
 
+export class ConfigOptionUpdate extends Schema.Class<ConfigOptionUpdate>("ConfigOptionUpdate")({
+  sessionUpdate: Schema.Literal("config_option_update"),
+  configOptions: Schema.optionalKey(Schema.Unknown),
+}) {}
+
 export const KnownSessionUpdate = Schema.Union([
   AgentMessageChunk,
   AgentThoughtChunk,
@@ -81,6 +86,7 @@ export const KnownSessionUpdate = Schema.Union([
   AvailableCommandsUpdate,
   PlanUpdate,
   UsageUpdate,
+  ConfigOptionUpdate,
 ])
 
 export type SessionUpdate = typeof KnownSessionUpdate.Type | UnknownUpdate
@@ -101,6 +107,20 @@ export const textFromContent = (content: unknown): string => {
   return ""
 }
 
+export const toolPayloadText = (value: unknown): string => {
+  if (value === undefined || value === null) return ""
+  if (typeof value === "string") return value
+  const fromContent = textFromContent(value)
+  if (fromContent !== "") return fromContent
+  if (typeof value !== "object") return String(value)
+  try {
+    const json = JSON.stringify(value, null, 2)
+    return json === "{}" || json === "[]" || json === "null" ? "" : json
+  } catch {
+    return ""
+  }
+}
+
 export const sessionIdFromParams = (params: unknown): string | undefined => {
   if (!isRecord(params)) return undefined
   return typeof params.sessionId === "string" ? params.sessionId : undefined
@@ -109,6 +129,57 @@ export const sessionIdFromParams = (params: unknown): string | undefined => {
 export const updateFromParams = (params: unknown): unknown => {
   if (!isRecord(params)) return params
   return params.update !== undefined ? params.update : params
+}
+
+const numberish = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === "string" && value !== "") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return undefined
+}
+
+export const CONTEXT_WINDOWS: Record<string, number> = {
+  "grok-4.6": 500_000,
+  "grok-4.5": 256_000,
+}
+
+export const contextWindowFor = (
+  modelId: string | undefined,
+  advertised?: number,
+): number | undefined => {
+  if (advertised !== undefined && advertised > 0) return advertised
+  if (modelId !== undefined && CONTEXT_WINDOWS[modelId] !== undefined) {
+    return CONTEXT_WINDOWS[modelId]
+  }
+  return undefined
+}
+
+export const occupancyFromUnknown = (
+  value: unknown,
+  window?: number,
+): { used: number; size: number } | undefined => {
+  if (!isRecord(value)) return undefined
+  if (isRecord(value.usage)) {
+    const nested = occupancyFromUnknown(value.usage, window)
+    if (nested !== undefined) return nested
+  }
+  if (isRecord(value._meta)) {
+    const nested = occupancyFromUnknown(value._meta, window)
+    if (nested !== undefined) return nested
+  }
+  if (isRecord(value.update)) {
+    const nested = occupancyFromUnknown(value.update, window)
+    if (nested !== undefined) return nested
+  }
+  const used = numberish(value.used) ?? numberish(value.usedTokens)
+    ?? numberish(value.tokens_used) ?? numberish(value.context_used)
+    ?? numberish(value.inputTokens) ?? numberish(value.totalTokens)
+  const size = numberish(value.size) ?? numberish(value.maxTokens)
+    ?? numberish(value.context_window) ?? numberish(value.contextWindow) ?? window
+  if (used === undefined || size === undefined || size === 0) return undefined
+  return { used, size }
 }
 
 export const decodeSessionUpdate = (input: unknown): SessionUpdate => {

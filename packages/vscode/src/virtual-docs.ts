@@ -11,11 +11,22 @@ export const docKey = (scheme: string, absPath: string): string =>
 
 export const virtualDocRef = (
   scheme: string,
-  absPath: string
+  absPath: string,
 ): { readonly scheme: string; readonly path: string } => ({
   scheme,
-  path: normalizeAbsPath(absPath)
+  path: normalizeAbsPath(absPath),
 })
+
+export const filePathFromEditorUri = (uri: {
+  readonly scheme: string
+  readonly path: string
+  readonly fsPath: string
+}): string => {
+  if (uri.scheme === ORIGINAL_SCHEME || uri.scheme === PROPOSED_SCHEME) {
+    return uri.path.match(/^\/[A-Za-z]:/) ? uri.path.slice(1) : uri.path
+  }
+  return uri.fsPath
+}
 
 export class BeardDocStore {
   private readonly bodies = new Map<string, string>()

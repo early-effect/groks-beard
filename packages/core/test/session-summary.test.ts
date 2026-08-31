@@ -7,7 +7,7 @@ it("decodes observed summary.json keys and strips extras", () => {
     generated_title: "Plan the beard",
     current_model_id: "grok-4.6",
     grok_home: "/Users/russ/.grok",
-    unexpected_future_field: "ok"
+    unexpected_future_field: "ok",
   })
   expect(summary.info.id).toBe("abc")
   expect(summary.generated_title).toBe("Plan the beard")
@@ -17,7 +17,7 @@ it("decodes observed summary.json keys and strips extras", () => {
 
 it("treats optional fields as absent, not required", () => {
   const summary = decodeSessionSummary({
-    info: { id: "x", cwd: "/r" }
+    info: { id: "x", cwd: "/r" },
   })
   expect(summary.title_is_manual).toBeUndefined()
   expect(summary.parent_session_id).toBeUndefined()

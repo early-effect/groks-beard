@@ -3,12 +3,18 @@ import { Schema } from "effect"
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import * as vscode from "vscode"
-import { CHANGE_INDEX_KEY, ChangeStore, type UndoApplyPorts } from "./change-store.js"
+import {
+  CHANGE_INDEX_KEY,
+  ChangeStore,
+  type UndoApplyPorts,
+  type UndoApplyResult,
+} from "./change-store.js"
 import type { DiffOpenPlan } from "./diff-open.js"
 import { detectDiffEditor, type FollowAlongPlan, schemesFromTabInput } from "./follow-along.js"
 import { gitHeadText } from "./path-diff.js"
 import { ReviewHost } from "./review-host.js"
 import { BeardDocStore, ORIGINAL_SCHEME, PROPOSED_SCHEME, virtualDocRef } from "./virtual-docs.js"
+import { isWorkspaceFilePath } from "./workspace-path.js"
 
 export class BeardContentProvider implements vscode.TextDocumentContentProvider {
   readonly onDidChange: vscode.Event<vscode.Uri>
@@ -77,6 +83,15 @@ const currentText = (path: string): string | undefined => {
   return readDiskText(path)
 }
 
+export const reportUndoResult = (result: UndoApplyResult): void => {
+  if (result.ok) return
+  if (result.cancelled === true) {
+    void vscode.window.showInformationMessage(`Undo cancelled for ${result.path}.`)
+    return
+  }
+  void vscode.window.showWarningMessage(`Undo stopped on ${result.path}: ${result.reason}`)
+}
+
 export const vscodeUndoPorts = (): UndoApplyPorts => ({
   readDisk: (path) => currentText(path),
   confirmDirty: async (path) => {
@@ -135,10 +150,14 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
     const message = cause instanceof Error ? cause.message : String(cause)
     void vscode.window.showWarningMessage(`Grok Changes storage is not writable: ${message}`)
   }
+  const workspaceRoots = (): ReadonlyArray<string> =>
+    (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
+  const inWorkspace = (path: string): boolean => isWorkspaceFilePath(path, workspaceRoots())
   const store = new ChangeStore({
     storageRoot,
     now: () => Date.now(),
     join,
+    inWorkspace,
     loadIndex: () => context.workspaceState.get(CHANGE_INDEX_KEY),
     saveIndex: (index) => {
       void context.workspaceState.update(CHANGE_INDEX_KEY, Schema.encodeSync(ChangeSetIndex)(index))
@@ -174,6 +193,7 @@ export const createReviewHost = (context: vscode.ExtensionContext): {
     warn: (message) => {
       void vscode.window.showWarningMessage(message)
     },
+    inWorkspace,
     gitHead: (path) => {
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
       if (root === undefined) return undefined

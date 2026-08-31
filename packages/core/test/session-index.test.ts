@@ -4,12 +4,12 @@ import {
   encodeCwd,
   encodedCwdExceedsLimit,
   grokHome,
-  indexSessions
+  indexSessions,
 } from "../src/session-index.ts"
 
 it("encodes cwd the way Grok groups sessions", () => {
   expect(encodeCwd("/Users/russ/projects/fun/groks-beard")).toBe(
-    "%2FUsers%2Fruss%2Fprojects%2Ffun%2Fgroks-beard"
+    "%2FUsers%2Fruss%2Fprojects%2Ffun%2Fgroks-beard",
   )
 })
 
@@ -28,7 +28,7 @@ it("orders sessions by updates.jsonl mtime, not id", () => {
   const ordered = indexSessions([
     { id: "old-uuid", updatesMtimeMs: 1 },
     { id: "new-uuid", updatesMtimeMs: 9 },
-    { id: "no-updates", summaryMtimeMs: 5 }
+    { id: "no-updates", summaryMtimeMs: 5 },
   ])
   expect(ordered.map((row) => row.id)).toEqual(["new-uuid", "no-updates", "old-uuid"])
   expect(compareSessionActivity(ordered[0]!, ordered[1]!)).toBeLessThan(0)

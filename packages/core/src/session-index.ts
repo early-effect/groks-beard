@@ -29,11 +29,11 @@ export const compareSessionActivity = (a: SessionActivityStat, b: SessionActivit
   statSessionActivity(b) - statSessionActivity(a)
 
 export const indexSessions = (
-  stats: ReadonlyArray<SessionActivityStat>
+  stats: ReadonlyArray<SessionActivityStat>,
 ): ReadonlyArray<SessionActivityStat> => [...stats].sort(compareSessionActivity)
 
 export const pageSessionIds = (
   ordered: ReadonlyArray<SessionActivityStat>,
   offset: number,
-  limit: number = SESSION_PAGE_SIZE
+  limit: number = SESSION_PAGE_SIZE,
 ): ReadonlyArray<string> => ordered.slice(offset, offset + limit).map((row) => row.id)

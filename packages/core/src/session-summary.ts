@@ -2,7 +2,7 @@ import { Schema } from "effect"
 
 export class SessionInfo extends Schema.Class<SessionInfo>("SessionInfo")({
   id: Schema.String,
-  cwd: Schema.String
+  cwd: Schema.String,
 }) {}
 
 export class SessionSummary extends Schema.Class<SessionSummary>("SessionSummary")({
@@ -22,7 +22,7 @@ export class SessionSummary extends Schema.Class<SessionSummary>("SessionSummary
   last_recap: Schema.optionalKey(Schema.String),
   sandbox_profile: Schema.optionalKey(Schema.String),
   reasoning_effort: Schema.optionalKey(Schema.String),
-  grok_home: Schema.optionalKey(Schema.String)
+  grok_home: Schema.optionalKey(Schema.String),
 }) {}
 
 export const decodeSessionSummary = Schema.decodeUnknownSync(SessionSummary)

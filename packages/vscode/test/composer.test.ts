@@ -9,7 +9,7 @@ it("accumulates selection chips into a TUI prompt", () => {
     absPath: "/repo/src/Foo.scala",
     workspaceRoot: "/repo",
     startLine: 10,
-    endLine: 50
+    endLine: 50,
   }))
   expect(composer.promptText("fix this", false)).toBe("@src/Foo.scala:10-50\n\nfix this")
 })
@@ -20,7 +20,7 @@ it("copies a pending selection @ ref", () => {
     absPath: "/repo/a.ts",
     workspaceRoot: "/repo",
     startLine: 1,
-    endLine: 2
+    endLine: 2,
   })
   composer.setPendingSelection(chip)
   expect(composer.pendingSelection?.path).toBe("a.ts")

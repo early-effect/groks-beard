@@ -32,6 +32,7 @@ export type BeardClientHandlers = {
     requestId: string,
   ) => PermissionOutcome | Promise<PermissionOutcome>
   readonly onSessionUpdate?: (params: unknown) => void
+  readonly onMcpCatalogChanged?: () => void
   readonly onExitPlanMode?: (
     params: unknown,
     requestId: string,
@@ -134,6 +135,18 @@ export const connectBeardAcp = (handlers: BeardClientHandlers = {}): BeardAcp =>
     )
     .onNotification("session/update", (ctx) => {
       handlers.onSessionUpdate?.(ctx.params)
+    })
+    .onNotification("_x.ai/session/update", (params: unknown) => params, (ctx) => {
+      handlers.onSessionUpdate?.(ctx.params)
+    })
+    .onNotification("_x.ai/mcp_initialized", (_params: unknown) => _params, () => {
+      handlers.onMcpCatalogChanged?.()
+    })
+    .onNotification("_x.ai/mcp/servers_updated", (_params: unknown) => _params, () => {
+      handlers.onMcpCatalogChanged?.()
+    })
+    .onNotification("_x.ai/mcp/tools_changed", (_params: unknown) => _params, () => {
+      handlers.onMcpCatalogChanged?.()
     })
   const connection = app.connect(transport.stream)
   return { connection, agent: connection.agent, transport, state, terminal }

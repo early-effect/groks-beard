@@ -17,7 +17,7 @@ import {
   type UndoApplyResult,
 } from "./change-store.js"
 import { type DiffOpenPlan, diffTitle, planDiffOpen } from "./diff-open.js"
-import { type FollowAlongPlan, planFollowAlong } from "./follow-along.js"
+import { type FollowAlongPlan, planFollowAlong, shouldFollowAlong } from "./follow-along.js"
 import { NO_BEARD_SNAPSHOT_NOTICE, resolvePathDiff } from "./path-diff.js"
 import { BeardDocStore } from "./virtual-docs.js"
 
@@ -30,6 +30,7 @@ export type ReviewHostPorts = {
   readonly activeScheme: () => string | undefined
   readonly inDiffEditor: () => boolean
   readonly gitHead?: (path: string) => string | undefined
+  readonly inWorkspace?: (path: string) => boolean
 }
 
 export class ReviewHost {
@@ -44,6 +45,10 @@ export class ReviewHost {
     private readonly ports: ReviewHostPorts,
   ) {}
 
+  private keepPath(path: string): boolean {
+    return this.ports.inWorkspace?.(path) ?? true
+  }
+
   rememberPermission(requestId: string, params: unknown): void {
     this.permissions.set(requestId, params)
     const toolCall = toolCallFromPermissionParams(params)
@@ -52,7 +57,7 @@ export class ReviewHost {
       toolCall,
       diskText: this.ports.readDisk,
       diskIsBefore: true,
-    })
+    }).filter((diff) => this.keepPath(diff.path))
     this.stageDocs(diffs)
     if (sessionId !== "") {
       this.store.ingestReconstructed({
@@ -125,9 +130,13 @@ export class ReviewHost {
     const decoded = decodeSessionUpdate(updateFromParams(params))
     if (!(decoded instanceof ToolCallUpdate)) return
     const extracted = diffsFromToolCall(decoded)
-    if (extracted.locations.length > 0) {
+    const locations = extracted.locations.filter((location) => this.keepPath(location.path))
+    if (
+      locations.length > 0
+      && shouldFollowAlong(extracted.kind, { hasDiffs: extracted.diffs.length > 0 })
+    ) {
       const scheme = this.ports.activeScheme()
-      this.ports.follow(planFollowAlong(extracted.locations, {
+      this.ports.follow(planFollowAlong(locations, {
         inDiffEditor: this.ports.inDiffEditor(),
         ...(scheme !== undefined ? { scheme } : {}),
       }))

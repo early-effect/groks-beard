@@ -1,0 +1,53 @@
+import { expect, it } from "@effect/vitest"
+import { chatHtml } from "../src/chat-html.ts"
+
+it("embeds composer chrome and the logo into the chat document", () => {
+  const html = chatHtml({
+    cspSource: "https://example.vscode-cdn.net",
+    scriptUri: "https://example.vscode-cdn.net/chat.js",
+    logoUri: "https://example.vscode-cdn.net/logo.png",
+    ctrlEnterToSend: false,
+  })
+  expect(html).toContain('data-logo="https://example.vscode-cdn.net/logo.png"')
+  expect(html).toContain(".empty-logo")
+  expect(html).toContain("width: 132px")
+  expect(html).toContain(".composer-bar")
+  expect(html).toContain(".toast")
+  expect(html).toContain(".toast-add")
+  expect(html).toContain(".toast-del")
+  expect(html).toContain(".toast-keep")
+  expect(html).toContain(".settings-panel")
+  expect(html).toContain(".json-btn")
+  expect(html).toContain(".mcp-trust")
+  expect(html).toContain(".occupancy-track")
+  expect(html).toContain(".queued-now")
+  expect(html).toContain(".tool-more")
+  expect(html).toContain(".tool-rollup")
+  expect(html).toContain(".tool-stream")
+  expect(html).toContain(".mcp-actions")
+  expect(html).toContain(".mcp-tool-list")
+  expect(html).toContain(".mode-chip")
+  expect(html).toContain(".model-menu")
+  expect(html).toContain(".model-effort")
+  expect(html).toContain(".menu-sub")
+  expect(html).toContain(".editor-context")
+  expect(html).toContain(".add-selection")
+  expect(html).toContain(".mentions-empty")
+  expect(html).toContain(".mentions li.selected")
+  expect(html).toContain(".composer-context")
+  expect(html).toContain(".editor-path")
+  expect(html).toContain(".plan-open")
+  expect(html).toContain(".plan-approve")
+  expect(html).toContain(".plan-revise")
+  expect(html).toContain(".chip-kind")
+  expect(html).toContain(".chip-open")
+  expect(html).toContain(".chip-remove")
+  expect(html).toContain("--beard-cream")
+  expect(html).toContain(".send-btn")
+  expect(html).toContain(".stop-btn")
+  expect(html).toContain("--beard-orange")
+  expect(html).toContain("--beard-brown")
+  expect(html).toContain("--beard-black")
+  expect(html).not.toContain("charts-blue")
+  expect(html).not.toContain("button-background")
+})

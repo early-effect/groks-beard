@@ -7,6 +7,7 @@ export class PromptChip extends Schema.Class<PromptChip>("PromptChip")({
   startLine: Schema.optionalKey(Schema.Int),
   endLine: Schema.optionalKey(Schema.Int),
   languageId: Schema.optionalKey(Schema.String),
+  excerpt: Schema.optionalKey(Schema.String),
   source: Schema.Literals(["selection", "file", "active", "mention"]),
 }) {}
 
@@ -38,17 +39,19 @@ export const workspaceRelativePath = (absPath: string, workspaceRoot?: string): 
 export const chipFromSelection = (input: {
   readonly absPath: string
   readonly workspaceRoot?: string
-  readonly startLine: number
-  readonly endLine: number
+  readonly startLine?: number
+  readonly endLine?: number
   readonly languageId?: string
+  readonly excerpt?: string
 }): PromptChip =>
   new PromptChip({
     path: workspaceRelativePath(input.absPath, input.workspaceRoot),
     absPath: input.absPath,
-    startLine: input.startLine,
-    endLine: input.endLine,
     source: "selection",
+    ...(input.startLine !== undefined ? { startLine: input.startLine } : {}),
+    ...(input.endLine !== undefined ? { endLine: input.endLine } : {}),
     ...(input.languageId !== undefined ? { languageId: input.languageId } : {}),
+    ...(input.excerpt !== undefined && input.excerpt !== "" ? { excerpt: input.excerpt } : {}),
   })
 
 export const chipFromFile = (input: {
@@ -64,9 +67,30 @@ export const chipFromFile = (input: {
     ...(input.languageId !== undefined ? { languageId: input.languageId } : {}),
   })
 
+const fenceTicks = (text: string): string => {
+  let ticks = "```"
+  while (text.includes(ticks)) ticks += "`"
+  return ticks
+}
+
+const fenceLang = (chip: PromptChip): string => {
+  if (chip.languageId === undefined || chip.languageId === "") return ""
+  if (chip.languageId === "md") return "markdown"
+  return chip.languageId
+}
+
+export const formatChipBlock = (chip: PromptChip): string => {
+  const ref = formatAtRef(chip)
+  if (chip.excerpt === undefined || chip.excerpt === "") return ref
+  const body = truncateToByteCap(chip.excerpt)
+  const fence = fenceTicks(body)
+  const lang = fenceLang(chip)
+  return `${ref}\n\n${fence}${lang}\n${body}\n${fence}`
+}
+
 export const buildPromptText = (text: string, chips: ReadonlyArray<PromptChip>): string => {
-  const refs = chips.map(formatAtRef)
-  return [...refs, text].filter((part) => part.length > 0).join("\n\n")
+  const blocks = chips.map(formatChipBlock)
+  return [...blocks, text].filter((part) => part.length > 0).join("\n\n")
 }
 
 export const chipsForSend = (input: {

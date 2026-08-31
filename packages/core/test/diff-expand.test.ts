@@ -8,7 +8,7 @@ it("substitutes a region in the middle of a file at permission time", () => {
     diskText: disk,
     oldRegion: "old-token",
     newRegion: "new-token",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(true)
   expect(sides.oldText).toBe(disk)
@@ -22,7 +22,7 @@ it("treats empty oldRegion plus non-empty disk as a whole-file write", () => {
     diskText: disk,
     oldRegion: "",
     newRegion: "replaced",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(true)
   expect(sides.oldText).toBe(disk)
@@ -34,7 +34,7 @@ it("falls back to region-only when the file is missing", () => {
     diskText: undefined,
     oldRegion: "old",
     newRegion: "new",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(false)
   expect(sides.oldText).toBe("old")
@@ -46,7 +46,7 @@ it("treats a missing disk plus empty oldRegion as a new file", () => {
     diskText: undefined,
     oldRegion: "",
     newRegion: "hello",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(true)
   expect(sides.oldText).toBe("")
@@ -59,7 +59,7 @@ it("falls back to region-only when the file is oversize", () => {
     diskText: disk,
     oldRegion: "x",
     newRegion: "y",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(false)
 })
@@ -70,7 +70,7 @@ it("does not manufacture a CRLF diff when the region arrived with LF", () => {
     diskText: disk,
     oldRegion: "old",
     newRegion: "new",
-    diskIsBefore: true
+    diskIsBefore: true,
   })
   expect(sides.wholeFile).toBe(true)
   expect(sides.newText).toContain("\r\n")
@@ -84,7 +84,7 @@ it("replaceAll substitutes every match", () => {
     oldRegion: "foo",
     newRegion: "baz",
     diskIsBefore: true,
-    replaceAll: true
+    replaceAll: true,
   })
   expect(sides.newText).toBe("baz bar baz")
 })
@@ -95,7 +95,7 @@ it("recovers the original from a post-write disk", () => {
     diskText: disk,
     oldRegion: "old-token",
     newRegion: "new-token",
-    diskIsBefore: false
+    diskIsBefore: false,
   })
   expect(sides.oldText).toBe("aaa\nold-token\nccc\n")
   expect(sides.newText).toBe(disk)
@@ -112,16 +112,16 @@ it("permission-time expansion is invertible via the post-write path", () => {
           diskText: disk,
           oldRegion: "OLD",
           newRegion: "NEW",
-          diskIsBefore: true
+          diskIsBefore: true,
         })
         const after = expandDiffToWholeFile({
           diskText: before.newText,
           oldRegion: "OLD",
           newRegion: "NEW",
-          diskIsBefore: false
+          diskIsBefore: false,
         })
         return after.oldText === disk && after.newText === before.newText
-      }
-    )
+      },
+    ),
   )
 })

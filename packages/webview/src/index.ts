@@ -1,4 +1,6 @@
+export * from "./chrome.js"
 export * from "./markdown.js"
+export * from "./mentions.js"
 export * from "./model.js"
 export * from "./slash.js"
 export * from "./thinking.js"

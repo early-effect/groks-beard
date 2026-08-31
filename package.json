@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc -b && pnpm --filter @groks-beard/webview bundle",
+    "pack:vscode": "pnpm build && node packages/vscode/scripts/pack.mjs",
     "test": "pnpm --filter @groks-beard/core test && pnpm --filter @groks-beard/acp test && pnpm --filter @groks-beard/mcp test && pnpm --filter @groks-beard/webview test && pnpm --filter @groks-beard/vscode test",
     "typecheck": "tsc -b"
   },

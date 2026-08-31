@@ -32,7 +32,7 @@ const isProtected = (member: PoolMember): boolean =>
 export const selectReapable = (
   members: ReadonlyArray<PoolMember>,
   now: number,
-  options: { readonly idleTtlMs?: number; readonly lruCap?: number } = {}
+  options: { readonly idleTtlMs?: number; readonly lruCap?: number } = {},
 ): ReadonlyArray<string> => {
   const idleTtlMs = options.idleTtlMs ?? IDLE_TTL_MS
   const lruCap = options.lruCap ?? LRU_CAP

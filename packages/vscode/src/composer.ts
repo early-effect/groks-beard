@@ -4,7 +4,7 @@ import {
   chipFromSelection,
   chipsForSend,
   formatAtRef,
-  type PromptChip
+  type PromptChip,
 } from "@groks-beard/core"
 
 export class ComposerState {
@@ -12,9 +12,12 @@ export class ComposerState {
   pendingSelection: PromptChip | undefined
 
   addChip(chip: PromptChip): void {
-    this.chips = [...this.chips.filter((existing) =>
-      existing.absPath !== chip.absPath || existing.startLine !== chip.startLine
-    ), chip]
+    this.chips = [
+      ...this.chips.filter((existing) =>
+        existing.absPath !== chip.absPath || existing.startLine !== chip.startLine
+      ),
+      chip,
+    ]
   }
 
   clear(): void {
@@ -29,7 +32,7 @@ export class ComposerState {
     const chips = chipsForSend({
       chips: this.chips,
       includeActiveFileByDefault,
-      ...(activeFile !== undefined ? { activeFile } : {})
+      ...(activeFile !== undefined ? { activeFile } : {}),
     })
     return buildPromptText(text, chips)
   }

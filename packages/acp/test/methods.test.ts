@@ -9,7 +9,7 @@ it("normalizes x.ai/ methods to the ACP-legal _x.ai/ form", () => {
 
 it("reads _meta[x.ai/tool]", () => {
   const tool = xaiToolFromMeta({
-    "x.ai/tool": { name: "exit_plan_mode", kind: "exit_plan", read_only: true }
+    "x.ai/tool": { name: "exit_plan_mode", kind: "exit_plan", read_only: true },
   })
   expect(tool?.name).toBe("exit_plan_mode")
   expect(tool?.kind).toBe("exit_plan")

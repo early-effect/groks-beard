@@ -6,6 +6,7 @@ import { newSession, promptSession } from "../src/sessions.ts"
 import {
   assertNoYoloArgs,
   GROK_AGENT_STDIO_ARGS,
+  grokAgentStdioArgs,
   killSpawnedAgent,
   spawnGrokAgentStdio,
 } from "../src/spawn.ts"
@@ -15,6 +16,9 @@ const fixture = join(dirname(fileURLToPath(import.meta.url)), "fixtures/fake-gro
 it("stdio spawn args are agent stdio without yolo or no-leader", () => {
   expect([...GROK_AGENT_STDIO_ARGS]).toEqual(["agent", "stdio"])
   expect(assertNoYoloArgs(GROK_AGENT_STDIO_ARGS)).toBe(true)
+  expect([...grokAgentStdioArgs()]).toEqual(["agent", "stdio"])
+  expect([...grokAgentStdioArgs(true)]).toEqual(["--trust", "agent", "stdio"])
+  expect(assertNoYoloArgs(grokAgentStdioArgs(true))).toBe(true)
 })
 
 it("kills the grok child even when terminal.dispose throws", () => {

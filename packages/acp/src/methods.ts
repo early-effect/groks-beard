@@ -17,7 +17,7 @@ export const XaiToolMeta = Schema.Struct({
   kind: Schema.optionalKey(Schema.String),
   namespace: Schema.optionalKey(Schema.String),
   label: Schema.optionalKey(Schema.String),
-  read_only: Schema.optionalKey(Schema.Boolean)
+  read_only: Schema.optionalKey(Schema.Boolean),
 })
 
 export const xaiToolFromMeta = (meta: unknown): typeof XaiToolMeta.Type | undefined => {

@@ -22,6 +22,7 @@ export const clientCapabilities = (policy: CapabilityPolicy): ClientCapabilities
   if (policy.terminalHandlersReady) {
     caps.terminal = true
   }
+  caps.session = { configOptions: {} }
   return caps
 }
 

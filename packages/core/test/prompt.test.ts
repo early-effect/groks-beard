@@ -7,14 +7,14 @@ import {
   formatAtRef,
   PromptChip,
   truncateToByteCap,
-  utf8ByteLength
+  utf8ByteLength,
 } from "../src/prompt.ts"
 
 it("formats a file chip as @path", () => {
   const chip = new PromptChip({
     path: "src/Foo.scala",
     absPath: "/abs/src/Foo.scala",
-    source: "file"
+    source: "file",
   })
   expect(formatAtRef(chip)).toBe("@src/Foo.scala")
 })
@@ -25,7 +25,7 @@ it("formats a selection as @path:start-end", () => {
     absPath: "/abs/src/Foo.scala",
     startLine: 10,
     endLine: 50,
-    source: "selection"
+    source: "selection",
   })
   expect(formatAtRef(chip)).toBe("@src/Foo.scala:10-50")
 })
@@ -41,23 +41,34 @@ it("builds a TUI-shaped prompt from selection chips", () => {
     absPath: "/repo/src/Foo.scala",
     workspaceRoot: "/repo",
     startLine: 10,
-    endLine: 50
+    endLine: 50,
   })
   expect(formatAtRef(selection)).toBe("@src/Foo.scala:10-50")
   expect(buildPromptText("explain", [selection])).toBe("@src/Foo.scala:10-50\n\nexplain")
+  const quoted = chipFromSelection({
+    absPath: "/repo/plan.md",
+    workspaceRoot: "/repo",
+    startLine: 12,
+    endLine: 40,
+    languageId: "markdown",
+    excerpt: "Use Metals for compile.",
+  })
+  expect(buildPromptText("why Metals?", [quoted])).toBe(
+    "@plan.md:12-40\n\n```markdown\nUse Metals for compile.\n```\n\nwhy Metals?",
+  )
   const active = chipFromFile({
     absPath: "/repo/src/Bar.scala",
     workspaceRoot: "/repo",
-    source: "active"
+    source: "active",
   })
   expect(chipsForSend({
     chips: [],
     activeFile: active,
-    includeActiveFileByDefault: true
+    includeActiveFileByDefault: true,
   })).toEqual([active])
   expect(chipsForSend({
     chips: [selection],
     activeFile: active,
-    includeActiveFileByDefault: true
+    includeActiveFileByDefault: true,
   })).toEqual([selection])
 })

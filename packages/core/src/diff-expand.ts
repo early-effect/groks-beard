@@ -48,14 +48,14 @@ const regionOnly = (oldRegion: string, newRegion: string): DiffSides => ({
   oldText: oldRegion,
   newText: newRegion,
   firstChangedLine: firstChangedLine(oldRegion, newRegion),
-  wholeFile: false
+  wholeFile: false,
 })
 
 const wholeFile = (oldText: string, newText: string): DiffSides => ({
   oldText,
   newText,
   firstChangedLine: firstChangedLine(oldText, newText),
-  wholeFile: true
+  wholeFile: true,
 })
 
 const indexesOf = (haystack: string, needle: string): Array<number> => {
@@ -83,7 +83,7 @@ const lineAtOffset = (text: string, offset: number): number => {
 const pickIndex = (
   haystack: string,
   needle: string,
-  siteLine: number | undefined
+  siteLine: number | undefined,
 ): number => {
   const hits = indexesOf(haystack, needle)
   if (hits.length === 0) return -1
@@ -92,8 +92,12 @@ const pickIndex = (
   return match ?? hits[0] ?? -1
 }
 
-const replaceOnceAt = (haystack: string, start: number, needle: string, replacement: string): string =>
-  haystack.slice(0, start) + replacement + haystack.slice(start + needle.length)
+const replaceOnceAt = (
+  haystack: string,
+  start: number,
+  needle: string,
+  replacement: string,
+): string => haystack.slice(0, start) + replacement + haystack.slice(start + needle.length)
 
 const replaceAll = (haystack: string, needle: string, replacement: string): string => {
   if (needle === "") return haystack
@@ -106,7 +110,9 @@ type Located = {
 }
 
 const locateHaystack = (haystack: string, needle: string): Located | undefined => {
-  if (needle === "" || haystack.includes(needle)) return { text: haystack, crlf: haystack.includes("\r\n") }
+  if (needle === "" || haystack.includes(needle)) {
+    return { text: haystack, crlf: haystack.includes("\r\n") }
+  }
   if (haystack.includes("\r\n") && !needle.includes("\r\n")) {
     const lf = toLf(haystack)
     if (lf.includes(needle)) return { text: lf, crlf: true }
@@ -114,9 +120,10 @@ const locateHaystack = (haystack: string, needle: string): Located | undefined =
   return undefined
 }
 
-const emit = (located: Located): string => located.crlf && !located.text.includes("\r\n")
-  ? restoreCrlf(located.text)
-  : located.text
+const emit = (located: Located): string =>
+  located.crlf && !located.text.includes("\r\n")
+    ? restoreCrlf(located.text)
+    : located.text
 
 export const expandDiffToWholeFile = (input: DiffExpandInput): DiffSides => {
   const { diskText, oldRegion, newRegion, diskIsBefore } = input

@@ -60,8 +60,62 @@ export const dispatchWebviewMsg = (msg: WebviewMsg, handlers: WebviewHandlers): 
     case "cycleMode":
       handlers.cycleMode(msg)
       return
+    case "setMode":
+      handlers.setMode(msg)
+      return
+    case "setModel":
+      handlers.setModel(msg)
+      return
+    case "sendNow":
+      handlers.sendNow(msg)
+      return
+    case "setReasoning":
+      handlers.setReasoning(msg)
+      return
+    case "openSettings":
+      handlers.openSettings(msg)
+      return
     case "openChanges":
       handlers.openChanges(msg)
+      return
+    case "keepAllPending":
+      handlers.keepAllPending(msg)
+      return
+    case "undoAllPending":
+      handlers.undoAllPending(msg)
+      return
+    case "commitAllPending":
+      handlers.commitAllPending(msg)
+      return
+    case "refreshMcp":
+      handlers.refreshMcp(msg)
+      return
+    case "setMcpEnabled":
+      handlers.setMcpEnabled(msg)
+      return
+    case "setMcpToolEnabled":
+      handlers.setMcpToolEnabled(msg)
+      return
+    case "revealEditor":
+      handlers.revealEditor(msg)
+      return
+    case "addSelection":
+      handlers.addSelection(msg)
+      return
+    case "openPlan":
+      handlers.openPlan(msg)
+      return
+    case "openMcpConfig":
+      handlers.openMcpConfig(msg)
+      return
+    case "openSettingsJson":
+      handlers.openSettingsJson(msg)
+      return
+    case "trustFolder":
+      handlers.trustFolder(msg)
+      return
+    case "setSetting":
+      handlers.setSetting(msg)
       return
   }
 }
@@ -85,7 +139,25 @@ export const WEBVIEW_DISPATCH_HANDLED: Record<WebviewMsg["_tag"], true> = {
   mentionQuery: true,
   mentionPick: true,
   cycleMode: true,
+  setMode: true,
+  setModel: true,
+  sendNow: true,
+  setReasoning: true,
+  openSettings: true,
   openChanges: true,
+  keepAllPending: true,
+  undoAllPending: true,
+  commitAllPending: true,
+  refreshMcp: true,
+  setMcpEnabled: true,
+  setMcpToolEnabled: true,
+  revealEditor: true,
+  addSelection: true,
+  openPlan: true,
+  openMcpConfig: true,
+  openSettingsJson: true,
+  trustFolder: true,
+  setSetting: true,
 }
 
 const _lock: typeof WEBVIEW_MSG_HANDLED = WEBVIEW_DISPATCH_HANDLED

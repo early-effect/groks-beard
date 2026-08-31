@@ -7,7 +7,7 @@ export const splitNdjson = (buffer: string, chunk: string): {
   const rest = parts.pop() ?? ""
   return {
     lines: parts.filter((line) => line.trim().length > 0),
-    rest
+    rest,
   }
 }
 

@@ -13,6 +13,8 @@ export type ToolRow = {
   readonly status: string
   readonly additions?: number
   readonly deletions?: number
+  readonly input?: string
+  readonly output?: string
 }
 
 export type TurnView = {
@@ -35,6 +37,22 @@ export type ChatModel = {
     readonly modeId: string
     readonly modelId?: string
     readonly occupancy?: { readonly used: number; readonly size: number }
+    readonly reasoning?: {
+      readonly id: string
+      readonly current: string
+      readonly options: ReadonlyArray<{ readonly value: string; readonly name: string }>
+    }
+    readonly availableModes?: ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly availableModels?: ReadonlyArray<{
+      readonly modelId: string
+      readonly name: string
+      readonly description?: string
+      readonly contextWindow?: number
+      readonly reasoning?: {
+        readonly current: string
+        readonly options: ReadonlyArray<{ readonly value: string; readonly name: string }>
+      }
+    }>
   }
   readonly turns: ReadonlyArray<TurnView>
   readonly commands: ReadonlyArray<{ name: string; description: string; hint?: string }>
@@ -45,6 +63,14 @@ export type ChatModel = {
   readonly question?: Extract<HostMsg, { _tag: "questionCard" }>
   readonly elicit?: Extract<HostMsg, { _tag: "elicitCard" }>
   readonly queued: number
+  readonly changes?: {
+    readonly fileCount: number
+    readonly additions: number
+    readonly deletions: number
+  }
+  readonly mcp?: Extract<HostMsg, { _tag: "mcpCatalog" }>
+  readonly settings?: Extract<HostMsg, { _tag: "settingsState" }>
+  readonly editor?: Extract<HostMsg, { _tag: "editorContext" }>
   readonly error?: { readonly code?: string; readonly message: string }
 }
 
@@ -55,6 +81,11 @@ export const emptyChatModel = (): ChatModel => ({
   mentionFiles: [],
   queued: 0,
 })
+
+export const turnIsRunning = (model: ChatModel): boolean => {
+  const last = model.turns[model.turns.length - 1]
+  return last !== undefined && last.stopReason === undefined
+}
 
 const emptyTurn = (id: string): TurnView => ({
   id,
@@ -86,8 +117,25 @@ const mergeTools = (
   const next = existing.slice()
   for (const row of incoming) {
     const idx = next.findIndex((tool) => tool.id === row.id)
-    if (idx === -1) next.push(row)
-    else next[idx] = { ...next[idx]!, ...row }
+    if (idx === -1) {
+      next.push({
+        ...row,
+        title: row.title !== "" ? row.title : "Tool",
+        kind: row.kind !== "" ? row.kind : "other",
+      })
+      continue
+    }
+    const prev = next[idx]!
+    const input = row.input !== undefined && row.input !== "" ? row.input : prev.input
+    const output = row.output !== undefined && row.output !== "" ? row.output : prev.output
+    next[idx] = {
+      ...prev,
+      ...row,
+      title: row.title !== "" ? row.title : prev.title,
+      kind: row.kind !== "" ? row.kind : prev.kind,
+      ...(input !== undefined ? { input } : {}),
+      ...(output !== undefined ? { output } : {}),
+    }
   }
   return next
 }
@@ -101,12 +149,18 @@ const mergeSession = (
   const previous = model.session
   const modelId = msg.modelId ?? previous?.modelId
   const occupancy = msg.occupancy ?? previous?.occupancy
+  const reasoning = msg.reasoning ?? previous?.reasoning
+  const availableModes = msg.availableModes ?? previous?.availableModes
+  const availableModels = msg.availableModels ?? previous?.availableModels
   return {
     sessionId: msg.sessionId !== "" ? msg.sessionId : previous?.sessionId ?? "",
     title: msg.title !== "" ? msg.title : previous?.title ?? "",
     modeId: msg.modeId !== "" ? msg.modeId : previous?.modeId ?? "",
     ...(modelId !== undefined ? { modelId } : {}),
     ...(occupancy !== undefined ? { occupancy } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    ...(availableModes !== undefined ? { availableModes } : {}),
+    ...(availableModels !== undefined ? { availableModels } : {}),
   }
 }
 
@@ -152,6 +206,8 @@ export const applyHostMsg = (model: ChatModel, msg: HostMsg): ChatModel => {
       return { ...model, commands: [...msg.commands] }
     case "mentionResults":
       return { ...model, mentionQuery: msg.query, mentionFiles: [...msg.files] }
+    case "composerChip":
+      return model
     case "turnEnd": {
       const {
         permission: _permission,
@@ -167,6 +223,26 @@ export const applyHostMsg = (model: ChatModel, msg: HostMsg): ChatModel => {
     }
     case "queued":
       return { ...model, queued: msg.count }
+    case "changesSummary":
+      return msg.fileCount > 0
+        ? {
+          ...model,
+          changes: {
+            fileCount: msg.fileCount,
+            additions: msg.additions,
+            deletions: msg.deletions,
+          },
+        }
+        : (() => {
+          const { changes: _changes, ...rest } = model
+          return rest
+        })()
+    case "mcpCatalog":
+      return { ...model, mcp: msg }
+    case "settingsState":
+      return { ...model, settings: msg }
+    case "editorContext":
+      return { ...model, editor: msg }
     case "error":
       return {
         ...model,
@@ -178,12 +254,20 @@ export const applyHostMsg = (model: ChatModel, msg: HostMsg): ChatModel => {
       return {
         ...emptyChatModel(),
         ...(model.session !== undefined ? { session: model.session } : {}),
+        ...(model.changes !== undefined ? { changes: model.changes } : {}),
+        ...(model.mcp !== undefined ? { mcp: model.mcp } : {}),
+        ...(model.settings !== undefined ? { settings: model.settings } : {}),
+        ...(model.editor !== undefined ? { editor: model.editor } : {}),
         commands: model.commands,
       }
     case "restoreTranscript": {
       let next: ChatModel = {
         ...emptyChatModel(),
         ...(model.session !== undefined ? { session: model.session } : {}),
+        ...(model.changes !== undefined ? { changes: model.changes } : {}),
+        ...(model.mcp !== undefined ? { mcp: model.mcp } : {}),
+        ...(model.settings !== undefined ? { settings: model.settings } : {}),
+        ...(model.editor !== undefined ? { editor: model.editor } : {}),
         commands: model.commands,
       }
       for (const raw of msg.messages) {
@@ -211,8 +295,13 @@ export const HOST_MSG_APPLIED: Record<HostMsg["_tag"], true> = {
   elicitCard: true,
   availableCommands: true,
   mentionResults: true,
+  composerChip: true,
   turnEnd: true,
   queued: true,
+  changesSummary: true,
+  mcpCatalog: true,
+  settingsState: true,
+  editorContext: true,
   error: true,
   clearTranscript: true,
   restoreTranscript: true,

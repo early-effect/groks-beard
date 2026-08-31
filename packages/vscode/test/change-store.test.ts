@@ -555,3 +555,56 @@ it("sidecar Undo uses an existing editor ACP snapshot and Keep drops only the si
   expect(store.getFile("s1", "turn_1", "/tmp/a.ts")).toBeUndefined()
   expect(files.size).toBe(0)
 })
+
+it("ignores edits that are not inside the workspace", () => {
+  const files = new Map<string, string>()
+  let index: unknown = []
+  const store = new ChangeStore({
+    storageRoot: "/store",
+    now: () => 1,
+    join: (...parts) => parts.join("/"),
+    loadIndex: () => index,
+    saveIndex: (next) => {
+      index = next
+    },
+    inWorkspace: (path) => path.startsWith("/repo/"),
+    fs: {
+      read: (path) => files.get(path),
+      write: (path, text) => {
+        files.set(path, text)
+      },
+      remove: (path) => {
+        files.delete(path)
+      },
+      mkdirp: () => undefined,
+    },
+  })
+  store.ingestReconstructed({
+    sessionId: "s1",
+    turnId: "turn_1",
+    title: "plan",
+    diffs: [
+      {
+        path: "/tmp/groks-beard-plan.md",
+        oldText: "",
+        newText: "# Plan\n",
+        firstChangedLine: 0,
+        wholeFile: true,
+        kind: "add",
+        toolCallId: "c1",
+      },
+      {
+        path: "/repo/src/Main.scala",
+        oldText: "a",
+        newText: "b",
+        firstChangedLine: 0,
+        wholeFile: true,
+        kind: "modify",
+        toolCallId: "c2",
+      },
+    ],
+  })
+  expect(store.pendingSummary()).toEqual({ fileCount: 1, additions: 1, deletions: 1 })
+  expect(store.getFile("s1", "turn_1", "/tmp/groks-beard-plan.md")).toBeUndefined()
+  expect(store.getFile("s1", "turn_1", "/repo/src/Main.scala")?.kind).toBe("modify")
+})

@@ -4,8 +4,18 @@ import {
   isDiffEditorInput,
   planFollowAlong,
   schemesFromTabInput,
+  shouldFollowAlong,
 } from "../src/follow-along.ts"
 import { ORIGINAL_SCHEME, PROPOSED_SCHEME } from "../src/virtual-docs.ts"
+
+it("does not follow read or search tools even when they report a path", () => {
+  expect(shouldFollowAlong("read", { hasDiffs: false })).toBe(false)
+  expect(shouldFollowAlong("search")).toBe(false)
+  expect(shouldFollowAlong("other")).toBe(false)
+  expect(shouldFollowAlong("edit")).toBe(true)
+  expect(shouldFollowAlong("other", { hasDiffs: true })).toBe(true)
+  expect(shouldFollowAlong("edit", { readOnly: true })).toBe(false)
+})
 
 it("preserves focus when the user is in a Beard diff editor", () => {
   const plan = planFollowAlong(

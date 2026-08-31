@@ -57,10 +57,54 @@ export class FakeGrokAgent {
               currentModeId: "normal",
               availableModes: [
                 { id: "normal", name: "Normal" },
+                { id: "auto", name: "Auto" },
                 { id: "plan", name: "Plan" },
-                { id: "always-approve", name: "Always-approve" },
+                { id: "always-approve", name: "Always approve" },
               ],
             },
+            models: {
+              currentModelId: "grok-4.6",
+              availableModels: [
+                {
+                  modelId: "grok-4.5",
+                  name: "Grok 4.5",
+                  context_window: 256000,
+                  supports_reasoning_effort: true,
+                  reasoning_effort: "high",
+                  reasoning_efforts: [
+                    { value: "high", name: "High" },
+                    { value: "medium", name: "Medium" },
+                    { value: "low", name: "Low" },
+                  ],
+                },
+                {
+                  modelId: "grok-4.6",
+                  name: "Grok 4.6",
+                  context_window: 500000,
+                  supports_reasoning_effort: true,
+                  reasoning_effort: "high",
+                  reasoning_efforts: [
+                    { value: "xhigh", name: "Extra high" },
+                    { value: "high", name: "High" },
+                    { value: "medium", name: "Medium" },
+                    { value: "low", name: "Low" },
+                  ],
+                },
+              ],
+            },
+            configOptions: [{
+              id: "reasoning_effort",
+              name: "Reasoning",
+              category: "thought_level",
+              type: "select",
+              currentValue: "high",
+              options: [
+                { value: "low", name: "Low" },
+                { value: "medium", name: "Medium" },
+                { value: "high", name: "High" },
+                { value: "xhigh", name: "Extra high" },
+              ],
+            }],
           }),
         ]
       case "session/load":
@@ -80,6 +124,10 @@ export class FakeGrokAgent {
           }, "term-1"),
         ]
       }
+      case "session/set_model":
+        return [ok(request.id, {})]
+      case "session/set_config_option":
+        return [ok(request.id, { configOptions: [] })]
       case "session/prompt":
         return [
           notify("session/update", {
@@ -117,6 +165,14 @@ export class FakeGrokAgent {
                 oldText: "old",
                 newText: "new",
               }],
+            },
+          }),
+          notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+              sessionUpdate: "usage_update",
+              used: 12000,
+              size: 500000,
             },
           }),
           ok(request.id, { stopReason: "end_turn" }),

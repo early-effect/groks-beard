@@ -3,11 +3,18 @@ import { Effect, Layer, ManagedRuntime } from "effect"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import * as vscode from "vscode"
-import type { UndoApplyResult } from "./change-store.js"
-import { type ChangesNode, ChangesTreeProvider, parseChangesNode } from "./changes-tree.js"
+import { CHANGES_PANE_CONTEXT, changesPresentationFrom } from "./changes-presentation.js"
+import { ChangesReviewPanel } from "./changes-review.js"
+import {
+  type ChangesNode,
+  ChangesTreeProvider,
+  findPendingFile,
+  parseChangesNode,
+} from "./changes-tree.js"
 import { ChatViewProvider } from "./chat-view.js"
 import { locateGrokCli } from "./cli-locator.js"
 import { ComposerState } from "./composer.js"
+import { commitGrokFiles } from "./git-commit-host.js"
 import { vscodeMcpHandle } from "./mcp-host-vscode.js"
 import {
   mergeMcpTable,
@@ -19,9 +26,24 @@ import {
 import { locateNode } from "./node-locator.js"
 import { missingCliMessage, missingNodeMessage } from "./onboarding.js"
 import type { ReviewHost } from "./review-host.js"
-import { createReviewHost, registerVirtualDocs, vscodeUndoPorts } from "./review-vscode.js"
+import {
+  createReviewHost,
+  registerVirtualDocs,
+  reportUndoResult,
+  vscodeUndoPorts,
+} from "./review-vscode.js"
 import { TUI_BRIDGE_STATE_KEY, TuiBridge } from "./tui-bridge.js"
-import { maybePlaceViews, VIEW_PLACEMENT_KEY, type ViewPlacement } from "./view-placement.js"
+import {
+  CHANGES_VIEW_ID,
+  CHANGES_VIEW_ID_SECONDARY,
+  changesViewIdForHost,
+  CHAT_VIEW_ID,
+  CHAT_VIEW_ID_SECONDARY,
+  chatViewIdForHost,
+  isVsCodeHost,
+  USE_ACTIVITY_BAR_CONTEXT,
+} from "./view-placement.js"
+import { filePathFromEditorUri } from "./virtual-docs.js"
 
 let runtime: ManagedRuntime.ManagedRuntime<never, never> | undefined
 const composer = new ComposerState()
@@ -45,12 +67,14 @@ const activeChip = () => {
       ...(languageId !== "" ? { languageId } : {}),
     })
   }
+  const excerpt = editor.document.getText(sel)
   return chipFromSelection({
     absPath,
     startLine: sel.start.line + 1,
     endLine: sel.end.line + 1,
     ...(root !== undefined ? { workspaceRoot: root } : {}),
     ...(languageId !== "" ? { languageId } : {}),
+    ...(excerpt !== "" ? { excerpt } : {}),
   })
 }
 
@@ -60,13 +84,33 @@ const asNode = (arg: unknown): ChangesNode | undefined => {
   return undefined
 }
 
-const reportUndo = (result: UndoApplyResult): void => {
-  if (result.ok) return
-  if (result.cancelled === true) {
-    void vscode.window.showInformationMessage(`Undo cancelled for ${result.path}.`)
-    return
+const nodeFromArg = (
+  arg: unknown,
+  store: ReviewHost["store"],
+): ChangesNode | undefined => {
+  const node = asNode(arg)
+  if (node !== undefined) return node
+  const uri = arg instanceof vscode.Uri ? arg : vscode.window.activeTextEditor?.document.uri
+  if (uri === undefined) return undefined
+  return findPendingFile(store, filePathFromEditorUri(uri))
+}
+
+const reportCommit = async (
+  paths: ReadonlyArray<string>,
+  titles: ReadonlyArray<string>,
+  onOk: () => void,
+): Promise<void> => {
+  try {
+    const count = await commitGrokFiles(paths, titles)
+    if (count === undefined) return
+    onOk()
+    void vscode.window.showInformationMessage(
+      count === 1 ? "Committed 1 file." : `Committed ${count} files.`,
+    )
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    void vscode.window.showErrorMessage(`Commit failed: ${message}`)
   }
-  void vscode.window.showWarningMessage(`Undo stopped on ${result.path}: ${result.reason}`)
 }
 
 const registerChangeCommands = (
@@ -75,10 +119,11 @@ const registerChangeCommands = (
   status: vscode.StatusBarItem,
 ): void => {
   const refreshStatus = () => {
-    const pending = review.store.list().reduce((n, set) => n + set.files.length, 0)
-    status.text = `$(diff) ${review.store.statusText()}`
+    const summary = review.store.pendingSummary()
+    const files = summary.fileCount === 1 ? "1 file" : `${summary.fileCount} files`
+    status.text = `$(diff) ${files} ${review.store.statusText()}`
     status.tooltip = review.store.undoReason() ?? "Grok Changes"
-    if (pending > 0) status.show()
+    if (summary.fileCount > 0) status.show()
     else status.hide()
   }
   review.store.onChange(refreshStatus)
@@ -98,13 +143,13 @@ const registerChangeCommands = (
       )
     }),
     vscode.commands.registerCommand("groksBeard.openChangeDiff", (arg?: unknown) => {
-      const node = asNode(arg)
+      const node = nodeFromArg(arg, review.store)
       if (node?.type === "file") {
         void review.openFileDiff(node.sessionId, node.turnId, node.path)
       }
     }),
     vscode.commands.registerCommand("groksBeard.keepChange", (arg?: unknown) => {
-      const node = asNode(arg)
+      const node = nodeFromArg(arg, review.store)
       if (node?.type === "file") review.keep(node.sessionId, node.turnId, node.path)
     }),
     vscode.commands.registerCommand("groksBeard.keepAll", (arg?: unknown) => {
@@ -116,17 +161,17 @@ const registerChangeCommands = (
       review.store.keepEvery()
     }),
     vscode.commands.registerCommand("groksBeard.undoChange", async (arg?: unknown) => {
-      const node = asNode(arg)
+      const node = nodeFromArg(arg, review.store)
       if (node?.type !== "file") return
-      reportUndo(await review.undo(node.sessionId, node.turnId, node.path, ports))
+      reportUndoResult(await review.undo(node.sessionId, node.turnId, node.path, ports))
     }),
     vscode.commands.registerCommand("groksBeard.undoAll", async (arg?: unknown) => {
       const node = asNode(arg)
       if (node?.type === "turn") {
-        reportUndo(await review.undoAll(node.sessionId, node.turnId, ports))
+        reportUndoResult(await review.undoAll(node.sessionId, node.turnId, ports))
         return
       }
-      reportUndo(await review.store.undoEvery(ports))
+      reportUndoResult(await review.store.undoEvery(ports))
     }),
   )
 }
@@ -137,17 +182,24 @@ export const activate = (context: vscode.ExtensionContext): void => {
   registerVirtualDocs(context, provider)
   chat = new ChatViewProvider(context, composer, runtime, review)
   const tree = new ChangesTreeProvider(review.store)
+  const reviewPanel = new ChangesReviewPanel(context, review, workspaceRoot)
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10)
-  status.command = "groksBeard.changes.focus"
+  const syncPresentation = () => {
+    const presentation = changesPresentationFrom(
+      vscode.workspace.getConfiguration("groksBeard").get("changesPresentation"),
+    )
+    const pane = presentation === "pane"
+    void vscode.commands.executeCommand("setContext", CHANGES_PANE_CONTEXT, pane)
+    status.command = pane
+      ? `${changesViewIdForHost(vscode.env.appName)}.focus`
+      : "groksBeard.openChangesReview"
+    chat?.syncChangesToast()
+  }
   registerChangeCommands(context, review, status)
-  const persisted = context.workspaceState.get<ViewPlacement>(VIEW_PLACEMENT_KEY)
-  void maybePlaceViews({
-    appName: vscode.env.appName,
-    persisted,
-    persist: (placement) => context.workspaceState.update(VIEW_PLACEMENT_KEY, placement),
-    moveViews: (viewIds, destinationId) =>
-      vscode.commands.executeCommand("vscode.moveViews", { viewIds, destinationId }),
-  })
+  syncPresentation()
+  if (!isVsCodeHost(vscode.env.appName)) {
+    void vscode.commands.executeCommand("setContext", USE_ACTIVITY_BAR_CONTEXT, true)
+  }
   const output = vscode.window.createOutputChannel("Grok's Beard")
   const handle = vscodeMcpHandle(
     composer,
@@ -166,12 +218,16 @@ export const activate = (context: vscode.ExtensionContext): void => {
   })
   void tuiBridge.sync()
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(ChatViewProvider.viewId, chat, {
+    vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID, chat, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
-    vscode.window.registerTreeDataProvider(ChangesTreeProvider.viewId, tree),
+    vscode.window.registerWebviewViewProvider(CHAT_VIEW_ID_SECONDARY, chat, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerTreeDataProvider(CHANGES_VIEW_ID, tree),
+    vscode.window.registerTreeDataProvider(CHANGES_VIEW_ID_SECONDARY, tree),
     vscode.commands.registerCommand("groksBeard.open", () => {
-      void vscode.commands.executeCommand(`${ChatViewProvider.viewId}.focus`)
+      void vscode.commands.executeCommand(`${chatViewIdForHost(vscode.env.appName)}.focus`)
       const rt = runtime
       const view = chat
       if (rt === undefined || view === undefined) return
@@ -199,15 +255,36 @@ export const activate = (context: vscode.ExtensionContext): void => {
     vscode.commands.registerCommand("groksBeard.cycleMode", () => {
       void chat?.cycleMode()
     }),
-    vscode.commands.registerCommand("groksBeard.addSelection", () => {
-      const chip = activeChip()
-      if (chip === undefined) {
-        void vscode.window.showWarningMessage("No active editor.")
+    vscode.commands.registerCommand("groksBeard.openChangesReview", () => {
+      reviewPanel.reveal()
+    }),
+    vscode.commands.registerCommand("groksBeard.commitChanges", () => {
+      const sets = review.store.list()
+      void reportCommit(
+        sets.flatMap((set) => set.files.map((file) => file.path)),
+        sets.map((set) => set.title),
+        () => review.store.keepEvery(),
+      )
+    }),
+    vscode.commands.registerCommand("groksBeard.commitChange", (arg?: unknown) => {
+      const node = nodeFromArg(arg, review.store)
+      if (node?.type !== "file") {
+        void vscode.commands.executeCommand("groksBeard.commitChanges")
         return
       }
-      composer.addChip(chip)
-      composer.setPendingSelection(chip)
-      void vscode.window.showInformationMessage(`Added ${formatAtRef(chip)}`)
+      const set = review.store.getTurn(node.sessionId, node.turnId)
+      void reportCommit([node.path], [set?.title ?? "Grok changes"], () => {
+        review.keep(node.sessionId, node.turnId, node.path)
+      })
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("groksBeard.changesPresentation")) syncPresentation()
+    }),
+    vscode.commands.registerCommand("groksBeard.openSettings", () => {
+      void vscode.commands.executeCommand("workbench.action.openSettings", "groksBeard")
+    }),
+    vscode.commands.registerCommand("groksBeard.addSelection", (raw?: unknown) => {
+      chat?.addSelectionToChat(raw)
     }),
     vscode.commands.registerCommand("groksBeard.addFile", () => {
       const editor = vscode.window.activeTextEditor

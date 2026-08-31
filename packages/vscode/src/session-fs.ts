@@ -2,7 +2,7 @@ import {
   decodeSessionSummary,
   indexSessions,
   type SessionActivityStat,
-  type SessionSummary
+  type SessionSummary,
 } from "@groks-beard/core"
 
 export type DirEntry = {
@@ -16,12 +16,11 @@ export type SessionFs = {
   readonly readText: (path: string) => string | undefined
 }
 
-const join = (dir: string, name: string): string =>
-  `${dir.replace(/[\\/]+$/, "")}/${name}`
+const join = (dir: string, name: string): string => `${dir.replace(/[\\/]+$/, "")}/${name}`
 
 export const statsForSessionGroup = (
   fs: SessionFs,
-  groupDir: string
+  groupDir: string,
 ): ReadonlyArray<SessionActivityStat> => {
   const stats: Array<SessionActivityStat> = []
   for (const entry of fs.list(groupDir)) {
@@ -34,7 +33,7 @@ export const statsForSessionGroup = (
       id: entry.name,
       ...(updates !== undefined ? { updatesMtimeMs: updates } : {}),
       ...(events !== undefined ? { eventsMtimeMs: events } : {}),
-      ...(summary !== undefined ? { summaryMtimeMs: summary } : {})
+      ...(summary !== undefined ? { summaryMtimeMs: summary } : {}),
     })
   }
   return indexSessions(stats)
@@ -43,7 +42,7 @@ export const statsForSessionGroup = (
 export const readSessionSummaries = (
   fs: SessionFs,
   groupDir: string,
-  ids: ReadonlyArray<string>
+  ids: ReadonlyArray<string>,
 ): ReadonlyArray<{ readonly id: string; readonly summary: SessionSummary | undefined }> =>
   ids.map((id) => {
     const text = fs.readText(join(join(groupDir, id), "summary.json"))

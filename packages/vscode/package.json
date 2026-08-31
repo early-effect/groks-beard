@@ -3,6 +3,7 @@
   "displayName": "Grok's Beard",
   "publisher": "early-effect",
   "description": "Effect-first VS Code / Cursor client for Grok Build",
+  "icon": "media/logo.png",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +20,16 @@
         {
           "id": "groks-beard",
           "title": "Grok's Beard",
-          "icon": "media/beard.svg"
+          "icon": "media/beard.svg",
+          "when": "groksBeard.useActivityBar"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "groks-beard-secondary",
+          "title": "Grok's Beard",
+          "icon": "media/beard.svg",
+          "when": "!groksBeard.useActivityBar"
         }
       ]
     },
@@ -28,11 +38,26 @@
         {
           "type": "webview",
           "id": "groksBeard.chat",
-          "name": "Chat"
+          "name": "Grok's Beard",
+          "when": "groksBeard.useActivityBar"
         },
         {
           "id": "groksBeard.changes",
-          "name": "Grok Changes"
+          "name": "Grok Changes",
+          "when": "groksBeard.useActivityBar && groksBeard.changesPane"
+        }
+      ],
+      "groks-beard-secondary": [
+        {
+          "type": "webview",
+          "id": "groksBeard.chatSecondary",
+          "name": "Grok's Beard",
+          "when": "!groksBeard.useActivityBar"
+        },
+        {
+          "id": "groksBeard.changesSecondary",
+          "name": "Grok Changes",
+          "when": "!groksBeard.useActivityBar && groksBeard.changesPane"
         }
       ]
     },
@@ -43,11 +68,15 @@
       },
       {
         "command": "groksBeard.cancel",
-        "title": "Grok's Beard: Cancel"
+        "title": "Grok's Beard: Stop"
       },
       {
         "command": "groksBeard.cycleMode",
         "title": "Grok's Beard: Cycle Mode"
+      },
+      {
+        "command": "groksBeard.openSettings",
+        "title": "Grok's Beard: Open Settings"
       },
       {
         "command": "groksBeard.addSelection",
@@ -70,8 +99,13 @@
         "title": "Grok's Beard: Open Change Diff"
       },
       {
+        "command": "groksBeard.openChangesReview",
+        "title": "Grok's Beard: Review Changes"
+      },
+      {
         "command": "groksBeard.keepChange",
-        "title": "Grok's Beard: Keep Change"
+        "title": "Grok's Beard: Keep Change",
+        "icon": "$(check)"
       },
       {
         "command": "groksBeard.keepAll",
@@ -79,11 +113,22 @@
       },
       {
         "command": "groksBeard.undoChange",
-        "title": "Grok's Beard: Undo Change"
+        "title": "Grok's Beard: Undo Change",
+        "icon": "$(discard)"
       },
       {
         "command": "groksBeard.undoAll",
         "title": "Grok's Beard: Undo All"
+      },
+      {
+        "command": "groksBeard.commitChange",
+        "title": "Grok's Beard: Commit Change",
+        "icon": "$(commit)"
+      },
+      {
+        "command": "groksBeard.commitChanges",
+        "title": "Grok's Beard: Commit Changes",
+        "icon": "$(commit)"
       },
       {
         "command": "groksBeard.enableTuiBridge",
@@ -98,23 +143,47 @@
       "view/item/context": [
         {
           "command": "groksBeard.keepChange",
-          "when": "view == groksBeard.changes && viewItem =~ /^changeFile/",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem =~ /^changeFile/",
           "group": "inline"
         },
         {
           "command": "groksBeard.undoChange",
-          "when": "view == groksBeard.changes && viewItem == changeFile",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeFile",
           "group": "inline"
         },
         {
           "command": "groksBeard.keepAll",
-          "when": "view == groksBeard.changes && viewItem =~ /^changeTurn/",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem =~ /^changeTurn/",
           "group": "inline"
         },
         {
           "command": "groksBeard.undoAll",
-          "when": "view == groksBeard.changes && viewItem == changeTurn",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeTurn",
           "group": "inline"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "groksBeard.addSelection",
+          "when": "editorHasSelection",
+          "group": "groksBeard@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "groksBeard.keepChange",
+          "when": "isInDiffEditor && (resourceScheme == beard-proposed || resourceScheme == beard-original)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "groksBeard.undoChange",
+          "when": "isInDiffEditor && (resourceScheme == beard-proposed || resourceScheme == beard-original)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "groksBeard.commitChange",
+          "when": "isInDiffEditor && (resourceScheme == beard-proposed || resourceScheme == beard-original)",
+          "group": "navigation@3"
         }
       ]
     },
@@ -140,14 +209,38 @@
           "type": "boolean",
           "default": false,
           "description": "When true, Enter inserts a newline and Ctrl/Cmd+Enter sends."
+        },
+        "groksBeard.changesPresentation": {
+          "type": "string",
+          "enum": ["toast", "pane"],
+          "enumDescriptions": [
+            "Compact toast in chat. Click Review to open a changes editor to the left.",
+            "Grok Changes split pane under chat in the sidebar."
+          ],
+          "default": "toast",
+          "description": "Where pending Grok file changes appear."
         }
       }
     },
+    "markdown.previewScripts": [
+      "./media/markdown-preview-selection.js"
+    ],
     "keybindings": [
       {
         "command": "groksBeard.open",
         "key": "ctrl+;",
         "mac": "cmd+;"
+      },
+      {
+        "command": "groksBeard.addSelection",
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "groksBeard.cancel",
+        "key": "escape",
+        "when": "groksBeard.turnRunning && (focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary)"
       }
     ]
   },

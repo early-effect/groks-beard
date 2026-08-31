@@ -56,6 +56,17 @@ export const detectDiffEditor = (active: {
   return (active.schemesInActiveGroup ?? []).some(isVirtualDiffScheme)
 }
 
+const FOLLOW_KINDS = new Set(["edit", "delete", "move"])
+
+export const shouldFollowAlong = (
+  kind: string,
+  options: { readonly hasDiffs?: boolean; readonly readOnly?: boolean } = {},
+): boolean => {
+  if (options.readOnly === true) return false
+  if (options.hasDiffs === true) return true
+  return FOLLOW_KINDS.has(kind.toLowerCase())
+}
+
 export const planFollowAlong = (
   locations: ReadonlyArray<ToolLocation>,
   active: {

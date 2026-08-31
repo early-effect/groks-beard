@@ -14,6 +14,7 @@ it("withholds fs.readTextFile for live-verified Grok >= 1.0.4", () => {
   })
   expect(caps.fs).toBeUndefined()
   expect(caps.terminal).toBeUndefined()
+  expect(caps.session).toEqual({ configOptions: {} })
 })
 
 it("advertises fs.readTextFile for 1.0.3", () => {

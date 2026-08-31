@@ -40,6 +40,7 @@ export type ChangeStoreDeps = {
   readonly loadIndex: () => unknown
   readonly saveIndex: (index: ReadonlyArray<ChangeSetRecord>) => void
   readonly join: (...parts: string[]) => string
+  readonly inWorkspace?: (path: string) => boolean
 }
 
 export type UndoApplyPorts = {
@@ -79,6 +80,30 @@ export class ChangeStore {
 
   constructor(private readonly deps: ChangeStoreDeps) {
     this.sets = decodeIndex(deps.loadIndex())
+    if (this.pruneOutsideWorkspace()) this.persist()
+  }
+
+  private keepPath(path: string): boolean {
+    return this.deps.inWorkspace?.(path) ?? true
+  }
+
+  private pruneOutsideWorkspace(): boolean {
+    if (this.deps.inWorkspace === undefined) return false
+    const before = this.sets
+    this.sets = before.map((set) => {
+      const files = set.files.filter((file) => this.keepPath(file.path))
+      return files.length === set.files.length ? set : new ChangeSetRecord({ ...set, files })
+    }).filter((set) => set.files.length > 0)
+    if (this.sidecar !== undefined) {
+      const files = this.sidecar.files.filter((file) => this.keepPath(file.path))
+      this.sidecar = files.length === 0
+        ? undefined
+        : files.length === this.sidecar.files.length
+        ? this.sidecar
+        : new ChangeSetRecord({ ...this.sidecar, files })
+    }
+    return this.sets.length !== before.length
+      || this.sets.some((set, idx) => set !== before[idx])
   }
 
   onChange(listener: () => void): () => void {
@@ -97,6 +122,16 @@ export class ChangeStore {
 
   pendingStats(): { readonly additions: number; readonly deletions: number } {
     return changeSetLineStats(this.list().flatMap((set) => set.files))
+  }
+
+  pendingSummary(): {
+    readonly fileCount: number
+    readonly additions: number
+    readonly deletions: number
+  } {
+    const files = this.list().flatMap((set) => set.files)
+    const stats = changeSetLineStats(files)
+    return { fileCount: files.length, additions: stats.additions, deletions: stats.deletions }
   }
 
   undoReason(): string | undefined {
@@ -136,7 +171,8 @@ export class ChangeStore {
     readonly title: string
     readonly diffs: ReadonlyArray<ReconstructedFileDiff>
   }): void {
-    if (input.diffs.length === 0) return
+    const diffs = input.diffs.filter((diff) => this.keepPath(diff.path))
+    if (diffs.length === 0) return
     let set = this.sets.find((row) =>
       row.sessionId === input.sessionId && row.turnId === input.turnId
     )
@@ -153,7 +189,7 @@ export class ChangeStore {
       set = new ChangeSetRecord({ ...set, title: input.title })
       this.replaceSet(set)
     }
-    for (const diff of input.diffs) {
+    for (const diff of diffs) {
       this.upsertFile(set, fileChangeFromReconstructed(diff), {
         wholeFile: diff.wholeFile,
         ...(diff.regionStandIn === true ? { regionStandIn: true } : {}),
@@ -175,7 +211,7 @@ export class ChangeStore {
       toolCall: input.toolCall,
       diskText: input.readDisk,
       diskIsBefore: input.diskIsBefore,
-    })
+    }).filter((diff) => this.keepPath(diff.path))
     this.ingestReconstructed({
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -206,7 +242,7 @@ export class ChangeStore {
       readonly kind: FileChangeRecord["kind"]
     }>
   }): number {
-    const files = input.files.map((file) => {
+    const files = input.files.filter((file) => this.keepPath(file.path)).map((file) => {
       const stored = this.loadUsableUndoByPath(file.path)
       return new FileChangeRecord({
         path: file.path,
@@ -220,6 +256,11 @@ export class ChangeStore {
         ...(stored === undefined ? { undoDisabledReason: SIDECAR_UNDO_REASON } : {}),
       })
     })
+    if (files.length === 0) {
+      this.sidecar = undefined
+      this.notify()
+      return 0
+    }
     this.sidecar = new ChangeSetRecord({
       sessionId: SIDECAR_SESSION_ID,
       turnId: SIDECAR_TURN_ID,

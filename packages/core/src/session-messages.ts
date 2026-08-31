@@ -1,12 +1,15 @@
 import { diffsFromRawInput } from "./diff-content.js"
-import type { HostMsg } from "./protocol.js"
+import type { HostMsg, SessionModelOption } from "./protocol.js"
 import {
+  ConfigOptionUpdate,
   CurrentModeUpdate,
   decodeSessionUpdate,
+  occupancyFromUnknown,
   sessionIdFromParams,
   type SessionUpdate,
   textFromContent,
   ToolCallUpdate,
+  toolPayloadText,
   updateFromParams,
   UsageUpdate,
 } from "./session-update.js"
@@ -44,12 +47,24 @@ const toolRowFromUpdate = (
   title: string
   kind: string
   status: string
-} => ({
-  id: update.toolCallId ?? "tool",
-  title: update.title ?? "Tool",
-  kind: update.kind ?? "other",
-  status: update.status ?? "pending",
-})
+  input?: string
+  output?: string
+} => {
+  const input = update.rawInput !== undefined ? toolPayloadText(update.rawInput) : ""
+  const output = update.content !== undefined
+    ? toolPayloadText(update.content)
+    : update.rawOutput !== undefined
+    ? toolPayloadText(update.rawOutput)
+    : ""
+  return {
+    id: update.toolCallId ?? "tool",
+    title: update.title ?? "",
+    kind: update.kind ?? "",
+    status: update.status ?? "pending",
+    ...(input !== "" ? { input } : {}),
+    ...(output !== "" ? { output } : {}),
+  }
+}
 
 const permissionOptions = (
   value: unknown,
@@ -112,15 +127,160 @@ export const elicitCardFromParams = (
     : { _tag: "elicitCard", requestId, serverName, mode, title }
 }
 
+const flattenSelectOptions = (
+  options: unknown,
+): Array<{ value: string; name: string }> => {
+  if (!Array.isArray(options)) return []
+  return options.flatMap((item) => {
+    if (!isRecord(item)) return []
+    if (Array.isArray(item.options)) return flattenSelectOptions(item.options)
+    if (typeof item.value !== "string" || item.value === "") return []
+    const name = typeof item.name === "string" && item.name !== "" ? item.name : item.value
+    return [{ value: item.value, name }]
+  })
+}
+
+export const parseReasoning = (
+  configOptions: unknown,
+): Extract<HostMsg, { _tag: "sessionMeta" }>["reasoning"] => {
+  if (!Array.isArray(configOptions)) return undefined
+  for (const item of configOptions) {
+    if (!isRecord(item) || typeof item.id !== "string" || item.id === "") continue
+    const category = typeof item.category === "string" ? item.category : ""
+    const name = typeof item.name === "string" ? item.name : item.id
+    if (category !== "thought_level" && !/effort|reason/i.test(`${item.id} ${name}`)) {
+      continue
+    }
+    const options = flattenSelectOptions(item.options)
+    const current = typeof item.currentValue === "string" ? item.currentValue : options[0]?.value
+    if (current === undefined || options.length === 0) continue
+    return { id: item.id, current, options }
+  }
+  return undefined
+}
+
+export const FALLBACK_REASONING_OPTIONS: ReadonlyArray<{ value: string; name: string }> = [
+  { value: "low", name: "Low" },
+  { value: "medium", name: "Medium" },
+  { value: "high", name: "High" },
+  { value: "xhigh", name: "Extra high" },
+]
+
+export type ModelReasoningView = {
+  readonly current: string
+  readonly options: ReadonlyArray<{ readonly value: string; readonly name: string }>
+}
+
+const numberish = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+
+export const parseReasoningEfforts = (
+  value: unknown,
+): Array<{ value: string; name: string }> => {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    if (Array.isArray(item.options)) return parseReasoningEfforts(item.options)
+    const optionValue = typeof item.value === "string" && item.value !== ""
+      ? item.value
+      : typeof item.id === "string" && item.id !== ""
+      ? item.id
+      : ""
+    if (optionValue === "") return []
+    const name = typeof item.name === "string" && item.name !== ""
+      ? item.name
+      : typeof item.label === "string" && item.label !== ""
+      ? item.label
+      : optionValue
+    return [{ value: optionValue, name }]
+  })
+}
+
+const defaultEffortValue = (
+  efforts: unknown,
+  options: ReadonlyArray<{ value: string; name: string }>,
+): string | undefined => {
+  if (Array.isArray(efforts)) {
+    for (const item of efforts) {
+      if (!isRecord(item) || item.default !== true) continue
+      if (typeof item.value === "string" && item.value !== "") return item.value
+      if (typeof item.id === "string" && item.id !== "") return item.id
+    }
+  }
+  return options[0]?.value
+}
+
+const modelReasoningFrom = (source: Record<string, unknown>): ModelReasoningView | undefined => {
+  const options = parseReasoningEfforts(source.reasoning_efforts)
+  if (options.length === 0) return undefined
+  const allowed = new Set(options.map((item) => item.value))
+  const advertised = typeof source.reasoning_effort === "string"
+    ? source.reasoning_effort
+    : undefined
+  const current = advertised !== undefined && allowed.has(advertised)
+    ? advertised
+    : defaultEffortValue(source.reasoning_efforts, options) ?? options[0]!.value
+  return { current, options }
+}
+
+export const parseModelReasoning = (model: unknown): ModelReasoningView | undefined => {
+  if (!isRecord(model)) return undefined
+  const meta = isRecord(model._meta) ? model._meta : undefined
+  const info = isRecord(model.info) ? model.info : undefined
+  return modelReasoningFrom(model)
+    ?? (meta !== undefined ? modelReasoningFrom(meta) : undefined)
+    ?? (info !== undefined ? modelReasoningFrom(info) : undefined)
+}
+
+const catalogEntry = (
+  catalog: unknown,
+  modelId: string,
+): Record<string, unknown> | undefined => {
+  if (!isRecord(catalog)) return undefined
+  const models = isRecord(catalog.models) ? catalog.models : catalog
+  const entry = models[modelId]
+  if (!isRecord(entry)) return undefined
+  return isRecord(entry.info) ? entry.info : entry
+}
+
+export const overlayModelCatalog = (
+  models: ReadonlyArray<SessionModelOption>,
+  catalog: unknown,
+): Array<SessionModelOption> => {
+  if (catalog === undefined) return [...models]
+  return models.map((model) => {
+    const info = catalogEntry(catalog, model.modelId)
+    if (info === undefined) return model
+    const reasoning = model.reasoning ?? parseModelReasoning(info)
+    const contextWindow = model.contextWindow
+      ?? numberish(info.context_window)
+      ?? numberish(info.contextWindow)
+    if (reasoning === undefined && (contextWindow === undefined || contextWindow <= 0)) {
+      return model
+    }
+    return {
+      ...model,
+      ...(contextWindow !== undefined && contextWindow > 0 ? { contextWindow } : {}),
+      ...(reasoning !== undefined ? { reasoning } : {}),
+    }
+  })
+}
+
 const sessionMeta = (
   params: unknown,
   modeId: string,
   occupancy?: { used: number; size: number },
+  reasoning?: Extract<HostMsg, { _tag: "sessionMeta" }>["reasoning"],
 ): Extract<HostMsg, { _tag: "sessionMeta" }> => {
   const sessionId = sessionIdFromParams(params) ?? ""
-  return occupancy !== undefined
-    ? { _tag: "sessionMeta", sessionId, title: "", modeId, occupancy }
-    : { _tag: "sessionMeta", sessionId, title: "", modeId }
+  return {
+    _tag: "sessionMeta",
+    sessionId,
+    title: "",
+    modeId,
+    ...(occupancy !== undefined ? { occupancy } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
+  }
 }
 
 export const hostMsgsFromSessionUpdate = (
@@ -164,9 +324,21 @@ const hostMsgsFromDecoded = (
     if (modeId === undefined) return []
     return [sessionMeta(params, modeId)]
   }
-  if (decoded instanceof UsageUpdate) {
-    if (decoded.used === undefined || decoded.size === undefined) return []
-    return [sessionMeta(params, "", { used: decoded.used, size: decoded.size })]
+  if (decoded instanceof UsageUpdate || decoded.sessionUpdate === "usage_update") {
+    const occupancy = occupancyFromUnknown(updateFromParams(params))
+      ?? occupancyFromUnknown(decoded)
+    if (occupancy === undefined) return []
+    return [sessionMeta(params, "", occupancy)]
+  }
+  if (decoded instanceof ConfigOptionUpdate || decoded.sessionUpdate === "config_option_update") {
+    const options = decoded instanceof ConfigOptionUpdate
+      ? decoded.configOptions
+      : isRecord(updateFromParams(params))
+      ? (updateFromParams(params) as Record<string, unknown>).configOptions
+      : undefined
+    const reasoning = parseReasoning(options)
+    if (reasoning === undefined) return []
+    return [sessionMeta(params, "", undefined, reasoning)]
   }
   return []
 }

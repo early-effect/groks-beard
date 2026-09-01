@@ -33,7 +33,7 @@ const manifest = JSON.parse(
 it("lists marketplace identity for early-effect.groks-beard", () => {
   expect(manifest.displayName).toBe("Grok's Beard")
   expect(manifest.publisher).toBe("early-effect")
-  expect(manifest.version).toBe("0.1.1")
+  expect(manifest.version).toBe("0.1.2")
   expect(manifest.license).toBe("Apache-2.0")
   expect(manifest.homepage).toBe("https://github.com/early-effect/groks-beard")
   expect(manifest.repository).toEqual({

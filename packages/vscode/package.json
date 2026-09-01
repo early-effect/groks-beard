@@ -4,7 +4,7 @@
   "publisher": "early-effect",
   "description": "Effect-first VS Code / Cursor client for Grok Build",
   "icon": "media/logo.png",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "license": "Apache-2.0",
   "repository": {

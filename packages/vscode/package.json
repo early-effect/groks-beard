@@ -4,8 +4,29 @@
   "publisher": "early-effect",
   "description": "Effect-first VS Code / Cursor client for Grok Build",
   "icon": "media/logo.png",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/early-effect/groks-beard.git"
+  },
+  "homepage": "https://github.com/early-effect/groks-beard",
+  "bugs": {
+    "url": "https://github.com/early-effect/groks-beard/issues"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "grok",
+    "grok build",
+    "ai",
+    "agent",
+    "cursor"
+  ],
   "type": "module",
   "main": "./dist/extension.js",
   "engines": {

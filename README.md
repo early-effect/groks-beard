@@ -1,8 +1,10 @@
 # Grok's Beard
 
-**Effect-first** VS Code / Cursor client for [Grok Build](https://x.ai). Named for the thing you grow while the agent works.
+**Effect-first** VS Code / Cursor client for [Grok Build](https://x.ai). Named for the thing you grow while the agent works, and a nod to the prog-rock band [Spock's Beard](https://en.wikipedia.org/wiki/Spock%27s_Beard).
 
-> **Status: early / pre-1.0.** Not a fork of the community Grok Build extension. Not affiliated with or endorsed by SpaceXAI (formerly xAI). *Grok* and *Grok Build* are trademarks of xAI; this project uses those names only to describe what it is compatible with.
+Created by [Russell White](https://github.com/russwyte). Published as **`early-effect.groks-beard`**.
+
+> **Status: early / 0.1.** Live on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=early-effect.groks-beard) and [Open VSX](https://open-vsx.org/extension/early-effect/groks-beard). Not a fork of the community Grok Build extension. Not affiliated with or endorsed by SpaceXAI (formerly xAI). *Grok* and *Grok Build* are trademarks of xAI; this project uses those names only to describe what it is compatible with.
 
 Two ways to use the same Grok, on one typed core:
 
@@ -13,15 +15,34 @@ Two ways to use the same Grok, on one typed core:
 
 Shared identity is the CLI's session tree under `~/.grok/sessions/`. Start in the TUI, resume in the editor, and the reverse. The TUI is not hosted inside VS Code's terminal (xterm.js is a documented-bad host for Grok).
 
-## What you get (v1)
+## Install
 
-- Grok Build CLI only. Sign in with `grok login` or `XAI_API_KEY`. The extension never holds your key.
-- TUI-shaped composer: `@path`, `@path:start-end`, slash commands from the live CLI.
-- Ask-mode **review before write**: native multi-file diff, then Allow.
-- Turn-grouped **Grok Changes**: Keep / Undo per file, including always-approve turns.
-- Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
+1. Install the [Grok Build CLI](https://x.ai/cli) (`grok`) and sign in with `grok login` or `XAI_API_KEY`.
+2. Install the extension.
+3. Open chat with `Ctrl+;` / `Cmd+;`.
 
-Not in v1: Electron desktop, phone remote, voice, Codex/Claude, telemetry.
+**VS Code** (Visual Studio Marketplace):
+
+```text
+ext install early-effect.groks-beard
+```
+
+https://marketplace.visualstudio.com/items?itemName=early-effect.groks-beard
+
+**Cursor** (Open VSX; that is what Cursor's Extensions search uses):
+
+Search **Grok's Beard** in Cursor, or install `early-effect.groks-beard`.
+
+https://open-vsx.org/extension/early-effect/groks-beard
+
+**From source:**
+
+```bash
+pnpm install
+pnpm pack:vscode
+code --install-extension packages/vscode/groks-beard.vsix --force
+# Cursor: cursor --install-extension packages/vscode/groks-beard.vsix --force
+```
 
 ## Requirements
 
@@ -29,17 +50,25 @@ Not in v1: Electron desktop, phone remote, voice, Codex/Claude, telemetry.
 - The [Grok Build CLI](https://x.ai/cli) (`grok`) on your PATH.
 - A SuperGrok / X Premium+ login, or an xAI API key. Grok's free tier does not include the CLI agent.
 
-## Install (when a VSIX exists)
+The extension never holds your key.
 
-From source, once the workspace is built:
+## What you get (v1)
 
-```bash
-pnpm install
-pnpm exec tsc -b
-# then install the packaged VSIX into VS Code or Cursor
-```
+- Grok Build CLI only. Sign in with `grok login` or `XAI_API_KEY`.
+- TUI-shaped composer: `@path`, `@path:start-end`, slash commands from the live CLI.
+- Ask-mode **review before write**: native multi-file diff, then Allow.
+- Turn-grouped **Grok Changes**: Keep / Undo per file, including always-approve turns.
+- Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Until the VSIX exists, `pnpm install && pnpm test` is the gate. Open **Grok's Beard** with `Ctrl+;` / `Cmd+;` once the host package lands.
+Not in v1: Electron desktop, phone remote, voice, Codex/Claude, telemetry.
+
+## Shortcuts
+
+| Action | Key |
+| --- | --- |
+| Open Grok's Beard | `Ctrl+;` / `Cmd+;` |
+| Add selection to chat | `Ctrl+Shift+;` / `Cmd+Shift+;` |
+| Stop the running turn | `Escape` (chat focused) |
 
 ## Modules
 
@@ -53,6 +82,10 @@ Until the VSIX exists, `pnpm install && pnpm test` is the gate. Open **Grok's Be
 
 Stack: Effect 4 RC, TypeScript 7, pnpm workspaces, vitest. The CLI owns tools, skills, MCP, memory, and compaction.
 
-## License
+## Copyright and license
 
-TBD. Treat this as source-available until a license file lands.
+Copyright 2026 [Russell White](https://github.com/russwyte).
+
+Grok's Beard is an original work by Russell White, published as `early-effect.groks-beard`.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You may not use this project except in compliance with the License.

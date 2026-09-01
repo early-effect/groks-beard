@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url"
 const manifest = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8"),
 ) as {
+  displayName: string
+  publisher: string
+  version: string
+  license: string
+  homepage: string
+  repository: { type: string; url: string }
+  bugs: { url: string }
+  categories: Array<string>
+  keywords: Array<string>
   contributes: {
     viewsContainers: {
       activitybar: Array<{ id: string; when?: string }>
@@ -20,6 +29,21 @@ const manifest = JSON.parse(
     }
   }
 }
+
+it("lists marketplace identity for early-effect.groks-beard", () => {
+  expect(manifest.displayName).toBe("Grok's Beard")
+  expect(manifest.publisher).toBe("early-effect")
+  expect(manifest.version).toBe("0.1.1")
+  expect(manifest.license).toBe("Apache-2.0")
+  expect(manifest.homepage).toBe("https://github.com/early-effect/groks-beard")
+  expect(manifest.repository).toEqual({
+    type: "git",
+    url: "https://github.com/early-effect/groks-beard.git",
+  })
+  expect(manifest.bugs).toEqual({ url: "https://github.com/early-effect/groks-beard/issues" })
+  expect(manifest.categories).toEqual(["AI", "Chat", "Other"])
+  expect(manifest.keywords).toEqual(["grok", "grok build", "ai", "agent", "cursor"])
+})
 
 it("contributes Grok's Beard as a secondary-sidebar tab with an activity-bar fallback", () => {
   expect(manifest.contributes.viewsContainers.activitybar.map((row) => row.id)).toEqual([

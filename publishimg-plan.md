@@ -1,6 +1,6 @@
 # Publishing Grok's Beard
 
-Attack this in order. Do not `vsce publish` from the current pack: the store page would show version `0.0.0`, no license, and a stub README that pack.mjs writes as "Local VSIX…".
+Repo listing work (steps 1–3) is done on this branch: Apache-2.0 `LICENSE`, `packages/vscode` at `0.1.0` with repository / categories, a real marketplace README, and `pack.mjs` copies those into the VSIX. Do not `vsce publish` until the publisher login in step 4 is done.
 
 Marketplace id is already decided: **`early-effect.groks-beard`**. Display name **Grok's Beard**. Repo: `https://github.com/early-effect/groks-beard`.
 
@@ -17,53 +17,36 @@ Keep the "not affiliated with SpaceXAI / xAI" line on the listing. Do not name t
 
 ---
 
-## 1. Listing metadata
+## 1. Listing metadata (done)
 
-Edit `packages/vscode/package.json` (this is what `vsce` reads after pack rewrites `name` to `groks-beard`):
+`packages/vscode/package.json` (this is what `vsce` reads after pack rewrites `name` to `groks-beard`):
 
-- Bump `version` from `0.0.0` to **`0.1.0`** (first public).
-- Add:
+- Bumped `version` from `0.0.0` to **`0.1.0`** (first public).
+- Added:
   - `"repository": { "type": "git", "url": "https://github.com/early-effect/groks-beard.git" }`
   - `"homepage": "https://github.com/early-effect/groks-beard"`
   - `"bugs": { "url": "https://github.com/early-effect/groks-beard/issues" }`
-  - `"license": "Apache-2.0"` (or whatever you pick in step 2)
+  - `"license": "Apache-2.0"`
   - `"categories": ["AI", "Chat", "Other"]`
   - `"keywords": ["grok", "grok build", "ai", "agent", "cursor"]`
-- Leave `publisher` as `early-effect`.
-- Leave `icon` as `media/logo.png`.
-- Leave `engines.vscode` as `^1.105.0`.
-- `private: true` is fine for the workspace package; pack already copies a staged `package.json`. If vsce still complains, strip `private` in the staged copy only.
+- Left `publisher` as `early-effect`.
+- Left `icon` as `media/logo.png`.
+- Left `engines.vscode` as `^1.105.0`.
+- Workspace package stays `private: true`; pack strips `private` on the staged copy.
 
-Root `README.md` is the listing copy. `packages/vscode/README.md` is a stub. Either replace the vscode README with a marketplace-focused page (install, requirements, shortcuts, disclaimer) or have pack copy the root README. Prefer a dedicated listing README under `packages/vscode/README.md` so the store does not dump the modules table.
-
-Update the root README install section once the item is live (`ext install early-effect.groks-beard`).
+Dedicated listing README is `packages/vscode/README.md` (install, requirements, shortcuts, disclaimer). Root README is the repo page; it still has the source install until the item is live (`ext install early-effect.groks-beard`).
 
 ---
 
-## 2. License
+## 2. License (done)
 
-Root README still says TBD. Marketplace requires a license file.
-
-- Add `LICENSE` at the repo root (Apache-2.0 matches the early-effect org unless you want something else).
-- Copy it into the VSIX stage (see pack.mjs).
-- Set `"license"` in `packages/vscode/package.json` to match.
+Apache-2.0 `LICENSE` at the repo root. Pack copies it into the VSIX (`extension/LICENSE.txt`). `"license": "Apache-2.0"` is set on the vscode package. Root README points at the file.
 
 ---
 
-## 3. Fix `packages/vscode/scripts/pack.mjs`
+## 3. Fix `packages/vscode/scripts/pack.mjs` (done)
 
-Today it:
-
-- Overwrites staged `README.md` with two lines of "Local VSIX" copy.
-- Passes `--allow-missing-repository` and `--skip-license`.
-
-Change it so the staged VSIX includes:
-
-- Real README (vscode listing README, or root README).
-- `LICENSE`.
-- Staged `package.json` with `name: "groks-beard"` plus repository / license / categories.
-
-Drop `--allow-missing-repository` and `--skip-license` once those fields exist. Keep `--no-dependencies` (the extension is already bundled).
+Pack copies the vscode listing README and root `LICENSE`, rewrites staged `name` to `groks-beard`, strips `private`, and keeps `--no-dependencies`. Skip flags are gone.
 
 Sanity check after pack:
 
@@ -131,15 +114,15 @@ Later, not tomorrow: a tag-triggered workflow that packs and publishes. Manual `
 
 ## Checklist
 
-- [ ] License file + `license` field
-- [ ] Version `0.1.0`
-- [ ] `repository` / `homepage` / `bugs`
-- [ ] Categories + keywords
-- [ ] Marketplace README (not the pack stub)
-- [ ] pack.mjs copies README + LICENSE; drop skip flags
-- [ ] Packed VSIX listing files look right
+- [x] License file + `license` field
+- [x] Version `0.1.0`
+- [x] `repository` / `homepage` / `bugs`
+- [x] Categories + keywords
+- [x] Marketplace README (not the pack stub)
+- [x] pack.mjs copies README + LICENSE; drop skip flags
+- [x] Packed VSIX listing files look right
 - [ ] Publisher `early-effect` exists on VS Marketplace
 - [ ] `vsce login` + publish
 - [ ] Open VSX namespace + `ovsx publish`
 - [ ] Fresh-install smoke test
-- [ ] README install instructions
+- [ ] README install instructions (root README, after the item is live)

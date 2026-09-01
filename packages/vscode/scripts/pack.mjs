@@ -36,11 +36,14 @@ mkdirSync(join(stage, "media"), { recursive: true })
 
 const pkg = JSON.parse(readFileSync(join(vscodeRoot, "package.json"), "utf8"))
 pkg.name = "groks-beard"
+delete pkg.private
 writeFileSync(join(stage, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`)
-writeFileSync(
-  join(stage, "README.md"),
-  "# Grok's Beard\n\nLocal VSIX of the Grok Build VS Code / Cursor client.\n",
-)
+const readme = join(vscodeRoot, "README.md")
+const license = join(repoRoot, "LICENSE")
+if (!existsSync(readme)) throw new Error("packages/vscode/README.md missing")
+if (!existsSync(license)) throw new Error("LICENSE missing at repo root")
+cpSync(readme, join(stage, "README.md"))
+cpSync(license, join(stage, "LICENSE"))
 cpSync(join(vscodeRoot, "dist/extension.js"), join(stage, "dist/extension.js"))
 cpSync(join(vscodeRoot, "dist/mcp-proxy.js"), join(stage, "dist/mcp-proxy.js"))
 cpSync(chatJs, join(stage, "dist/webview/chat.js"))
@@ -52,7 +55,7 @@ cpSync(
 )
 writeFileSync(
   join(stage, ".vscodeignore"),
-  "*\n!package.json\n!README.md\n!media/**\n!dist/extension.js\n!dist/mcp-proxy.js\n!dist/webview/chat.js\n",
+  "*\n!package.json\n!README.md\n!LICENSE\n!media/**\n!dist/extension.js\n!dist/mcp-proxy.js\n!dist/webview/chat.js\n",
 )
 
 const vsce = spawnSync(
@@ -62,8 +65,6 @@ const vsce = spawnSync(
     "@vscode/vsce",
     "package",
     "--no-dependencies",
-    "--allow-missing-repository",
-    "--skip-license",
     "--out",
     join(vscodeRoot, "groks-beard.vsix"),
   ],

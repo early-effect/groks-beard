@@ -84,7 +84,7 @@ Stack: Effect 4 RC, TypeScript 7, pnpm workspaces, vitest. The CLI owns tools, s
 
 ## Copyright and license
 
-Copyright 2026 [Russell White](https://github.com/russwyte).
+Copyright [Russell White](https://github.com/russwyte).
 
 Grok's Beard is an original work by Russell White, published as `early-effect.groks-beard`.
 

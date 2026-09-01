@@ -51,7 +51,7 @@ Not in v1: Electron desktop, phone remote, voice, Codex/Claude, telemetry.
 
 ## Copyright and license
 
-Copyright 2026 [Russell White](https://github.com/russwyte).
+Copyright [Russell White](https://github.com/russwyte).
 
 Grok's Beard is an original work by Russell White, published as `early-effect.groks-beard`.
 

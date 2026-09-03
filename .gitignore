@@ -10,6 +10,18 @@ out/
 coverage/
 *.tsbuildinfo
 
+# sbt
+target/
+project/project/
+project/target/
+.bsp/
+.bloop/
+.metals/
+metals.sbt
+*.semanticdb
+build.sbt.semanticdb
+.sbt/
+
 # OS / editor
 .DS_Store
 *.log

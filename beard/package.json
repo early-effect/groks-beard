@@ -1,0 +1,76 @@
+{
+  "name": "groks-beard",
+  "displayName": "Grok's Beard",
+  "publisher": "early-effect",
+  "description": "Effect-first VS Code / Cursor client for Grok Build",
+  "icon": "media/logo.png",
+  "version": "0.2.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/early-effect/groks-beard.git"
+  },
+  "homepage": "https://github.com/early-effect/groks-beard",
+  "bugs": {
+    "url": "https://github.com/early-effect/groks-beard/issues"
+  },
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "groks-beard",
+          "title": "Grok's Beard",
+          "icon": "media/beard.svg",
+          "when": "groksBeard.useActivityBar"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "groks-beard-secondary",
+          "title": "Grok's Beard",
+          "icon": "media/beard.svg",
+          "when": "!groksBeard.useActivityBar"
+        }
+      ]
+    },
+    "views": {
+      "groks-beard": [
+        {
+          "type": "webview",
+          "id": "groksBeard.chat",
+          "name": "Grok's Beard",
+          "when": "groksBeard.useActivityBar"
+        }
+      ],
+      "groks-beard-secondary": [
+        {
+          "type": "webview",
+          "id": "groksBeard.chatSecondary",
+          "name": "Grok's Beard",
+          "when": "!groksBeard.useActivityBar"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "groksBeard.open",
+        "title": "Grok's Beard: Open"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "groksBeard.open",
+        "key": "ctrl+;",
+        "mac": "cmd+;"
+      }
+    ]
+  }
+}

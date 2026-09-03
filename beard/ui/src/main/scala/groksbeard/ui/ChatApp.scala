@@ -198,6 +198,9 @@ object ChatApp:
 
       bridge.onHost(msg => run(applyHost(msg)))
       bridge.post(WebviewMsg.Ready)
+      ComposerQuery.mentionQuery(initialDraft).foreach { q =>
+        bridge.post(WebviewMsg.MentionQuery(q))
+      }
 
       val slashShown = Squawk.zipWith(draft, commands) { (d, cs) =>
         ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(cs, q)).getOrElse(Nil)
@@ -337,12 +340,12 @@ object ChatApp:
             A.role("listbox"),
             forEach(slashShown)(_.name) { cmd =>
               E.li(
-                TestId(s"slash-${cmd.name}"),
                 E.button(
                   MenuItem,
+                  TestId(s"slash-${cmd.name}"),
                   Ev.onClick(_ => pickSlash(cmd.name)),
                   cmd.name,
-                ),
+                )
               )
             },
           )
@@ -354,12 +357,12 @@ object ChatApp:
             A.role("listbox"),
             forEach(mentionShown)(_.absPath) { file =>
               E.li(
-                TestId(s"mention-${file.path}"),
                 E.button(
                   MenuItem,
+                  TestId(s"mention-${file.path}"),
                   Ev.onClick(_ => pickMention(file)),
                   file.path,
-                ),
+                )
               )
             },
           )
@@ -369,6 +372,7 @@ object ChatApp:
           E.textarea(
             Draft,
             TestId("draft"),
+            A.value(draft),
             A.placeholder("Message Grok"),
             A.title(
               settings.map { s =>

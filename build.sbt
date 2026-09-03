@@ -1,5 +1,6 @@
 import ascent.preview.sbt.AscentPreviewPlugin
 import ascent.preview.sbt.AscentPreviewPlugin.autoImport.*
+import chekhov.sbt.ChekhovPlugin.autoImport.*
 import org.scalajs.linker.interface.ModuleKind
 import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport.*
 import rocks.earlyeffect.splice.SplicePlugin.autoImport.*
@@ -41,10 +42,18 @@ pomIncludeRepository := { _ => false }
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 
 zipxJavaVersion := JdkVersion("25")
-zipxCapabilities += Capability.once(
-  name = Capability.TestName,
-  command = zipxTasks.session(testFull, LocalProject("uiJS") / spliceFull),
-)
+zipxEnv += "PLAYWRIGHT_BROWSERS_PATH" ->
+  EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright"))
+zipxCapabilities += Capability
+  .once(
+    name = Capability.TestName,
+    command = zipxTasks.session(
+      LocalProject("uiJS") / chekhovInstall,
+      testFull,
+      LocalProject("uiJS") / spliceFull,
+    ),
+  )
+  .withNodeVersion(NodeVersion("24"))
 
 val commonScalacOptions = Seq(
   "-deprecation",
@@ -65,6 +74,7 @@ val skipPublish = Seq(
 val javaTimePolyfill = MyVersions.javaTime
 
 lazy val root = (project in file("."))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .aggregate(
     LocalProject("core"),
     LocalProject("coreJS"),
@@ -80,6 +90,7 @@ lazy val root = (project in file("."))
   )
 
 lazy val core = (projectMatrix in file("beard/core"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .settings(
     name := "groks-beard-core",
     skipPublish,
@@ -96,6 +107,7 @@ lazy val core = (projectMatrix in file("beard/core"))
   )
 
 lazy val facade = (project in file("beard/facade"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
   .settings(
     name := "groks-beard-facade",
@@ -106,6 +118,7 @@ lazy val facade = (project in file("beard/facade"))
   )
 
 lazy val preview = (project in file("beard/preview"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .settings(
     name := "groks-beard-preview",
     skipPublish,
@@ -131,7 +144,13 @@ lazy val ui = (projectMatrix in file("beard/ui"))
         .dependsOn(facade)
         .settings(
           javaTimePolyfill,
-          scalaJSUseMainModuleInitializer := true,
+          MyVersions.chekhovUi,
+          chekhovBrowser := "firefox",
+          Test / fork    := false,
+          Test / jsEnv   := Def.uncached(chekhovJSEnv.value),
+          Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+          Compile / scalaJSUseMainModuleInitializer := true,
+          Test / scalaJSUseMainModuleInitializer    := false,
           spliceFastOutput                := Def.uncached(ascentPreviewRoot.value / "fast.js"),
           spliceFullOutput                := Def.uncached(
             (ThisBuild / baseDirectory).value / "beard" / "ui" / "target" / "splice" / "full.js"
@@ -151,6 +170,7 @@ lazy val stageExtension =
   taskKey[File]("Copy host fastLinkJS and ui spliceFull into beard/dist for the VSIX / extensionDevelopmentPath")
 
 lazy val host = (project in file("beard/host"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
   .dependsOn(LocalProject("coreJS"))
   .settings(

@@ -46,16 +46,40 @@ object McpToml:
     }
     s"\"$escaped\""
 
+  // Scala.js regex has no MULTILINE; scan line starts instead.
   private def tableRange(text: String, header: String): Option[(Int, Int)] =
-    val escaped = header.replaceAll("([.*+?^${}()|\\[\\]\\\\])", "\\\\$1")
-    val re      = s"(?m)^\\[$escaped\\][ \\t]*\\r?\\n?".r
-    re.findFirstMatchIn(text).map { m =>
-      val start = m.start
-      val after = m.end
-      val rest  = text.substring(after)
-      val next  = "(?m)^[ \\t]*\\[".r.findFirstMatchIn(rest)
-      val end   = next.map(n => after + n.start).getOrElse(text.length)
-      (start, end)
+    val needle = s"[$header]"
+    val start  = indexAtLineStart(text, needle, 0)
+    start.map { s =>
+      var after = s + needle.length
+      while after < text.length && isHSpace(text.charAt(after)) do after += 1
+      if after < text.length && text.charAt(after) == '\r' then after += 1
+      if after < text.length && text.charAt(after) == '\n' then after += 1
+      val next = nextTableOffset(text, after)
+      (s, next.getOrElse(text.length))
     }
   end tableRange
+
+  private def isHSpace(c: Char): Boolean = c == ' ' || c == '\t'
+
+  private def indexAtLineStart(text: String, needle: String, from: Int): Option[Int] =
+    var i = from
+    while i <= text.length do
+      val idx = text.indexOf(needle, i)
+      if idx < 0 then return None
+      if idx == 0 || text.charAt(idx - 1) == '\n' then return Some(idx)
+      i = idx + 1
+    None
+
+  private def nextTableOffset(text: String, from: Int): Option[Int] =
+    var i = from
+    while i < text.length do
+      val atLine = i == 0 || text.charAt(i - 1) == '\n'
+      if atLine then
+        var k = i
+        while k < text.length && isHSpace(text.charAt(k)) do k += 1
+        if k < text.length && text.charAt(k) == '[' then return Some(i)
+      i += 1
+    None
+  end nextTableOffset
 end McpToml

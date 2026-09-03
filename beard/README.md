@@ -25,6 +25,20 @@ Then open:
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
+## Core tests (JVM + JS)
+
+`beard/core` is a projectMatrix. `core/testFull` is the JVM axis only. CI's zipx `test` job runs aggregate `testFull`, which links and runs `coreJS`. Scala.js rejects `java.security.MessageDigest` at link time and `(?m)` at runtime.
+
+```bash
+sbt --no-server testCore
+```
+
+That alias is `core/testFull; coreJS/testFull`. Match CI (Chekhov + every module + splice):
+
+```bash
+sbt --no-server verifyBeard
+```
+
 ## UI tests (Chekhov / Firefox)
 
 `ascent-chekhov` mounts the chat UI under ChekhovJSEnv (Playwright Firefox):

@@ -55,6 +55,9 @@ zipxCapabilities += Capability
   )
   .withNodeVersion(NodeVersion("24"))
 
+addCommandAlias("testCore", "core/testFull; coreJS/testFull")
+addCommandAlias("verifyBeard", "uiJS/chekhovInstall; testFull; uiJS/spliceFull")
+
 val commonScalacOptions = Seq(
   "-deprecation",
   "-feature",
@@ -90,6 +93,7 @@ lazy val root = (project in file("."))
     test / skip := true,
   )
 
+// JVM + JS. `core/testFull` is JVM-only; CI links and runs coreJS. Use `testCore`.
 lazy val core = (projectMatrix in file("beard/core"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .settings(
@@ -101,11 +105,7 @@ lazy val core = (projectMatrix in file("beard/core"))
     zioTestSettings,
   )
   .jvmPlatform(scalaVersions = scalaVersions)
-  .jsPlatform(
-    scalaVersions,
-    Nil,
-    (p: Project) => p.settings(javaTimePolyfill),
-  )
+  .jsPlatform(scalaVersions = scalaVersions, javaTimePolyfill)
 
 lazy val facade = (project in file("beard/facade"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)

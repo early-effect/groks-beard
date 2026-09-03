@@ -1,7 +1,5 @@
 package groksbeard.core
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import zio.json.ast.Json
 import zio.test.*
 
@@ -11,20 +9,20 @@ object McpSpec extends ZIOSpecDefault:
       suite("SocketAddress")(
         test("uses XDG_RUNTIME_DIR and a 16-char workspace hash on unix") {
           val workspace = "/Users/russ/proj"
-          val addr      = SocketAddress.address(workspace, win = false, sha256_16, "/run/user/501", identity)
+          val addr      = SocketAddress.address(workspace, win = false, digest16, "/run/user/501", identity)
           assertTrue(
-            addr == s"/run/user/501/groks-beard/${sha256_16(workspace)}.sock",
-            SocketAddress.hash16(workspace, sha256_16).length == 16,
+            addr == s"/run/user/501/groks-beard/${digest16(workspace)}.sock",
+            SocketAddress.hash16(workspace, digest16).length == 16,
           )
         },
         test("falls back to tmpdir when XDG_RUNTIME_DIR is unset") {
-          val addr = SocketAddress.address("/tmp/ws", win = false, sha256_16, "/var/tmp", identity)
-          assertTrue(addr == s"/var/tmp/groks-beard/${sha256_16("/tmp/ws")}.sock")
+          val addr = SocketAddress.address("/tmp/ws", win = false, digest16, "/var/tmp", identity)
+          assertTrue(addr == s"/var/tmp/groks-beard/${digest16("/tmp/ws")}.sock")
         },
         test("uses a named pipe on Windows and lowercases the workspace path") {
-          val a = SocketAddress.address("C:\\Users\\Russ\\Proj", win = true, sha256_16, "/unused", identity)
-          val b = SocketAddress.address("c:\\users\\russ\\proj", win = true, sha256_16, "/unused", identity)
-          assertTrue(a == b, a == s"\\\\.\\pipe\\groks-beard-${sha256_16("c:\\users\\russ\\proj")}")
+          val a = SocketAddress.address("C:\\Users\\Russ\\Proj", win = true, digest16, "/unused", identity)
+          val b = SocketAddress.address("c:\\users\\russ\\proj", win = true, digest16, "/unused", identity)
+          assertTrue(a == b, a == s"\\\\.\\pipe\\groks-beard-${digest16("c:\\users\\russ\\proj")}")
         },
       ),
       suite("NodeLocator")(
@@ -86,6 +84,27 @@ object McpSpec extends ZIOSpecDefault:
             "# keep\n[mcp_servers.groks-beard]\ncommand = \"x\"\n\n[mcp_servers.other]\ncommand = \"y\"\n"
           val next = McpToml.removeTable(existing)
           assertTrue(next.contains("# keep"), next.contains("[mcp_servers.other]"), !next.contains("groks-beard"))
+        },
+        test("does not treat a mid-line [mcp_servers.groks-beard] mention as the table") {
+          val existing = "note = \"see [mcp_servers.groks-beard]\"\n[mcp_servers.other]\ncommand = \"npx\"\n"
+          val table    = McpToml.renderTable("/bin/node", "/proxy.js", "/ws")
+          val merged   = McpToml.mergeTable(existing, table)
+          assertTrue(
+            merged.contains("see [mcp_servers.groks-beard]"),
+            merged.contains("[mcp_servers.other]"),
+            merged.contains("command = \"npx\""),
+            merged.contains("command = \"/bin/node\""),
+          )
+        },
+        test("replaces a groks-beard table in a CRLF file") {
+          val existing = "[mcp_servers.groks-beard]\r\ncommand = \"old\"\r\n\r\n[plugins]\r\nfoo = true\r\n"
+          val table    = McpToml.renderTable("/bin/node", "/proxy.js", "/ws")
+          val merged   = McpToml.mergeTable(existing, table)
+          assertTrue(
+            merged.contains("command = \"/bin/node\""),
+            !merged.contains("command = \"old\""),
+            merged.contains("[plugins]"),
+          )
         },
       ),
       suite("McpTools")(
@@ -266,9 +285,10 @@ object McpSpec extends ZIOSpecDefault:
       ),
     )
 
-  private def sha256_16(text: String): String =
-    val md = MessageDigest.getInstance("SHA-256")
-    md.digest(text.getBytes(StandardCharsets.UTF_8)).map(b => f"${b & 0xff}%02x").mkString.take(16)
+  // Injected into SocketAddress. Do not use java.security; it is absent on Scala.js.
+  private def digest16(text: String): String =
+    val hex = text.map(c => f"${c.toInt & 0xff}%02x").mkString
+    (hex + "0" * 16).take(16)
 
   private final class FakeHost extends McpToolHost:
     var shown: Int                              = 0

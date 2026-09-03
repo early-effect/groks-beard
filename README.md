@@ -82,7 +82,7 @@ The product lives under `beard/` (Scala 3, Scala.js, Ascent, zio-json). `package
 
 | Path | Role |
 | --- | --- |
-| `beard/core` | Protocol, ChatRuntime, diffs, MCP tool dispatch |
+| `beard/core` | Protocol, ChatRuntime, diffs, MCP tool dispatch (JVM + JS; `sbt testCore`) |
 | `beard/ui` | Ascent chat webview |
 | `beard/host` | VS Code / Cursor extension |
 | `beard/mcp` | stdio MCP proxy for the external TUI |

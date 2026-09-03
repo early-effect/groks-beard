@@ -98,6 +98,60 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("changes scene lists the pending file and Keep drops it") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Changes)
+          result <- withMounted(ui) { root =>
+            for
+              row <- root.getByTestId("change-Main.scala").innerText
+              _   <- root.button("change-keep-Main.scala").click
+              _   <- waitGone(root, "changes")
+            yield assertTrue(row.contains("Main.scala"), row.contains("+2/-1"))
+          }
+        yield result
+        end for
+      },
+      test("Review on an edit tool paints the sidebar diff") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Changes)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- root.button("tool-diff-call_1").click
+              _    <- waitPresent(root, "diff")
+              text <- root.getByTestId("diff").innerText
+            yield assertTrue(text.contains("def run"))
+          }
+        yield result
+        end for
+      },
+      test("Open on a change paints a sidebar diff") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Changes)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- root.button("change-open-Main.scala").click
+              _    <- waitPresent(root, "diff")
+              text <- root.getByTestId("diff").innerText
+            yield assertTrue(text.contains("def run"), text.contains("object Main"))
+          }
+        yield result
+        end for
+      },
+      test("permission Open diff paints the reviewer") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Permission)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- root.button("open-diff").click
+              body <- waitPresent(root, "diff")
+            yield assertTrue(body)
+          }
+        yield result
+      },
       test("Send clears the draft") {
         val bridge = PreviewBridge()
         for
@@ -127,6 +181,14 @@ object ChatChromeSpec extends ZIOSpecDefault:
         if t == expected then ZIO.succeed(t) else ZIO.sleep(20.millis) *> loop
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for draft == $expected"))(5.seconds)
+
+  private def waitPresent(root: AscentRoot, testId: String)(using Trace): IO[Throwable, Boolean] =
+    def loop: IO[Throwable, Boolean] =
+      ZIO.succeed(Option(root.element.querySelector(s"""[data-testid="$testId"]"""))).flatMap {
+        case Some(_) => ZIO.succeed(true)
+        case None    => ZIO.sleep(20.millis) *> loop
+      }
+    loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId"))(5.seconds)
 
   private def waitGone(root: AscentRoot, testId: String)(using Trace): IO[Throwable, Unit] =
     def loop: IO[Throwable, Unit] =

@@ -54,7 +54,28 @@ final case class ElicitCard(
     url: Option[String] = None,
 )
 
-final case class ChangesSummary(fileCount: Int, additions: Int, deletions: Int)
+final case class ChangeFileView(
+    path: String,
+    kind: String,
+    additions: Int,
+    deletions: Int,
+    wholeFile: Boolean = true,
+    undoDisabled: Option[String] = None,
+)
+
+final case class ChangesSummary(
+    fileCount: Int,
+    additions: Int,
+    deletions: Int,
+    files: List[ChangeFileView] = Nil,
+)
+
+final case class DiffView(
+    path: String,
+    oldText: String,
+    newText: String,
+    wholeFile: Boolean = true,
+)
 
 final case class ChatModel(
     sessionId: String = "",
@@ -72,6 +93,7 @@ final case class ChatModel(
     elicit: Option[ElicitCard] = None,
     queued: Int = 0,
     changes: Option[ChangesSummary] = None,
+    diff: Option[DiffView] = None,
     error: Option[String] = None,
 )
 
@@ -125,6 +147,10 @@ object ChatModel:
         model.copy(queued = count)
       case HostMsg.Changes(summary) =>
         model.copy(changes = if summary.fileCount > 0 then Some(summary) else None)
+      case HostMsg.DiffPreview(path, oldText, newText, wholeFile) =>
+        model.copy(diff = Some(DiffView(path, oldText, newText, wholeFile)))
+      case HostMsg.ClearDiff =>
+        model.copy(diff = None)
       case HostMsg.Error(message, _) =>
         model.copy(error = Some(message))
       case HostMsg.ClearTranscript =>
@@ -135,6 +161,8 @@ object ChatModel:
           question = None,
           elicit = None,
           queued = 0,
+          changes = None,
+          diff = None,
           error = None,
         )
 

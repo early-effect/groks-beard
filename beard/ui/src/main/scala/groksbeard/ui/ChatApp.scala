@@ -12,7 +12,7 @@ enum OpenMenu:
   case Mode, Settings
 
 enum Scene:
-  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit
+  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes
 
 object Scene:
   def from(name: String): Scene =
@@ -25,6 +25,7 @@ object Scene:
       case "plan"       => Scene.Plan
       case "question"   => Scene.Question
       case "elicit"     => Scene.Elicit
+      case "changes"    => Scene.Changes
       case _            => Scene.Empty
 end Scene
 
@@ -39,6 +40,10 @@ object ChatApp:
   private val orange       = Color.hex("#c24e16")
   private val cream        = Color.hex("#f3e6d0")
   private val menuBg       = Color.Keyword("var(--vscode-menu-background, #2a1d16)")
+  private val addFg        = Color.Keyword("var(--vscode-gitDecoration-addedResourceForeground, #3fb950)")
+  private val delFg        = Color.Keyword("var(--vscode-gitDecoration-deletedResourceForeground, #f85149)")
+  private val addBg        = Color.Keyword("var(--vscode-diffEditor-insertedTextBackground, rgba(63, 185, 80, 0.18))")
+  private val delBg        = Color.Keyword("var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.18))")
 
   object Page
       extends GlobalStyle(
@@ -225,6 +230,60 @@ object ChatApp:
 
   object StopReason extends CssClass(fontSize.px(12), color(muted))
 
+  object ChangesPane
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(6),
+        padding.px(10),
+        borderTop(Border.solid(1.px, widgetBorder)),
+        backgroundColor(menuBg),
+      )
+
+  object FileRow
+      extends CssClass(
+        display.flex,
+        flexWrap.wrap,
+        alignItems.center,
+        gap.px(8),
+        fontSize.px(12),
+      )
+
+  object StatAdd extends CssClass(color(addFg), fontWeight(600))
+
+  object StatDel extends CssClass(color(delFg), fontWeight(600))
+
+  object DiffPane
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(4),
+        padding.px(10),
+        borderTop(Border.solid(1.px, widgetBorder)),
+        maxHeight.px(280),
+        overflowY.auto,
+        fontFamily.of(FontFamily.monospace),
+        fontSize.px(12),
+      )
+
+  object AddLine
+      extends CssClass(
+        color(addFg),
+        backgroundColor(addBg),
+        whiteSpace.preWrap,
+        padding(0.px, 6.px),
+      )
+
+  object DelLine
+      extends CssClass(
+        color(delFg),
+        backgroundColor(delBg),
+        whiteSpace.preWrap,
+        padding(0.px, 6.px),
+      )
+
+  object CtxLine extends CssClass(whiteSpace.preWrap, color(muted), padding(0.px, 6.px))
+
   def component(bridge: HostBridge, logoSrc: Option[String], scene: Scene = Scene.Empty): UIO[ascent.ast.UI[Any]] =
     val initialDraft = scene match
       case Scene.Slash    => "/"
@@ -345,21 +404,19 @@ object ChatApp:
             Transcript,
             TestId("transcript"),
             forEach(chat.map(_.turns))(_.id) { turn =>
-              renderTurn(turn)
+              renderTurn(bridge, turn)
             },
           )
         ),
         renderCards(bridge, chat),
-        when(chat.map(c => c.queued > 0 || c.changes.nonEmpty || c.error.nonEmpty))(
+        renderDiff(bridge, chat),
+        renderChanges(bridge, chat),
+        when(chat.map(c => c.queued > 0 || c.error.nonEmpty))(
           E.div(
             Toast,
             TestId("status"),
             chat.map { c =>
-              c.error.getOrElse {
-                val queue = if c.queued > 0 then s"${c.queued} queued" else ""
-                val chg   = c.changes.fold("")(s => s"${s.fileCount} files +${s.additions}/-${s.deletions}")
-                List(queue, chg).filter(_.nonEmpty).mkString(" · ")
-              }
+              c.error.getOrElse(if c.queued > 0 then s"${c.queued} queued" else "")
             },
           )
         ),
@@ -513,7 +570,7 @@ object ChatApp:
     end for
   end component
 
-  private def renderTurn(turn: TurnView): ascent.ast.UI[Any] =
+  private def renderTurn(bridge: HostBridge, turn: TurnView): ascent.ast.UI[Any] =
     val (earlier, visible) = ToolView.splitTail(turn.tools)
     val userText           = turn.user.map { u =>
       val refs = u.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
@@ -538,11 +595,11 @@ object ChatApp:
               E.details(
                 ToolBox,
                 E.summary(ToolView.rollupLabel(earlier.size)),
-                Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(t)))),
+                Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(bridge, t)))),
               )
             )
           else Nil
-        E.div(Arg.ArgsArg((rolled ++ visible.map(renderTool)).map(Arg.ChildArg(_))))
+        E.div(Arg.ArgsArg((rolled ++ visible.map(t => renderTool(bridge, t))).map(Arg.ChildArg(_))))
       else E.span(),
       if turn.agent.nonEmpty then E.div(AgentMsg, TestId(s"agent-${turn.id}"), ChatMarkdown.render(turn.agent))
       else E.span(),
@@ -550,18 +607,35 @@ object ChatApp:
     )
   end renderTurn
 
-  private def renderTool(tool: ToolRow): ascent.ast.UI[Any] =
+  private def renderTool(bridge: HostBridge, tool: ToolRow): ascent.ast.UI[Any] =
     val stats =
       (tool.additions, tool.deletions) match
-        case (Some(a), Some(d)) => s" +$a/-$d"
-        case _                  => ""
-    E.details(
-      ToolBox,
-      TestId(s"tool-${tool.id}"),
-      E.summary(s"${tool.title}$stats"),
-      tool.input.filter(_.nonEmpty).fold(E.span())(in => E.pre(ToolView.clip(in))),
-      tool.output.filter(_.nonEmpty).fold(E.span())(out => E.pre(ToolView.clip(out))),
-    )
+        case (Some(a), Some(d)) => Some((a, d))
+        case _                  => None
+    stats match
+      case Some((a, d)) =>
+        E.div(
+          ToolBox,
+          FileRow,
+          TestId(s"tool-${tool.id}"),
+          E.span(tool.title),
+          statsEl(a, d),
+          E.button(
+            Chip,
+            TestId(s"tool-diff-${tool.id}"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(tool.id)))),
+            "Review",
+          ),
+        )
+      case None =>
+        E.details(
+          ToolBox,
+          TestId(s"tool-${tool.id}"),
+          E.summary(tool.title),
+          tool.input.filter(_.nonEmpty).fold(E.span())(in => E.pre(ToolView.clip(in))),
+          tool.output.filter(_.nonEmpty).fold(E.span())(out => E.pre(ToolView.clip(out))),
+        )
+    end match
   end renderTool
 
   private def renderCards(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
@@ -666,4 +740,84 @@ object ChatApp:
         )
       },
     )
+
+  private def renderChanges(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    when(chat.map(_.changes.exists(_.files.nonEmpty)))(
+      E.div(
+        ChangesPane,
+        TestId("changes"),
+        E.div(
+          FileRow,
+          E.strong("Grok Changes"),
+          chat.map { c =>
+            c.changes.fold("")(s => ChangeSet.formatStats(s.additions, s.deletions))
+          },
+        ),
+        forEach(chat.map(_.changes.toList.flatMap(_.files)))(_.path) { file =>
+          val region = if file.wholeFile then "" else " region"
+          val reason = file.undoDisabled.fold("")(r => s" · $r")
+          E.div(
+            FileRow,
+            TestId(s"change-${UnifiedDiff.fileName(file.path)}"),
+            E.span(s"${UnifiedDiff.fileName(file.path)} ${file.kind}$region$reason"),
+            statsEl(file.additions, file.deletions),
+            E.button(
+              Chip,
+              TestId(s"change-open-${UnifiedDiff.fileName(file.path)}"),
+              Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(file.path)))),
+              "Open",
+            ),
+            E.button(
+              Chip,
+              TestId(s"change-keep-${UnifiedDiff.fileName(file.path)}"),
+              Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.KeepChange(file.path)))),
+              "Keep",
+            ),
+            if file.undoDisabled.isDefined then E.span(file.undoDisabled.getOrElse(""))
+            else
+              E.button(
+                Chip,
+                TestId(s"change-undo-${UnifiedDiff.fileName(file.path)}"),
+                Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.UndoChange(file.path)))),
+                "Undo",
+              ),
+          )
+        },
+      )
+    )
+
+  private def renderDiff(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    when(chat.map(_.diff.nonEmpty))(
+      E.div(
+        DiffPane,
+        TestId("diff"),
+        E.div(
+          FileRow,
+          chat.map { c =>
+            c.diff.fold("") { d =>
+              val scope = if d.wholeFile then "whole file" else "region"
+              s"${UnifiedDiff.fileName(d.path)} ($scope)"
+            }
+          },
+          E.button(
+            Chip,
+            TestId("diff-close"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.CloseDiff))),
+            "Close",
+          ),
+        ),
+        forEach(chat.map(_.diff.toList.flatMap(d => UnifiedDiff.lines(d.oldText, d.newText).zipWithIndex)))(
+          _._2.toString
+        ) { pair =>
+          val (line, idx) = pair
+          line match
+            case DiffLine.Add(text)     => E.div(AddLine, TestId(s"diff-add-$idx"), s"+ $text")
+            case DiffLine.Del(text)     => E.div(DelLine, TestId(s"diff-del-$idx"), s"- $text")
+            case DiffLine.Context(text) => E.div(CtxLine, TestId(s"diff-ctx-$idx"), s"  $text")
+        },
+      )
+    )
+
+  private def statsEl(add: Int, del: Int): ascent.ast.UI[Any] =
+    E.span(E.span(StatAdd, s"+$add"), E.span(StatDel, s"/-$del"))
 end ChatApp

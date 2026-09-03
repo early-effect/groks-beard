@@ -1,12 +1,17 @@
 package groksbeard.host
 
-import groksbeard.core.{ChatHtml, ChatRuntime, HostMsg, SettingsState, WebviewMsg}
+import groksbeard.core.{ChatHtml, ChatRuntime, HostMsg, ReviewPorts, SettingsState, WebviewMsg}
 import groksbeard.host.vscode.*
 import zio.json.*
 
 import scala.scalajs.js
 
-final class ChatView(context: ExtensionContext) extends WebviewViewProvider:
+final class ChatView(context: ExtensionContext, review: Review, tree: ChangesTree, status: StatusBarItem)
+    extends WebviewViewProvider:
+
+  private var runtime: Option[ChatRuntime] = None
+
+  def current: Option[ChatRuntime] = runtime
   def resolveWebviewView(
       webviewView: WebviewView,
       ctx: WebviewViewResolveContext,
@@ -27,17 +32,39 @@ final class ChatView(context: ExtensionContext) extends WebviewViewProvider:
     )
     def post(msg: HostMsg): Unit =
       val _ = webview.postMessage(js.JSON.parse(msg.toJson))
+      msg match
+        case HostMsg.Changes(summary) =>
+          status.text =
+            if summary.fileCount == 0 then "$(beard) Grok"
+            else s"$$(diff) ${summary.fileCount}  +${summary.additions}/-${summary.deletions}"
+          if summary.fileCount > 0 then status.show() else status.hide()
+        case _ => ()
       ()
-    val runtime = ChatRuntime(post)
+    end post
+    val rt = ChatRuntime(
+      post,
+      ports = ReviewPorts(
+        readDisk = review.readDisk,
+        openNativeDiffs = review.open,
+        applyUndo = review.applyUndo,
+        onStoreChange = () => tree.refresh(),
+      ),
+    )
+    runtime = Some(rt)
     webview.onDidReceiveMessage { raw =>
       js.JSON.stringify(raw).fromJson[WebviewMsg].foreach {
-        case WebviewMsg.Ready               => runtime.ready()
-        case WebviewMsg.Send(text)          => runtime.send(text)
-        case WebviewMsg.Queue(text)         => runtime.queue(text)
-        case WebviewMsg.Cancel              => runtime.cancel()
-        case WebviewMsg.SetMode(id)         => runtime.setMode(id)
+        case WebviewMsg.Ready               => rt.ready()
+        case WebviewMsg.Send(text)          => rt.send(text)
+        case WebviewMsg.Queue(text)         => rt.queue(text)
+        case WebviewMsg.Cancel              => rt.cancel()
+        case WebviewMsg.SetMode(id)         => rt.setMode(id)
         case WebviewMsg.MentionQuery(query) => post(HostMsg.MentionResults(query, Nil))
         case WebviewMsg.OpenSettings        => post(HostMsg.Settings(SettingsState.defaults))
+        case WebviewMsg.OpenDiff(id)        => rt.openDiff(id)
+        case WebviewMsg.OpenChanges         => rt.openChanges()
+        case WebviewMsg.KeepChange(path)    => rt.keep(path)
+        case WebviewMsg.UndoChange(path)    => rt.undo(path)
+        case WebviewMsg.CloseDiff           => rt.closeDiff()
         case _                              => ()
       }
     }

@@ -60,6 +60,25 @@ object ChatModelSpec extends ZIOSpecDefault:
         val next = ChatModel.applyMsg(withCard, HostMsg.TurnEnd("t1", "end_turn"))
         assertTrue(next.permission.isEmpty, next.queued == 0, next.turns.head.stopReason.contains("end_turn"))
       },
+      test("changes summary and diff preview fold into the model") {
+        val withFiles = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.Changes(
+            ChangesSummary(1, 2, 1, List(ChangeFileView("/tmp/Main.scala", "modify", 2, 1)))
+          ),
+        )
+        val withDiff = ChatModel.applyMsg(
+          withFiles,
+          HostMsg.DiffPreview("/tmp/Main.scala", "old", "new"),
+        )
+        val cleared = ChatModel.applyMsg(withDiff, HostMsg.ClearDiff)
+        assertTrue(
+          withFiles.changes.exists(_.files.head.path == "/tmp/Main.scala"),
+          withDiff.diff.exists(_.newText == "new"),
+          cleared.diff.isEmpty,
+          cleared.changes.nonEmpty,
+        )
+      },
       test("clearTranscript keeps session chrome") {
         val model = ChatModel.empty.copy(
           title = "Stay",

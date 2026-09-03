@@ -10,12 +10,15 @@ trait Disposable extends js.Object:
 @js.native
 trait Uri extends js.Object:
   def fsPath: String = js.native
+  def scheme: String = js.native
+  def path: String   = js.native
   @js.annotation.JSName("toString")
   def asString: String = js.native
 
 @js.native
 trait UriNs extends js.Object:
   def file(path: String): Uri                         = js.native
+  def parse(value: String): Uri                       = js.native
   def joinPath(base: Uri, pathSegments: String*): Uri = js.native
 
 @js.native
@@ -70,11 +73,12 @@ trait WindowNs extends js.Object:
       viewId: String,
       provider: WebviewViewProvider,
       options: js.UndefOr[WebviewViewProviderOptions] = js.undefined,
-  ): Disposable                                                         = js.native
-  def showErrorMessage(message: String): js.Promise[js.Any]             = js.native
-  def showInformationMessage(message: String): js.Promise[js.Any]       = js.native
-  def createOutputChannel(name: String): OutputChannel                  = js.native
-  def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem = js.native
+  ): Disposable                                                                              = js.native
+  def showErrorMessage(message: String): js.Promise[js.Any]                                  = js.native
+  def showInformationMessage(message: String): js.Promise[js.Any]                            = js.native
+  def createOutputChannel(name: String): OutputChannel                                       = js.native
+  def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem                      = js.native
+  def registerTreeDataProvider[T](viewId: String, provider: TreeDataProvider[T]): Disposable = js.native
 end WindowNs
 
 @js.native
@@ -90,8 +94,9 @@ trait StatusBarItem extends js.Object:
 
 @js.native
 trait CommandsNs extends js.Object:
-  def registerCommand(command: String, callback: js.Function0[Any]): Disposable = js.native
-  def executeCommand[T](command: String, rest: js.Any*): js.Promise[T]          = js.native
+  def registerCommand(command: String, callback: js.Function0[Any]): Disposable         = js.native
+  def registerCommand(command: String, callback: js.Function1[js.Any, Any]): Disposable = js.native
+  def executeCommand[T](command: String, rest: js.Any*): js.Promise[T]                  = js.native
 
 @js.native
 trait WorkspaceConfiguration extends js.Object:
@@ -106,10 +111,50 @@ trait WorkspaceNs extends js.Object:
   def workspaceFolders: js.UndefOr[js.Array[WorkspaceFolder]]                   = js.native
   def getConfiguration(section: String): WorkspaceConfiguration                 = js.native
   def onDidChangeConfiguration(listener: js.Function1[js.Any, Any]): Disposable = js.native
+  def fs: FileSystem                                                            = js.native
+  def registerTextDocumentContentProvider(
+      scheme: String,
+      provider: TextDocumentContentProvider,
+  ): Disposable = js.native
+end WorkspaceNs
 
 @js.native
 trait EnvNs extends js.Object:
   def appName: String = js.native
+
+@js.native
+trait FileSystem extends js.Object:
+  def writeFile(uri: Uri, content: js.typedarray.Uint8Array): js.Promise[Unit] = js.native
+  def readFile(uri: Uri): js.Promise[js.typedarray.Uint8Array]                 = js.native
+  def delete(uri: Uri): js.Promise[Unit]                                       = js.native
+
+trait TextDocumentContentProvider extends js.Object:
+  def provideTextDocumentContent(uri: Uri, token: CancellationToken): String
+
+trait TreeDataProvider[T] extends js.Object:
+  def getTreeItem(element: T): TreeItem
+  def getChildren(element: js.UndefOr[T]): js.Array[T]
+
+@js.native
+@JSImport("vscode", "EventEmitter")
+class EventEmitter[T]() extends js.Object:
+  def event: js.Function1[js.Function1[js.UndefOr[T], Any], Disposable] = js.native
+  def fire(): Unit                                                      = js.native
+  def fire(data: T): Unit                                               = js.native
+
+@js.native
+@JSImport("vscode", "TreeItem")
+class TreeItem(val label: String, val collapsibleState: Int) extends js.Object:
+  var id: js.UndefOr[String]           = js.native
+  var description: js.UndefOr[String]  = js.native
+  var contextValue: js.UndefOr[String] = js.native
+  var tooltip: js.UndefOr[String]      = js.native
+  var command: js.UndefOr[js.Any]      = js.native
+
+object TreeItemCollapsible:
+  val None: Int      = 0
+  val Collapsed: Int = 1
+  val Expanded: Int  = 2
 
 @js.native
 @JSImport("vscode", JSImport.Namespace)

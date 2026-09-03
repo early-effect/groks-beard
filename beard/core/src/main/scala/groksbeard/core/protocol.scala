@@ -38,6 +38,8 @@ enum HostMsg:
   case TurnEnd(turnId: String, stopReason: String)
   case Queued(count: Int)
   case Changes(summary: ChangesSummary)
+  case DiffPreview(path: String, oldText: String, newText: String, wholeFile: Boolean = true)
+  case ClearDiff
   case Error(message: String, code: Option[String] = None)
   case ClearTranscript
 end HostMsg
@@ -155,7 +157,18 @@ object HostMsg:
           "fileCount" -> Json.Num(summary.fileCount),
           "additions" -> Json.Num(summary.additions),
           "deletions" -> Json.Num(summary.deletions),
+          "files"     -> Json.Arr(summary.files.map(changeFileJson)*),
         )
+      case HostMsg.DiffPreview(path, oldText, newText, wholeFile) =>
+        Json.Obj(
+          "_tag"      -> Json.Str("diffPreview"),
+          "path"      -> Json.Str(path),
+          "oldText"   -> Json.Str(oldText),
+          "newText"   -> Json.Str(newText),
+          "wholeFile" -> Json.Bool(wholeFile),
+        )
+      case HostMsg.ClearDiff =>
+        Json.Obj("_tag" -> Json.Str("clearDiff"))
       case HostMsg.Error(message, code) =>
         jsonObj(List("_tag" -> Json.Str("error"), "message" -> Json.Str(message)) ++ optional("code", code))
       case HostMsg.ClearTranscript =>
@@ -244,7 +257,15 @@ object HostMsg:
               files <- intField(obj, "fileCount")
               add   <- intField(obj, "additions")
               del   <- intField(obj, "deletions")
-            yield HostMsg.Changes(ChangesSummary(files, add, del))
+            yield HostMsg.Changes(ChangesSummary(files, add, del, changeFilesField(obj)))
+          case Some(Json.Str("diffPreview")) =>
+            for
+              path    <- stringField(obj, "path")
+              oldText <- stringField(obj, "oldText")
+              newText <- stringField(obj, "newText")
+            yield HostMsg.DiffPreview(path, oldText, newText, boolField(obj, "wholeFile").getOrElse(true))
+          case Some(Json.Str("clearDiff")) =>
+            Right(HostMsg.ClearDiff)
           case Some(Json.Str("error")) =>
             stringField(obj, "message").map(msg => HostMsg.Error(msg, optionalString(obj, "code")))
           case Some(Json.Str("clearTranscript")) =>
@@ -309,6 +330,37 @@ object HostMsg:
     obj.get(key) match
       case Some(Json.Num(n)) => Right(n.intValue)
       case _                 => Left(s"HostMsg.$key must be a number")
+
+  private def changeFileJson(file: ChangeFileView): Json =
+    jsonObj(
+      List(
+        "path"      -> Json.Str(file.path),
+        "kind"      -> Json.Str(file.kind),
+        "additions" -> Json.Num(file.additions),
+        "deletions" -> Json.Num(file.deletions),
+        "wholeFile" -> Json.Bool(file.wholeFile),
+      ) ++ file.undoDisabled.toList.map(s => "undoDisabled" -> Json.Str(s))
+    )
+
+  private def changeFilesField(obj: Json.Obj): List[ChangeFileView] =
+    obj.get("files") match
+      case Some(Json.Arr(items)) =>
+        items.toList.collect { case o: Json.Obj =>
+          (o.get("path"), o.get("kind"), o.get("additions"), o.get("deletions")) match
+            case (Some(Json.Str(path)), Some(Json.Str(kind)), Some(Json.Num(add)), Some(Json.Num(del))) =>
+              Some(
+                ChangeFileView(
+                  path,
+                  kind,
+                  add.intValue,
+                  del.intValue,
+                  boolField(o, "wholeFile").getOrElse(true),
+                  optionalString(o, "undoDisabled"),
+                )
+              )
+            case _ => None
+        }.flatten
+      case _ => Nil
 
   private def chipJson(chip: PromptChip): Json =
     jsonObj(
@@ -437,6 +489,9 @@ enum WebviewMsg:
   case ElicitAccept(requestId: String)
   case ElicitDecline(requestId: String)
   case OpenChanges
+  case KeepChange(path: String)
+  case UndoChange(path: String)
+  case CloseDiff
 end WebviewMsg
 
 object WebviewMsg:
@@ -491,6 +546,12 @@ object WebviewMsg:
         Json.Obj("_tag" -> Json.Str("elicitDecline"), "requestId" -> Json.Str(requestId))
       case WebviewMsg.OpenChanges =>
         Json.Obj("_tag" -> Json.Str("openChanges"))
+      case WebviewMsg.KeepChange(path) =>
+        Json.Obj("_tag" -> Json.Str("keepChange"), "path" -> Json.Str(path))
+      case WebviewMsg.UndoChange(path) =>
+        Json.Obj("_tag" -> Json.Str("undoChange"), "path" -> Json.Str(path))
+      case WebviewMsg.CloseDiff =>
+        Json.Obj("_tag" -> Json.Str("closeDiff"))
     }
 
   given JsonDecoder[WebviewMsg] =
@@ -564,8 +625,17 @@ object WebviewMsg:
               case Some(Json.Str(r)) => Right(WebviewMsg.ElicitDecline(r))
               case _                 => Left("WebviewMsg.elicitDecline missing requestId")
           case Some(Json.Str("openChanges")) => Right(WebviewMsg.OpenChanges)
-          case Some(Json.Str(other))         => Left(s"unknown WebviewMsg _tag: $other")
-          case _                             => Left("WebviewMsg missing _tag")
+          case Some(Json.Str("keepChange"))  =>
+            obj.get("path") match
+              case Some(Json.Str(p)) => Right(WebviewMsg.KeepChange(p))
+              case _                 => Left("WebviewMsg.keepChange missing path")
+          case Some(Json.Str("undoChange")) =>
+            obj.get("path") match
+              case Some(Json.Str(p)) => Right(WebviewMsg.UndoChange(p))
+              case _                 => Left("WebviewMsg.undoChange missing path")
+          case Some(Json.Str("closeDiff")) => Right(WebviewMsg.CloseDiff)
+          case Some(Json.Str(other))       => Left(s"unknown WebviewMsg _tag: $other")
+          case _                           => Left("WebviewMsg missing _tag")
       case _ => Left("WebviewMsg must be an object")
     }
 end WebviewMsg

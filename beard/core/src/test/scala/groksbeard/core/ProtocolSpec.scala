@@ -58,5 +58,24 @@ object ProtocolSpec extends ZIOSpecDefault:
         val end: HostMsg   = HostMsg.TurnEnd("t1", "end_turn")
         assertTrue(chunk.toJson.fromJson[HostMsg] == Right(chunk), end.toJson.fromJson[HostMsg] == Right(end))
       },
+      test("changes summary and keep/undo round-trip") {
+        val summary: HostMsg = HostMsg.Changes(
+          ChangesSummary(
+            1,
+            3,
+            1,
+            List(ChangeFileView("/tmp/Main.scala", "modify", 3, 1, wholeFile = true)),
+          )
+        )
+        val keep: WebviewMsg = WebviewMsg.KeepChange("/tmp/Main.scala")
+        val undo: WebviewMsg = WebviewMsg.UndoChange("/tmp/Main.scala")
+        val diff: HostMsg    = HostMsg.DiffPreview("/tmp/Main.scala", "old", "new", wholeFile = true)
+        assertTrue(
+          summary.toJson.fromJson[HostMsg] == Right(summary),
+          keep.toJson.fromJson[WebviewMsg] == Right(keep),
+          undo.toJson.fromJson[WebviewMsg] == Right(undo),
+          diff.toJson.fromJson[HostMsg] == Right(diff),
+        )
+      },
     )
 end ProtocolSpec

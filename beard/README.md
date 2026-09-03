@@ -10,7 +10,12 @@ From the repo root, join Metals' BSP or fail:
 sbt --no-server ~uiJS/ascentPreview
 ```
 
-Then open http://localhost:8765/?scene=empty
+Then open:
+
+- http://localhost:8765/?scene=empty
+- http://localhost:8765/?scene=slash
+- http://localhost:8765/?scene=mentions
+- http://localhost:8765/?scene=settings
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 

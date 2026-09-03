@@ -1,6 +1,6 @@
 package groksbeard.host
 
-import groksbeard.core.{ChatHtml, HostMsg, WebviewMsg}
+import groksbeard.core.{ChatHtml, HostMsg, ModeOption, SettingsState, SlashCommand, WebviewMsg}
 import groksbeard.host.vscode.*
 import zio.json.*
 
@@ -26,14 +26,43 @@ final class ChatView(context: ExtensionContext) extends WebviewViewProvider:
       ctrlEnterToSend = false,
     )
     webview.onDidReceiveMessage { raw =>
-      val json = js.JSON.stringify(raw)
+      val json                     = js.JSON.stringify(raw)
+      def post(msg: HostMsg): Unit =
+        val _ = webview.postMessage(js.JSON.parse(msg.toJson))
+        ()
+
       json.fromJson[WebviewMsg].foreach {
         case WebviewMsg.Ready =>
-          val ready: HostMsg = HostMsg.Ready
-          val meta: HostMsg  = HostMsg.SessionMeta("local", "Grok's Beard", "normal")
-          val _              = webview.postMessage(js.JSON.parse(ready.toJson))
-          val _              = webview.postMessage(js.JSON.parse(meta.toJson))
-        case WebviewMsg.Send(_) =>
+          post(HostMsg.Ready)
+          post(
+            HostMsg.SessionMeta(
+              "local",
+              "Grok's Beard",
+              "normal",
+              List(
+                ModeOption("normal", "Normal"),
+                ModeOption("plan", "Plan"),
+                ModeOption("auto", "Auto"),
+                ModeOption("always-approve", "Always approve"),
+              ),
+            )
+          )
+          post(
+            HostMsg.AvailableCommands(
+              List(
+                SlashCommand("compact", "Compact context"),
+                SlashCommand("always-approve", "Skip permission prompts"),
+              )
+            )
+          )
+          post(HostMsg.Settings(SettingsState.defaults))
+        case WebviewMsg.MentionQuery(query) =>
+          post(HostMsg.MentionResults(query, Nil))
+        case WebviewMsg.SetMode(id) =>
+          post(HostMsg.SessionMeta("local", "Grok's Beard", id, Nil))
+        case WebviewMsg.OpenSettings =>
+          post(HostMsg.Settings(SettingsState.defaults))
+        case _ =>
           ()
       }
     }

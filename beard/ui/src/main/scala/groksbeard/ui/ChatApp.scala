@@ -4,6 +4,7 @@ import ascent.*
 import ascent.css.Color
 import ascent.css.Styles.*
 import ascent.dsl.*
+import ascent.dsl.Arg
 import groksbeard.core.*
 import zio.*
 
@@ -11,15 +12,21 @@ enum OpenMenu:
   case Mode, Settings
 
 enum Scene:
-  case Empty, Slash, Mentions, Settings
+  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit
 
 object Scene:
   def from(name: String): Scene =
     name match
-      case "slash"    => Scene.Slash
-      case "mentions" => Scene.Mentions
-      case "settings" => Scene.Settings
-      case _          => Scene.Empty
+      case "slash"      => Scene.Slash
+      case "mentions"   => Scene.Mentions
+      case "settings"   => Scene.Settings
+      case "transcript" => Scene.Transcript
+      case "permission" => Scene.Permission
+      case "plan"       => Scene.Plan
+      case "question"   => Scene.Question
+      case "elicit"     => Scene.Elicit
+      case _            => Scene.Empty
+end Scene
 
 object ChatApp:
 
@@ -152,6 +159,72 @@ object ChatApp:
         fontSize.px(13),
       )
 
+  object Transcript
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        overflowY.auto,
+        padding.px(12),
+        gap.px(12),
+        minHeight.px(0),
+      )
+
+  object Turn extends CssClass(display.flex, flexDirection.column, gap.px(8))
+
+  object UserMsg
+      extends CssClass(
+        alignSelf.end,
+        backgroundColor(inputBg),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(8),
+        padding(8.px, 10.px),
+        fontSize.px(13),
+        whiteSpace.preWrap,
+      )
+
+  object AgentMsg extends CssClass(fontSize.px(13), color(fg))
+
+  object ThoughtBox
+      extends CssClass(
+        fontSize.px(12),
+        color(muted),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(6),
+        padding.px(6),
+      )
+
+  object ToolBox
+      extends CssClass(
+        fontSize.px(12),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(6),
+        padding.px(6),
+      )
+
+  object Card
+      extends CssClass(
+        backgroundColor(menuBg),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(8),
+        margin.px(8),
+        padding.px(10),
+        display.flex,
+        flexDirection.column,
+        gap.px(8),
+      )
+
+  object Toast
+      extends CssClass(
+        display.flex,
+        gap.px(8),
+        padding(6.px, 12.px),
+        fontSize.px(12),
+        color(muted),
+      )
+
+  object StopReason extends CssClass(fontSize.px(12), color(muted))
+
   def component(bridge: HostBridge, logoSrc: Option[String], scene: Scene = Scene.Empty): UIO[ascent.ast.UI[Any]] =
     val initialDraft = scene match
       case Scene.Slash    => "/"
@@ -161,17 +234,11 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
-      title        <- sq("Grok's Beard")
-      modeId       <- sq("normal")
-      modes        <- sq(List.empty[ModeOption])
-      draft        <- sq(initialDraft)
-      commands     <- sq(List.empty[SlashCommand])
-      mentionHost  <- sq("")
-      mentionFiles <- sq(List.empty[MentionFile])
-      dismissed    <- sq(false)
-      mentionIdx   <- sq(Option.empty[Int])
-      openMenu     <- sq(initialMenu)
-      settings     <- sq(SettingsState.defaults)
+      chat       <- sq(PreviewScenes.seed(scene))
+      draft      <- sq(initialDraft)
+      dismissed  <- sq(false)
+      mentionIdx <- sq(Option.empty[Int])
+      openMenu   <- sq(initialMenu)
     yield
       def run(effect: UIO[Unit]): Unit =
         Unsafe.unsafe { implicit u =>
@@ -180,21 +247,7 @@ object ChatApp:
         }
 
       def applyHost(msg: HostMsg): UIO[Unit] =
-        msg match
-          case HostMsg.Ready =>
-            ZIO.unit
-          case HostMsg.SessionMeta(_, nextTitle, nextMode, nextModes) =>
-            title.set(nextTitle) *>
-              modeId.set(nextMode) *>
-              ZIO.when(nextModes.nonEmpty)(modes.set(nextModes)).unit
-          case HostMsg.AvailableCommands(next) =>
-            commands.set(next)
-          case HostMsg.MentionResults(query, files) =>
-            mentionHost.set(query) *> mentionFiles.set(files)
-          case HostMsg.Settings(state) =>
-            settings.set(state)
-          case HostMsg.ComposerChip(path, absPath, source) =>
-            ZIO.unit
+        chat.update(ChatModel.applyMsg(_, msg))
 
       bridge.onHost(msg => run(applyHost(msg)))
       bridge.post(WebviewMsg.Ready)
@@ -202,21 +255,24 @@ object ChatApp:
         bridge.post(WebviewMsg.MentionQuery(q))
       }
 
-      val slashShown = Squawk.zipWith(draft, commands) { (d, cs) =>
-        ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(cs, q)).getOrElse(Nil)
+      val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
+        ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(c.commands, q)).getOrElse(Nil)
       }
-      val mentionPack  = Squawk.zipWith(mentionHost, mentionFiles)(Tuple2.apply)
-      val mentionBase  = Squawk.zipWith(mentionPack, dismissed)(Tuple2.apply)
-      val mentionShown = Squawk.zipWith(draft, mentionBase) { (d, pack) =>
-        val ((q, files), disc) = pack
-        ComposerQuery.mentionChoices(d, q, files, disc)
+      val mentionShown = Squawk.zipWith(draft, Squawk.zipWith(chat, dismissed)(Tuple2.apply)) { (d, pack) =>
+        val (c, disc) = pack
+        ComposerQuery.mentionChoices(d, c.mentionQuery, c.mentionFiles, disc)
       }
 
       def sendDraft: UIO[Unit] =
         draft.get.flatMap { text =>
           val trimmed = text.trim
           if trimmed.isEmpty then ZIO.unit
-          else ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed))) *> draft.set("") *> dismissed.set(false)
+          else
+            chat.get.flatMap { c =>
+              val msg =
+                if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed) else WebviewMsg.Send(trimmed)
+              ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false)
+            }
         }
 
       def pickSlash(name: String): UIO[Unit] =
@@ -251,14 +307,14 @@ object ChatApp:
           E.button(
             Chip,
             TestId("mode"),
-            A.title(modeId.map(ModeLabel.modeTip)),
+            A.title(chat.map(c => ModeLabel.modeTip(c.modeId))),
             Ev.onClick(_ =>
               openMenu.update {
                 case Some(OpenMenu.Mode) => None
                 case _                   => Some(OpenMenu.Mode)
               }
             ),
-            Squawk.zipWith(modeId, modes)(ModeLabel.modeLabel),
+            chat.map(c => ModeLabel.modeLabel(c.modeId, c.modes)),
           ),
           E.button(
             Chip,
@@ -274,26 +330,51 @@ object ChatApp:
             "Settings",
           ),
         ),
-        E.div(
-          Empty,
-          logoSrc match
-            case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
-            case None      => E.span(),
-          E.h1(Title, title),
-          E.p(Copy, "Ask Grok anything."),
+        when(chat.map(_.turns.isEmpty))(
+          E.div(
+            Empty,
+            logoSrc match
+              case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
+              case None      => E.span(),
+            E.h1(Title, chat.map(_.title)),
+            E.p(Copy, "Ask Grok anything."),
+          )
+        ),
+        when(chat.map(_.turns.nonEmpty))(
+          E.div(
+            Transcript,
+            TestId("transcript"),
+            forEach(chat.map(_.turns))(_.id) { turn =>
+              renderTurn(turn)
+            },
+          )
+        ),
+        renderCards(bridge, chat),
+        when(chat.map(c => c.queued > 0 || c.changes.nonEmpty || c.error.nonEmpty))(
+          E.div(
+            Toast,
+            TestId("status"),
+            chat.map { c =>
+              c.error.getOrElse {
+                val queue = if c.queued > 0 then s"${c.queued} queued" else ""
+                val chg   = c.changes.fold("")(s => s"${s.fileCount} files +${s.additions}/-${s.deletions}")
+                List(queue, chg).filter(_.nonEmpty).mkString(" · ")
+              }
+            },
+          )
         ),
         when(openMenu.map(_.contains(OpenMenu.Mode)))(
           E.div(
             Popover,
             TestId("mode-menu"),
-            forEach(modes)(_.id) { mode =>
+            forEach(chat.map(_.modes))(_.id) { mode =>
               E.button(
                 MenuItem,
                 TestId(s"mode-${mode.id}"),
                 A.title(ModeLabel.modeTip(mode.id)),
                 Ev.onClick(_ =>
                   openMenu.set(None) *>
-                    modeId.set(mode.id) *>
+                    chat.update(_.copy(modeId = mode.id)) *>
                     ZIO.succeed(bridge.post(WebviewMsg.SetMode(mode.id)))
                 ),
                 mode.name,
@@ -309,26 +390,28 @@ object ChatApp:
               MenuItem,
               TestId("setting-ctrl-enter"),
               Ev.onClick(_ =>
-                settings.get.flatMap { s =>
-                  val next = !s.useCtrlEnterToSend
-                  settings.set(s.copy(useCtrlEnterToSend = next)) *>
+                chat.get.flatMap { c =>
+                  val next = !c.settings.useCtrlEnterToSend
+                  chat.update(_.copy(settings = c.settings.copy(useCtrlEnterToSend = next))) *>
                     ZIO.succeed(bridge.post(WebviewMsg.SetSetting("useCtrlEnterToSend", next)))
                 }
               ),
-              settings.map(s => if s.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off"),
+              chat.map(c =>
+                if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off"
+              ),
             ),
             E.button(
               MenuItem,
               TestId("setting-active-file"),
               Ev.onClick(_ =>
-                settings.get.flatMap { s =>
-                  val next = !s.includeActiveFileByDefault
-                  settings.set(s.copy(includeActiveFileByDefault = next)) *>
+                chat.get.flatMap { c =>
+                  val next = !c.settings.includeActiveFileByDefault
+                  chat.update(_.copy(settings = c.settings.copy(includeActiveFileByDefault = next))) *>
                     ZIO.succeed(bridge.post(WebviewMsg.SetSetting("includeActiveFileByDefault", next)))
                 }
               ),
-              settings.map(s =>
-                if s.includeActiveFileByDefault then "Include active file: on" else "Include active file: off"
+              chat.map(c =>
+                if c.settings.includeActiveFileByDefault then "Include active file: on" else "Include active file: off"
               ),
             ),
           )
@@ -375,8 +458,8 @@ object ChatApp:
             A.value(draft),
             A.placeholder("Message Grok"),
             A.title(
-              settings.map { s =>
-                if s.useCtrlEnterToSend then "Ctrl/Cmd+Enter sends, Enter inserts a newline"
+              chat.map { c =>
+                if c.settings.useCtrlEnterToSend then "Ctrl/Cmd+Enter sends, Enter inserts a newline"
                 else "Enter sends, Shift+Enter inserts a newline"
               }
             ),
@@ -391,7 +474,7 @@ object ChatApp:
                 slash    <- slashShown.get
                 mentions <- mentionShown.get
                 idx      <- mentionIdx.get
-                s        <- settings.get
+                s        <- chat.get.map(_.settings)
                 out      <-
                   if key == "Escape" then go(openMenu.set(None) *> dismissed.set(true) *> mentionIdx.set(None))
                   else if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
@@ -417,11 +500,170 @@ object ChatApp:
             Send,
             TestId("send"),
             A.`type`("button"),
-            Ev.onClick(_ => sendDraft),
-            "Send",
+            Ev.onClick(_ =>
+              chat.get.flatMap { c =>
+                if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                else sendDraft
+              }
+            ),
+            chat.map(c => if ChatModel.turnIsRunning(c) then "Stop" else "Send"),
           ),
         ),
       )
     end for
   end component
+
+  private def renderTurn(turn: TurnView): ascent.ast.UI[Any] =
+    val (earlier, visible) = ToolView.splitTail(turn.tools)
+    val userText           = turn.user.map { u =>
+      val refs = u.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
+      (refs :+ u.text).filter(_.nonEmpty).mkString("\n")
+    }
+    E.section(
+      Turn,
+      TestId(s"turn-${turn.id}"),
+      userText.filter(_.nonEmpty).fold(E.span())(text => E.div(UserMsg, TestId(s"user-${turn.id}"), text)),
+      if turn.thought.nonEmpty then
+        E.details(
+          ThoughtBox,
+          TestId(s"thought-${turn.id}"),
+          E.summary(Thought.summaryLabel(turn.thought, turn.stopReason.nonEmpty)),
+          E.pre(turn.thought),
+        )
+      else E.span(),
+      if turn.tools.nonEmpty then
+        val rolled: List[ascent.ast.UI[Any]] =
+          if earlier.nonEmpty then
+            List(
+              E.details(
+                ToolBox,
+                E.summary(ToolView.rollupLabel(earlier.size)),
+                Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(t)))),
+              )
+            )
+          else Nil
+        E.div(Arg.ArgsArg((rolled ++ visible.map(renderTool)).map(Arg.ChildArg(_))))
+      else E.span(),
+      if turn.agent.nonEmpty then E.div(AgentMsg, TestId(s"agent-${turn.id}"), ChatMarkdown.render(turn.agent))
+      else E.span(),
+      turn.stopReason.filter(r => r != "end_turn").fold(E.span())(r => E.div(StopReason, r)),
+    )
+  end renderTurn
+
+  private def renderTool(tool: ToolRow): ascent.ast.UI[Any] =
+    val stats =
+      (tool.additions, tool.deletions) match
+        case (Some(a), Some(d)) => s" +$a/-$d"
+        case _                  => ""
+    E.details(
+      ToolBox,
+      TestId(s"tool-${tool.id}"),
+      E.summary(s"${tool.title}$stats"),
+      tool.input.filter(_.nonEmpty).fold(E.span())(in => E.pre(ToolView.clip(in))),
+      tool.output.filter(_.nonEmpty).fold(E.span())(out => E.pre(ToolView.clip(out))),
+    )
+  end renderTool
+
+  private def renderCards(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    E.div(
+      TestId("cards"),
+      forEach(chat.map(_.permission.toList))(_.requestId) { card =>
+        val choices = card.options.zipWithIndex.map { (opt, idx) =>
+          E.button(
+            MenuItem,
+            TestId(s"perm-${opt.optionId}"),
+            A.title(ToolView.permissionTip(opt.name, opt.kind)),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(card.requestId, opt.optionId)))),
+            s"${idx + 1} ${opt.name}",
+          )
+        }
+        val diff =
+          if card.hasDiff then
+            List(
+              E.button(
+                MenuItem,
+                TestId("open-diff"),
+                Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(card.requestId)))),
+                "Open diff",
+              )
+            )
+          else Nil
+        E.div(
+          Card,
+          TestId("permission"),
+          E.h3(card.title),
+          Arg.ArgsArg((choices ++ diff).map(Arg.ChildArg(_))),
+        )
+      },
+      forEach(chat.map(_.plan.toList))(_.requestId) { card =>
+        E.div(
+          Card,
+          TestId("plan"),
+          E.pre(card.planMarkdown),
+          E.button(
+            Send,
+            TestId("plan-approved"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, "approved")))),
+            "Approve",
+          ),
+          E.button(
+            MenuItem,
+            TestId("plan-cancelled"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, "cancelled")))),
+            "Request changes",
+          ),
+          E.button(
+            MenuItem,
+            TestId("plan-abandoned"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, "abandoned")))),
+            "Abandon",
+          ),
+        )
+      },
+      forEach(chat.map(_.question.toList))(_.requestId) { card =>
+        val body = card.questions.map { q =>
+          E.div(
+            E.p(q.prompt),
+            Arg.ArgsArg(
+              q.options.zipWithIndex.map { (opt, idx) =>
+                Arg.ChildArg(
+                  E.button(
+                    MenuItem,
+                    TestId(s"question-${q.id}-${opt.id}"),
+                    Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(card.requestId, q.id, opt.id)))),
+                    s"${idx + 1} ${opt.label}",
+                  )
+                )
+              }
+            ),
+          )
+        }
+        val dismiss = E.button(
+          MenuItem,
+          TestId("question-dismiss"),
+          Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId)))),
+          "Dismiss",
+        )
+        E.div(Card, TestId("question"), Arg.ArgsArg((body :+ dismiss).map(Arg.ChildArg(_))))
+      },
+      forEach(chat.map(_.elicit.toList))(_.requestId) { card =>
+        E.div(
+          Card,
+          TestId("elicit"),
+          E.h3(card.title),
+          E.button(
+            Send,
+            TestId("elicit-accept"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.ElicitAccept(card.requestId)))),
+            "Accept",
+          ),
+          E.button(
+            MenuItem,
+            TestId("elicit-decline"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(card.requestId)))),
+            "Decline",
+          ),
+        )
+      },
+    )
 end ChatApp

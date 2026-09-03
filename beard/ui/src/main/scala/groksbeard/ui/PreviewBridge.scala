@@ -73,7 +73,18 @@ final class PreviewBridge extends HostBridge:
               case _         => settings
           case _ => settings
         emit(HostMsg.Settings(settings))
-      case WebviewMsg.Send(_) | WebviewMsg.SlashPick(_) | WebviewMsg.MentionPick(_, _) =>
+      case WebviewMsg.Send(text) =>
+        emit(HostMsg.UserMessage("preview-turn", text))
+        emit(HostMsg.AgentChunk("preview-turn", s"Echo: **$text**"))
+        emit(HostMsg.TurnEnd("preview-turn", "end_turn"))
+      case WebviewMsg.Queue(_) =>
+        emit(HostMsg.Queued(1))
+      case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionChoice(_, _, _) |
+          WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
+          WebviewMsg.Cancel =>
+        emit(HostMsg.TurnEnd("t2", "end_turn"))
+      case WebviewMsg.SlashPick(_) | WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) |
+          WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
         ()
 
   def onHost(f: HostMsg => Unit): Unit =

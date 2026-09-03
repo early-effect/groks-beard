@@ -33,5 +33,30 @@ object ProtocolSpec extends ZIOSpecDefault:
         val got = """{"_tag":"not-a-real-tag"}""".fromJson[HostMsg]
         assertTrue(got.isLeft)
       },
+      test("permission card and plan verdict round-trip") {
+        val perm: HostMsg = HostMsg.Permission(
+          PermissionCard(
+            "r1",
+            "tc",
+            "Edit Foo.scala",
+            List(PermissionOption("allow", "Allow", "allow_once")),
+            hasDiff = true,
+          )
+        )
+        val choice: WebviewMsg  = WebviewMsg.PermissionChoice("r1", "allow")
+        val plan: HostMsg       = HostMsg.Plan(PlanCard("p1", "# Plan\n\nDo it."))
+        val verdict: WebviewMsg = WebviewMsg.PlanVerdict("p1", "approved")
+        assertTrue(
+          perm.toJson.fromJson[HostMsg] == Right(perm),
+          choice.toJson.fromJson[WebviewMsg] == Right(choice),
+          plan.toJson.fromJson[HostMsg] == Right(plan),
+          verdict.toJson.fromJson[WebviewMsg] == Right(verdict),
+        )
+      },
+      test("agent chunks and turnEnd round-trip") {
+        val chunk: HostMsg = HostMsg.AgentChunk("t1", "**hi**")
+        val end: HostMsg   = HostMsg.TurnEnd("t1", "end_turn")
+        assertTrue(chunk.toJson.fromJson[HostMsg] == Right(chunk), end.toJson.fromJson[HostMsg] == Right(end))
+      },
     )
 end ProtocolSpec

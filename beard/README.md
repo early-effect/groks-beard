@@ -19,6 +19,14 @@ Then open:
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
+## UI tests (Chekhov / Firefox)
+
+`ascent-chekhov` mounts the chat UI under ChekhovJSEnv (Playwright Firefox):
+
+```bash
+sbt --no-server "uiJS/chekhovInstall; uiJS/testFull"
+```
+
 ## Extension host (stub)
 
 ```bash

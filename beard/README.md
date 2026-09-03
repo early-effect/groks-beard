@@ -21,6 +21,7 @@ Then open:
 - http://localhost:8765/?scene=plan
 - http://localhost:8765/?scene=question
 - http://localhost:8765/?scene=elicit
+- http://localhost:8765/?scene=changes
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
@@ -41,4 +42,4 @@ sbt --no-server host/stageExtension
 code --extensionDevelopmentPath=beard
 ```
 
-Send in the sidebar should paint a user row, two thoughts, `hello`, an Edit tool group, and turn end.
+Send in the sidebar should paint a user row, two thoughts, `hello`, an Edit tool with `+N/-M`, and a Grok Changes panel. Open/Review shows a sidebar diff; Keep drops the file. The host also opens native `vscode.changes` (pairwise `vscode.diff` if that command is missing).

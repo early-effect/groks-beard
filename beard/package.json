@@ -48,6 +48,11 @@
           "id": "groksBeard.chat",
           "name": "Grok's Beard",
           "when": "groksBeard.useActivityBar"
+        },
+        {
+          "id": "groksBeard.changes",
+          "name": "Grok Changes",
+          "when": "groksBeard.useActivityBar"
         }
       ],
       "groks-beard-secondary": [
@@ -56,6 +61,11 @@
           "id": "groksBeard.chatSecondary",
           "name": "Grok's Beard",
           "when": "!groksBeard.useActivityBar"
+        },
+        {
+          "id": "groksBeard.changesSecondary",
+          "name": "Grok Changes",
+          "when": "!groksBeard.useActivityBar"
         }
       ]
     },
@@ -63,8 +73,52 @@
       {
         "command": "groksBeard.open",
         "title": "Grok's Beard: Open"
+      },
+      {
+        "command": "groksBeard.openDiff",
+        "title": "Grok's Beard: Open Diff"
+      },
+      {
+        "command": "groksBeard.openChangesReview",
+        "title": "Grok's Beard: Review Changes"
+      },
+      {
+        "command": "groksBeard.keepChange",
+        "title": "Grok's Beard: Keep Change",
+        "icon": "$(check)"
+      },
+      {
+        "command": "groksBeard.undoChange",
+        "title": "Grok's Beard: Undo Change",
+        "icon": "$(discard)"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "groksBeard.keepChange",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem =~ /^changeFile/",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.undoChange",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeFile",
+          "group": "inline"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "groksBeard.keepChange",
+          "when": "isInDiffEditor && (resourceScheme == beard-proposed || resourceScheme == beard-original)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "groksBeard.undoChange",
+          "when": "isInDiffEditor && (resourceScheme == beard-proposed || resourceScheme == beard-original)",
+          "group": "navigation@2"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "groksBeard.open",

@@ -93,9 +93,17 @@ final class FakeAgent(
               "update"    -> Json.Obj(
                 "sessionUpdate" -> Json.Str("tool_call"),
                 "toolCallId"    -> Json.Str("call_1"),
-                "title"         -> Json.Str("Edit"),
+                "title"         -> Json.Str("Edit Main.scala"),
                 "kind"          -> Json.Str("edit"),
                 "status"        -> Json.Str("pending"),
+                "content"       -> Json.Arr(
+                  Json.Obj(
+                    "type"    -> Json.Str("diff"),
+                    "path"    -> Json.Str("/tmp/Main.scala"),
+                    "oldText" -> Json.Str("object Main"),
+                    "newText" -> Json.Str("object Main:\n  def run = ()"),
+                  )
+                ),
               ),
             ),
           ),

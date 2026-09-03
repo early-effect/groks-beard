@@ -70,6 +70,16 @@ object SessionUpdate:
     val status = obj.get("status") match
       case Some(Json.Str(s)) => s
       case _                 => "pending"
-    ToolRow(id, title, kind, status)
+    val extracted = DiffContent.diffsFromToolCall(obj)
+    val stats     = extracted.diffs.headOption.map(d => ChangeSet.lineDiffStats(d.oldText, d.newText))
+    ToolRow(
+      id,
+      title,
+      kind,
+      status,
+      additions = stats.map(_._1),
+      deletions = stats.map(_._2),
+      input = extracted.diffs.headOption.map(_.path),
+    )
   end toolRow
 end SessionUpdate

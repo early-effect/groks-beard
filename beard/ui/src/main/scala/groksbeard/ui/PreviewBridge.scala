@@ -26,6 +26,9 @@ final class PreviewBridge extends HostBridge:
     MentionFile("README.md", "/repo/README.md"),
   )
 
+  private var pending: List[ChangeFileView] =
+    List(ChangeFileView(PreviewDiffs.MainPath, "modify", 2, 1, wholeFile = true))
+
   def post(msg: WebviewMsg): Unit =
     msg match
       case WebviewMsg.Ready =>
@@ -76,6 +79,23 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.Send(text) =>
         emit(HostMsg.UserMessage("preview-turn", text))
         emit(HostMsg.AgentChunk("preview-turn", s"Echo: **$text**"))
+        emit(
+          HostMsg.ToolGroup(
+            "preview-turn",
+            List(
+              ToolRow(
+                "call_1",
+                "Edit Main.scala",
+                "edit",
+                "completed",
+                additions = Some(2),
+                deletions = Some(1),
+                input = Some(PreviewDiffs.MainPath),
+              )
+            ),
+          )
+        )
+        emitChanges()
         emit(HostMsg.TurnEnd("preview-turn", "end_turn"))
       case WebviewMsg.Queue(_) =>
         emit(HostMsg.Queued(1))
@@ -83,15 +103,32 @@ final class PreviewBridge extends HostBridge:
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
         emit(HostMsg.TurnEnd("t2", "end_turn"))
-      case WebviewMsg.SlashPick(_) | WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) |
-          WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
+      case WebviewMsg.SlashPick(_) | WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) =>
         ()
+      case WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
+        emit(
+          HostMsg.DiffPreview(PreviewDiffs.MainPath, PreviewDiffs.MainOld, PreviewDiffs.MainNew, wholeFile = true)
+        )
+      case WebviewMsg.KeepChange(path) =>
+        pending = pending.filterNot(_.path == path)
+        emitChanges()
+        emit(HostMsg.ClearDiff)
+      case WebviewMsg.UndoChange(path) =>
+        pending = pending.filterNot(_.path == path)
+        emitChanges()
+        emit(HostMsg.ClearDiff)
+      case WebviewMsg.CloseDiff =>
+        emit(HostMsg.ClearDiff)
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f
 
   private def emit(msg: HostMsg): Unit =
     listener(msg)
+
+  private def emitChanges(): Unit =
+    val (add, del) = pending.foldLeft((0, 0)) { case ((a, d), f) => (a + f.additions, d + f.deletions) }
+    emit(HostMsg.Changes(ChangesSummary(pending.size, add, del, pending)))
 end PreviewBridge
 
 object PreviewBridge:

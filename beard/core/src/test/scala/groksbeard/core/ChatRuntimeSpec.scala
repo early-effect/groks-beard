@@ -43,7 +43,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           tags.head == "user:hello",
           tags.exists(_.startsWith("thought:")),
           tags.contains("agent:hello"),
-          tags.contains("tool:Edit"),
+          tags.exists(_.startsWith("tool:Edit")),
           tags.last == "end:end_turn",
         )
       },
@@ -59,7 +59,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           turn.user.exists(_.text == "hello"),
           turn.thought.contains("Considering"),
           turn.agent == "hello",
-          turn.tools.exists(_.title == "Edit"),
+          turn.tools.exists(_.title.contains("Edit")),
           turn.stopReason.contains("end_turn"),
           !ChatModel.turnIsRunning(model),
         )
@@ -96,6 +96,47 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         assertTrue(
           posted.toList == List(HostMsg.Queued(1), HostMsg.Queued(0))
         )
+      },
+      test("send ingests the fake edit into Changes") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val disk   = Map("/tmp/Main.scala" -> "aaa\nobject Main\nccc\n")
+        val rt     = ChatRuntime(posted += _, ports = ReviewPorts(readDisk = disk.get))
+        rt.ready()
+        posted.clear()
+        rt.send("edit Main")
+        val summary = posted.toList.collect { case HostMsg.Changes(s) => s }.last
+        assertTrue(
+          summary.fileCount == 1,
+          summary.files.head.path == "/tmp/Main.scala",
+          summary.files.head.wholeFile,
+          rt.pendingChanges.head.kind == ChangeKind.Modify,
+        )
+      },
+      test("keep drops a pending file") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        rt.send("edit Main")
+        rt.keep("/tmp/Main.scala")
+        assertTrue(
+          rt.pendingChanges.isEmpty,
+          posted.exists {
+            case HostMsg.Changes(s) => s.fileCount == 0
+            case _                  => false
+          },
+        )
+      },
+      test("openDiff posts a sidebar preview of the pending file") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        rt.send("edit Main")
+        posted.clear()
+        rt.openDiff("call_1")
+        assertTrue(posted.exists {
+          case HostMsg.DiffPreview(path, _, _, _) => path == "/tmp/Main.scala"
+          case _                                  => false
+        })
       },
       test("setMode commits plan before later work") {
         val rt = ChatRuntime(_ => ())

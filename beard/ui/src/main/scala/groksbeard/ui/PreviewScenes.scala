@@ -79,5 +79,40 @@ object PreviewScenes:
         ChatModel.empty.copy(
           elicit = Some(ElicitCard("el-1", "docs", "url", "Open docs?", Some("https://example.com")))
         )
+      case Scene.Changes =>
+        ChatModel.empty.copy(
+          turns = List(
+            TurnView(
+              id = "t3",
+              user = Some(TurnUser("Patch Main.scala")),
+              agent = "Edited `Main.scala`.",
+              tools = List(
+                ToolRow(
+                  "call_1",
+                  "Edit Main.scala",
+                  "edit",
+                  "completed",
+                  additions = Some(2),
+                  deletions = Some(1),
+                  input = Some("/tmp/Main.scala"),
+                )
+              ),
+              stopReason = Some("end_turn"),
+            )
+          ),
+          changes = Some(
+            ChangesSummary(
+              1,
+              2,
+              1,
+              List(ChangeFileView("/tmp/Main.scala", "modify", 2, 1, wholeFile = true)),
+            )
+          ),
+        )
       case _ => ChatModel.empty
 end PreviewScenes
+
+object PreviewDiffs:
+  val MainOld: String = "object Main\n"
+  val MainNew: String = "object Main:\n  def run = ()\n"
+  val MainPath        = "/tmp/Main.scala"

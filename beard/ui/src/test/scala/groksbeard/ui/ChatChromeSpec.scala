@@ -53,6 +53,51 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("permission Allow dismisses the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Permission)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("perm-allow").click
+              _ <- waitGone(root, "permission")
+            yield assertTrue(true)
+          }
+        yield result
+      },
+      test("plan Approve dismisses the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("plan-approved").click
+              _ <- waitGone(root, "plan")
+            yield assertTrue(true)
+          }
+        yield result
+      },
+      test("question option dismisses the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Question)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("question-style-dense").click
+              _ <- waitGone(root, "question")
+            yield assertTrue(true)
+          }
+        yield result
+      },
+      test("transcript scene shows the user turn") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            root.getByTestId("user-t1").innerText.map(t => assertTrue(t.contains("Summarize Main.scala")))
+          }
+        yield result
+      },
       test("Send clears the draft") {
         val bridge = PreviewBridge()
         for

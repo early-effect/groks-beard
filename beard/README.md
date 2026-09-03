@@ -16,6 +16,11 @@ Then open:
 - http://localhost:8765/?scene=slash
 - http://localhost:8765/?scene=mentions
 - http://localhost:8765/?scene=settings
+- http://localhost:8765/?scene=transcript
+- http://localhost:8765/?scene=permission
+- http://localhost:8765/?scene=plan
+- http://localhost:8765/?scene=question
+- http://localhost:8765/?scene=elicit
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 

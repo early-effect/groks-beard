@@ -1,0 +1,83 @@
+package groksbeard.ui
+
+import groksbeard.core.*
+
+object PreviewScenes:
+  private val allow =
+    PermissionOption("allow", "Allow", "allow_once")
+  private val reject =
+    PermissionOption("reject", "Reject", "reject_once")
+
+  def seed(scene: Scene): ChatModel =
+    scene match
+      case Scene.Transcript =>
+        ChatModel.empty.copy(
+          turns = List(
+            TurnView(
+              id = "t1",
+              user = Some(TurnUser("Summarize Main.scala")),
+              agent = "Here is a **short** look at `Main.scala`.\n\n- entry is `main`\n- it boots Ascent",
+              tools = List(
+                ToolRow(
+                  "read-1",
+                  "Read Main.scala",
+                  "read",
+                  "completed",
+                  input = Some("src/Main.scala"),
+                  output = Some("object Main"),
+                )
+              ),
+              thought = "Need the file first.",
+              stopReason = Some("end_turn"),
+            )
+          )
+        )
+      case Scene.Permission =>
+        ChatModel.empty.copy(
+          turns = List(
+            TurnView(
+              id = "t2",
+              user = Some(TurnUser("Edit Main.scala")),
+              agent = "I'll patch the file.",
+              tools =
+                List(ToolRow("edit-1", "Edit Main.scala", "edit", "pending", additions = Some(3), deletions = Some(1))),
+            )
+          ),
+          permission = Some(
+            PermissionCard("perm-1", "edit-1", "Edit src/Main.scala", List(allow, reject), hasDiff = true)
+          ),
+        )
+      case Scene.Plan =>
+        ChatModel.empty.copy(
+          plan = Some(
+            PlanCard(
+              "plan-1",
+              """# Plan
+                |
+                |1. Port transcript
+                |2. Wire cards
+                |""".stripMargin,
+            )
+          )
+        )
+      case Scene.Question =>
+        ChatModel.empty.copy(
+          question = Some(
+            QuestionCard(
+              "q-1",
+              List(
+                AgentQuestion(
+                  "style",
+                  "How should the transcript look?",
+                  List(QuestionOption("dense", "Dense"), QuestionOption("roomy", "Roomy")),
+                )
+              ),
+            )
+          )
+        )
+      case Scene.Elicit =>
+        ChatModel.empty.copy(
+          elicit = Some(ElicitCard("el-1", "docs", "url", "Open docs?", Some("https://example.com")))
+        )
+      case _ => ChatModel.empty
+end PreviewScenes

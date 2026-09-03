@@ -32,9 +32,13 @@ Do not serve `target/` with a static file server. Preview restages on change and
 sbt --no-server "uiJS/chekhovInstall; uiJS/testFull"
 ```
 
-## Extension host (stub)
+## Extension host (fake ACP)
+
+The host owns ACP. This slice talks to an in-process `FakeAgent` (no live `grok` spawn). Preview stays on `?scene=` fixtures.
 
 ```bash
 sbt --no-server host/stageExtension
 code --extensionDevelopmentPath=beard
 ```
+
+Send in the sidebar should paint a user row, two thoughts, `hello`, an Edit tool group, and turn end.

@@ -1,6 +1,6 @@
 package groksbeard.host
 
-import groksbeard.core.{ChatHtml, HostMsg, ModeOption, SettingsState, SlashCommand, WebviewMsg}
+import groksbeard.core.{ChatHtml, ChatRuntime, HostMsg, SettingsState, WebviewMsg}
 import groksbeard.host.vscode.*
 import zio.json.*
 
@@ -25,45 +25,20 @@ final class ChatView(context: ExtensionContext) extends WebviewViewProvider:
       logoUri = Some(logoUri.asString),
       ctrlEnterToSend = false,
     )
+    def post(msg: HostMsg): Unit =
+      val _ = webview.postMessage(js.JSON.parse(msg.toJson))
+      ()
+    val runtime = ChatRuntime(post)
     webview.onDidReceiveMessage { raw =>
-      val json                     = js.JSON.stringify(raw)
-      def post(msg: HostMsg): Unit =
-        val _ = webview.postMessage(js.JSON.parse(msg.toJson))
-        ()
-
-      json.fromJson[WebviewMsg].foreach {
-        case WebviewMsg.Ready =>
-          post(HostMsg.Ready)
-          post(
-            HostMsg.SessionMeta(
-              "local",
-              "Grok's Beard",
-              "normal",
-              List(
-                ModeOption("normal", "Normal"),
-                ModeOption("plan", "Plan"),
-                ModeOption("auto", "Auto"),
-                ModeOption("always-approve", "Always approve"),
-              ),
-            )
-          )
-          post(
-            HostMsg.AvailableCommands(
-              List(
-                SlashCommand("compact", "Compact context"),
-                SlashCommand("always-approve", "Skip permission prompts"),
-              )
-            )
-          )
-          post(HostMsg.Settings(SettingsState.defaults))
-        case WebviewMsg.MentionQuery(query) =>
-          post(HostMsg.MentionResults(query, Nil))
-        case WebviewMsg.SetMode(id) =>
-          post(HostMsg.SessionMeta("local", "Grok's Beard", id, Nil))
-        case WebviewMsg.OpenSettings =>
-          post(HostMsg.Settings(SettingsState.defaults))
-        case _ =>
-          ()
+      js.JSON.stringify(raw).fromJson[WebviewMsg].foreach {
+        case WebviewMsg.Ready               => runtime.ready()
+        case WebviewMsg.Send(text)          => runtime.send(text)
+        case WebviewMsg.Queue(text)         => runtime.queue(text)
+        case WebviewMsg.Cancel              => runtime.cancel()
+        case WebviewMsg.SetMode(id)         => runtime.setMode(id)
+        case WebviewMsg.MentionQuery(query) => post(HostMsg.MentionResults(query, Nil))
+        case WebviewMsg.OpenSettings        => post(HostMsg.Settings(SettingsState.defaults))
+        case _                              => ()
       }
     }
     ()

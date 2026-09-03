@@ -82,6 +82,7 @@ lazy val root = (project in file("."))
     facade,
     preview,
     host,
+    mcp,
   )
   .settings(
     name := "groks-beard-root",
@@ -167,7 +168,10 @@ lazy val ui = (projectMatrix in file("beard/ui"))
   )
 
 lazy val stageExtension =
-  taskKey[File]("Copy host fastLinkJS and ui spliceFull into beard/dist for the VSIX / extensionDevelopmentPath")
+  taskKey[File]("Copy host fastLinkJS, mcp-proxy, and ui spliceFull into beard/dist")
+
+lazy val packageVsix =
+  taskKey[File]("Stage the extension and pack beard/groks-beard.vsix with vsce")
 
 lazy val host = (project in file("beard/host"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
@@ -195,6 +199,44 @@ lazy val host = (project in file("beard/host"))
       IO.copyFile(hostOut / "main.js", dest / "extension.js")
       val chat = (LocalProject("uiJS") / spliceFull).value
       IO.copyFile(chat, webview / "chat.js")
+      val mcpOut = (LocalProject("mcp") / Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+      val _mcp   = (LocalProject("mcp") / Compile / fastLinkJS).value
+      IO.copyFile(mcpOut / "main.js", dest / "mcp-proxy.js")
       dest
     },
+    packageVsix := Def.uncached {
+      val dest = stageExtension.value
+      val base = (ThisBuild / baseDirectory).value
+      val cwd  = base / "beard"
+      val vsix = cwd / "groks-beard.vsix"
+      IO.copyFile(base / "LICENSE", cwd / "LICENSE")
+      import scala.sys.process.*
+      val code = Process(
+        Seq("npx", "--yes", "@vscode/vsce", "package", "--no-dependencies", "-o", vsix.getAbsolutePath),
+        cwd,
+      ).!
+      if code != 0 then sys.error(s"vsce package failed with $code")
+      val _ = dest
+      vsix
+    },
+  )
+
+lazy val mcp = (project in file("beard/mcp"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(LocalProject("coreJS"))
+  .settings(
+    name := "groks-beard-mcp",
+    skipPublish,
+    scalaVersion := scala3Version,
+    scalacOptions ++= commonScalacOptions,
+    javaTimePolyfill,
+    MyVersions.zioLib,
+    MyVersions.jsonLib,
+    scalaJSUseMainModuleInitializer := true,
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+    Test / skip     := true,
+    Test / sources  := Nil,
+    Test / test     := Def.uncached(sbt.protocol.testing.TestResult.Passed),
+    Test / testFull := Def.uncached(sbt.protocol.testing.TestResult.Passed),
   )

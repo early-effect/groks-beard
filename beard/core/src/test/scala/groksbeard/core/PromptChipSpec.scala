@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import zio.test.*
+import zio.test.Gen
 
 object PromptChipSpec extends ZIOSpecDefault:
   def spec =
@@ -38,6 +39,29 @@ object PromptChipSpec extends ZIOSpecDefault:
       test("truncates embeddings to the byte cap") {
         val truncated = Utf8.truncateToByteCap("a" * (40 * 1024), PromptChip.EmbedByteCap)
         assertTrue(Utf8.byteLength(truncated) <= PromptChip.EmbedByteCap)
+      },
+      test("workspaceRelativePath strips a matching root") {
+        val seg = Gen.stringBounded(1, 8)(Gen.alphaNumericChar)
+        check(seg, seg) { (dir, file) =>
+          val root = s"/repo/$dir"
+          val abs  = s"$root/$file.scala"
+          val rel  = PromptChip.workspaceRelativePath(abs, Some(root))
+          assertTrue(
+            rel == s"$file.scala",
+            PromptChip.formatAtRef(PromptChip.fromFile(abs, Some(root))).startsWith("@"),
+          )
+        }
+      },
+      test("chipsForSend keeps explicit chips and only then the active file") {
+        val active = PromptChip.fromFile("/repo/src/Bar.scala", Some("/repo"), source = "active")
+        val chip   = PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo"))
+        check(Gen.boolean) { include =>
+          assertTrue(
+            PromptChip.chipsForSend(List(chip), Some(active), include) == List(chip),
+            PromptChip.chipsForSend(Nil, Some(active), include) == (if include then List(active) else Nil),
+            PromptChip.chipsForSend(Nil, None, include).isEmpty,
+          )
+        }
       },
     )
 end PromptChipSpec

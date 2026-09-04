@@ -7,7 +7,8 @@ final case class Occupancy(used: Int, size: Int) derives JsonCodec
 
 object Occupancy:
   def percent(used: Int, size: Int): Int =
-    if size <= 0 then 0 else math.min(100, math.round(used.toDouble / size * 100).toInt)
+    if size <= 0 then 0
+    else math.max(0, math.min(100, math.round(used.toDouble / size * 100).toInt))
 
   def compact(value: Int): String =
     if value >= 1_000_000 then

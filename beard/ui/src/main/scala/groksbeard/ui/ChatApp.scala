@@ -1,8 +1,10 @@
 package groksbeard.ui
 
 import ascent.*
+import ascent.ast.Attr
 import ascent.css.Color
 import ascent.css.Styles.*
+import ascent.domtypes.AttrValue
 import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
@@ -65,14 +67,27 @@ object ChatApp:
         display.flex,
         flexDirection.column,
         height.pct(100),
+        minHeight.pct(100),
         boxSizing.borderBox,
       )
 
   object Toolbar
       extends CssClass(
         display.flex,
+        alignItems.center,
+        gap.px(6),
+        flexShrink(0),
         padding(8.px, 12.px),
         borderBottom(Border.solid(1.px, widgetBorder)),
+      )
+
+  object Stage
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
       )
 
   object Chip
@@ -104,9 +119,40 @@ object ChatApp:
         fontSize.px(14),
       )
 
+  object OccupancyMeter
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        gap.px(6),
+        minWidth.px(0),
+        flexGrow(1.0),
+        color(muted),
+        fontSize.px(11),
+      )
+
+  object OccupancyTrack
+      extends CssClass(
+        width.px(36),
+        height.px(4),
+        borderRadius.px(2),
+        backgroundColor(widgetBorder),
+        overflow.hidden,
+        flexShrink(0),
+      )
+
+  object OccupancyFill
+      extends CssClass(
+        height.pct(100),
+        backgroundColor(Color.hex("#6b4a32")),
+      )
+
+  object OccupancyFillWarn extends CssClass(backgroundColor(orange))
+
+  object OccupancyFillHot extends CssClass(backgroundColor(Color.hex("#a33b12")))
+
   object OccupancyCopy
       extends CssClass(
-        marginLeft.auto,
+        overflow.hidden,
         fontSize.px(11),
         color(muted),
       )
@@ -116,11 +162,14 @@ object ChatApp:
         display.flex,
         flexDirection.column,
         alignItems.center,
-        paddingTop.px(48),
-        minHeight.px(180),
+        justifyContent.center,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
+        padding.px(16),
       )
 
-  object Logo extends CssClass(width.px(132), height.px(132))
+  object Logo extends CssClass(width.px(96), height.px(96))
 
   object Title
       extends CssClass(
@@ -140,8 +189,18 @@ object ChatApp:
       extends CssClass(
         display.flex,
         flexDirection.column,
+        flexShrink(0),
         padding.px(12),
         borderTop(Border.solid(1.px, widgetBorder)),
+      )
+
+  object ComposerBar
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        justifyContent.flexEnd,
+        gap.px(8),
+        marginTop.px(8),
       )
 
   object Draft
@@ -242,7 +301,20 @@ object ChatApp:
         padding.px(10),
         display.flex,
         flexDirection.column,
+        flexShrink(0),
         gap.px(8),
+      )
+
+  object CardBtn
+      extends CssClass(
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(4),
+        padding(6.px, 8.px),
+        backgroundColor(inputBg),
+        color(fg),
+        cursor.pointer,
+        textAlign.left,
+        fontSize.px(13),
       )
 
   object Toast
@@ -471,33 +543,28 @@ object ChatApp:
             ),
             "Settings",
           ),
-          when(chat.map(_.occupancy.exists(_.size > 0)))(
-            E.span(
-              OccupancyCopy,
-              TestId("occupancy"),
-              A.title(chat.map(_.occupancy.fold("")(o => Occupancy.tone(o.used, o.size)))),
-              chat.map(_.occupancy.fold("")(o => Occupancy.label(o.used, o.size))),
+        ),
+        E.div(
+          Stage,
+          when(chat.map(_.turns.isEmpty))(
+            E.div(
+              Empty,
+              logoSrc match
+                case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
+                case None      => E.span(),
+              E.h1(Title, chat.map(_.title)),
+              E.p(Copy, "Ask Grok anything."),
             )
           ),
-        ),
-        when(chat.map(_.turns.isEmpty))(
-          E.div(
-            Empty,
-            logoSrc match
-              case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
-              case None      => E.span(),
-            E.h1(Title, chat.map(_.title)),
-            E.p(Copy, "Ask Grok anything."),
-          )
-        ),
-        when(chat.map(_.turns.nonEmpty))(
-          E.div(
-            Transcript,
-            TestId("transcript"),
-            forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
-              renderTurn(bridge, id, turn)
-            },
-          )
+          when(chat.map(_.turns.nonEmpty))(
+            E.div(
+              Transcript,
+              TestId("transcript"),
+              forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
+                renderTurn(bridge, id, turn)
+              },
+            )
+          ),
         ),
         renderCards(bridge, chat),
         renderDiff(bridge, chat),
@@ -665,17 +732,23 @@ object ChatApp:
               end for
             },
           ),
-          E.button(
-            Send,
-            TestId("send"),
-            A.`type`("button"),
-            Ev.onClick(_ =>
-              chat.get.flatMap { c =>
-                if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                else sendDraft
-              }
+          E.div(
+            ComposerBar,
+            when(chat.map(_.occupancy.exists(_.size > 0)))(
+              occupancyEl(chat)
             ),
-            chat.map(c => if ChatModel.turnIsRunning(c) then "Stop" else "Send"),
+            E.button(
+              Send,
+              TestId("send"),
+              A.`type`("button"),
+              Ev.onClick(_ =>
+                chat.get.flatMap { c =>
+                  if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                  else sendDraft
+                }
+              ),
+              chat.map(c => if ChatModel.turnIsRunning(c) then "Stop" else "Send"),
+            ),
           ),
         ),
       )
@@ -767,8 +840,9 @@ object ChatApp:
       TestId("cards"),
       forEach(chat.map(_.permission.toList))(_.requestId) { card =>
         val choices = card.options.zipWithIndex.map { (opt, idx) =>
+          val skin = if idx == 0 then Send else CardBtn
           E.button(
-            MenuItem,
+            skin,
             TestId(s"perm-${opt.optionId}"),
             A.title(ToolView.permissionTip(opt.name, opt.kind)),
             Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(card.requestId, opt.optionId)))),
@@ -779,7 +853,7 @@ object ChatApp:
           if card.hasDiff then
             List(
               E.button(
-                MenuItem,
+                CardBtn,
                 TestId("open-diff"),
                 Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(card.requestId)))),
                 "Open diff",
@@ -944,4 +1018,24 @@ object ChatApp:
 
   private def statsEl(add: Int, del: Int): ascent.ast.UI[Any] =
     E.span(E.span(StatAdd, s"+$add"), E.span(StatDel, s"/-$del"))
+
+  private def occupancyEl(chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    forEach(chat.map(_.occupancy.toList))(o => s"${o.used}/${o.size}") { o =>
+      val pct  = Occupancy.percent(o.used, o.size)
+      val fill =
+        Occupancy.tone(o.used, o.size) match
+          case "hot"  => OccupancyFillHot
+          case "warn" => OccupancyFillWarn
+          case _      => OccupancyFill
+      E.span(
+        OccupancyMeter,
+        TestId("occupancy"),
+        A.title(s"Context used this session: ${Occupancy.label(o.used, o.size)}"),
+        E.span(
+          OccupancyTrack,
+          E.span(fill, Attr.StaticAttr("style", AttrValue.Str(s"width:${pct}%;height:100%;display:block"))),
+        ),
+        E.span(OccupancyCopy, Occupancy.label(o.used, o.size)),
+      )
+    }
 end ChatApp

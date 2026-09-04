@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import zio.test.*
+import zio.test.Gen
 
 object ModeLabelSpec extends ZIOSpecDefault:
   def spec =
@@ -26,6 +27,17 @@ object ModeLabelSpec extends ZIOSpecDefault:
           ModeLabel.nextMode("auto", modes) == "always-approve",
           ModeLabel.nextMode("always-approve", modes) == "normal",
         )
+      },
+      test("nextMode returns to the start after one full cycle") {
+        val modes = List(
+          ModeOption("normal", "Normal"),
+          ModeOption("plan", "Plan"),
+          ModeOption("always-approve", "Always approve"),
+        )
+        checkAll(Gen.fromIterable(modes.map(_.id))) { start =>
+          val walked = (1 to modes.size).foldLeft(start)((id, _) => ModeLabel.nextMode(id, modes))
+          assertTrue(walked == start)
+        }
       },
       test("explains modes") {
         assertTrue(

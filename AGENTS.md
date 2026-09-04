@@ -26,4 +26,12 @@ Chekhov passing is not visual review. Before asking for commit approval:
 4. Stretch the window. The composer stays on the bottom edge; unused height is the transcript/empty stage, not a void under Send.
 5. Walk empty, slash, mentions, permission, plan, question, changes. Click, type, send. Look for clipped chips, full-width accidents, ghost buttons, occupancy crowding the toolbar.
 
+## Clean review artifacts before the PR
+
+Screenshots, Playwright dumps, and other review temp files are not product. Before every commit that goes on a PR:
+
+1. Delete root-level captures (`beard-*.png`, `page-*.png`, MCP `filename` screenshots). They are gitignored as `/*.png`. Product images live under `beard/media/`.
+2. Do not `git add -A` from the repo root. That will still miss ignored pngs, but it will pick up other junk (`*.log` is ignored; untracked notes and worktrees are not).
+3. `git status` must show no leftover review files. If an untracked png is listed, it is not ignored yet: add the pattern, delete the file, and only then commit.
+
 Applies to: `beard/ui/**`, `beard/host/**`, `beard/preview/**`

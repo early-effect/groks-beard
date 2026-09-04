@@ -21,9 +21,12 @@ object LiveMain extends ZIOAppDefault:
       args <- getArgs
       root = resolvePreviewRoot(args)
       port = resolvePort(args)
-      session <- LiveSession.start(line => java.lang.System.err.println(s"[beard] $line"))
-      _       <- ZIO.logInfo(s"Grok's Beard preview on http://localhost:$port serving $root")
-      _       <- Server.serve(routes(root, port, session)).provide(Server.defaultWith(_.port(port)))
+      _ <- ZIO.scoped {
+        LiveSession.start(line => java.lang.System.err.println(s"[beard] $line")).flatMap { session =>
+          ZIO.logInfo(s"Grok's Beard preview on http://localhost:$port serving $root") *>
+            Server.serve(routes(root, port, session)).provide(Server.defaultWith(_.port(port)))
+        }
+      }
     yield ()
 
   def routes(previewRoot: JPath, port: Int, session: LiveSession): Routes[Any, Response] =
@@ -92,7 +95,10 @@ object LiveSession:
           ProcessTransport.spawn(cmd, args, cwd).orDie.flatMap { transport =>
             val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
             val rt   = ChatRuntime(emit, transport, cwd = cwd, capabilities = caps)
-            handle.set(msg => HostDispatch(rt, msg, emit))
+            ZIO.addFinalizer(ZIO.succeed {
+              log(s"closing grok agent (pid ${transport.pid})")
+              rt.close()
+            }) *> handle.set(msg => HostDispatch(rt, msg, emit))
           }
     yield LiveSession(events, handle)
     end for

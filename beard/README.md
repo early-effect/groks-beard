@@ -4,11 +4,10 @@ Greenfield Scala.js / Ascent rewrite of Grok's Beard. The TypeScript tree under 
 
 ## Preview (agent design loop)
 
-Datastar-example shape: stage the UI, then run the JVM server that composes `Preview.routes` with live Grok.
+One sbt command stages the UI, starts live Grok, and restages on change. `ascentPreviewServe` forks `LiveMain` (Ascent `Preview.routes` plus ACP) and keeps that JVM up; `~` only rebuilds.
 
 ```bash
-sbt --no-server ~uiJS/ascentPreview   # splice + stamp (no server)
-sbt --no-server preview/run           # :8765, Preview.routes ++ grok ACP
+sbt --no-server ~uiJS/ascentPreview
 ```
 
 Open http://localhost:8765/ for **live Grok** (`grok agent stdio`, not FakeAgent). Canned scenes stay on `?scene=`:
@@ -50,7 +49,7 @@ sbt --no-server "uiJS/chekhovInstall; uiJS/testFull"
 
 ## Extension host
 
-The host and `preview/run` spawn `grok agent stdio` (no `--always-approve` / `--yolo` / `--no-leader`, no `terminal: true`). Unit tests keep FakeAgent. Canned `?scene=` fixtures stay for Chekhov.
+The host and `~uiJS/ascentPreview` spawn `grok agent stdio` (no `--always-approve` / `--yolo` / `--no-leader`, no `terminal: true`). The grok child is acquired in a ZIO Scope and destroyed when the preview JVM exits. Unit tests keep FakeAgent. Canned `?scene=` fixtures stay for Chekhov.
 
 ```bash
 sbt --no-server host/stageExtension

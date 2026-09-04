@@ -26,3 +26,8 @@ build.sbt.semanticdb
 # OS / editor
 .DS_Store
 *.log
+
+# Agent / Playwright review captures. Product images live under beard/media/.
+/*.png
+/test-results/
+/playwright-report/

@@ -43,6 +43,7 @@ final case class SessionNewResult(sessionId: String, modes: Option[SessionModeSt
 final case class SessionLoadParams(sessionId: String) derives JsonCodec
 final case class SessionLoadResult(sessionId: String) derives JsonCodec
 final case class SessionSetModeParams(sessionId: String, modeId: String) derives JsonCodec
+final case class SessionCancelParams(sessionId: String) derives JsonCodec
 
 final case class PromptText(@jsonField("type") tpe: String = "text", text: String) derives JsonCodec
 final case class SessionPromptParams(sessionId: String, prompt: List[PromptText]) derives JsonCodec
@@ -91,6 +92,7 @@ enum AcpUpdate derives JsonCodec:
       modeId: Option[String] = None,
       currentModeId: Option[String] = None,
   )
+  @jsonHint("usage_update") case Usage(used: Option[Int] = None, size: Option[Int] = None)
 end AcpUpdate
 
 final case class AcpSessionNotify(sessionId: String = "", update: AcpUpdate) derives JsonCodec

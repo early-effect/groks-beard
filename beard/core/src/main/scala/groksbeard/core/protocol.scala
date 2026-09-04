@@ -35,6 +35,7 @@ enum HostMsg derives JsonCodec:
       title: String,
       modeId: String,
       availableModes: List[ModeOption] = Nil,
+      occupancy: Option[Occupancy] = None,
   )
   @jsonHint("availableCommands") case AvailableCommands(commands: List[SlashCommand])
   @jsonHint("mentionResults") case MentionResults(query: String, files: List[MentionFile])

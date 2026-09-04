@@ -61,6 +61,32 @@ object ComposerQuerySpec extends ZIOSpecDefault:
           ComposerQuery.moveMentionIndex(Some(0), "ArrowUp", 0).isEmpty,
         )
       },
+      test("maps 1-9 onto permission options") {
+        val opts = List(
+          PermissionOption("allow", "Allow", "allow_once"),
+          PermissionOption("reject", "Reject", "reject_once"),
+        )
+        assertTrue(
+          ComposerQuery.permissionOption("1", opts).map(_.optionId).contains("allow"),
+          ComposerQuery.permissionOption("2", opts).map(_.optionId).contains("reject"),
+          ComposerQuery.permissionOption("3", opts).isEmpty,
+          ComposerQuery.permissionOption("a", opts).isEmpty,
+        )
+      },
+      test("maps 1-9 and a-f onto the first question") {
+        val questions = List(
+          AgentQuestion(
+            "style",
+            "How?",
+            List(QuestionOption("dense", "Dense"), QuestionOption("roomy", "Roomy")),
+          )
+        )
+        assertTrue(
+          ComposerQuery.questionOption("1", questions).contains(("style", "dense")),
+          ComposerQuery.questionOption("2", questions).contains(("style", "roomy")),
+          ComposerQuery.questionOption("a", questions).isEmpty,
+        )
+      },
       test("Enter sends unless ctrlEnterToSend, Shift+Enter inserts a newline, Ctrl/Cmd+Enter always sends") {
         assertTrue(
           ComposerQuery.sendOnKey("Enter", shift = false, ctrlOrMeta = false, ctrlEnterToSend = false) ==

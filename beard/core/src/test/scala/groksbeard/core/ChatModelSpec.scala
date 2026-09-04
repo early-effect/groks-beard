@@ -79,6 +79,19 @@ object ChatModelSpec extends ZIOSpecDefault:
           cleared.changes.nonEmpty,
         )
       },
+      test("sessionMeta occupancy sticks across a later mode-only meta") {
+        val withOcc = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.SessionMeta("s1", "Grok's Beard", "normal", occupancy = Some(Occupancy(80, 500))),
+        )
+        val modeOnly = ChatModel.applyMsg(withOcc, HostMsg.SessionMeta("", "", "plan"))
+        assertTrue(
+          withOcc.occupancy.contains(Occupancy(80, 500)),
+          modeOnly.modeId == "plan",
+          modeOnly.occupancy.contains(Occupancy(80, 500)),
+          modeOnly.sessionId == "s1",
+        )
+      },
       test("composerChip upserts by path and range") {
         val first = ChatModel.applyMsg(
           ChatModel.empty,

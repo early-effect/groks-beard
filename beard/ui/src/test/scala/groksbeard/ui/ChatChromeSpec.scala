@@ -71,6 +71,49 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("permission Esc parks the card without answering") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Permission)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "permission")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "permission")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("permission 1 picks the first option") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Permission)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "permission")
+              _ <- root.textarea("draft").press("1")
+              _ <- waitGone(root, "permission")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("occupancy from sessionMeta paints the toolbar") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed(
+                bridge.push(HostMsg.SessionMeta("s", "Grok's Beard", "normal", occupancy = Some(Occupancy(80, 500))))
+              )
+              text <- waitPresent(root, "occupancy") *> root.getByTestId("occupancy").innerText
+            yield assertTrue(text.contains("80"), text.contains("500"))
+          }
+        yield result
+        end for
+      },
       test("permission Allow dismisses the card") {
         val bridge = PreviewBridge()
         for

@@ -1,8 +1,10 @@
 package groksbeard.ui
 
 import ascent.*
+import ascent.ast.Attr
 import ascent.css.Color
 import ascent.css.Styles.*
+import ascent.domtypes.AttrValue
 import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
@@ -48,31 +50,67 @@ object ChatApp:
 
   object Page
       extends GlobalStyle(
-        Selector(Elem.html, height.pct(100)),
+        Selector(
+          Elem.html,
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
+          overflow.hidden,
+          backgroundColor(bg),
+        ),
         Selector(
           Elem.body,
-          height.pct(100),
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
           margin.zero,
+          overflow.hidden,
           color(fg),
           backgroundColor(bg),
           fontFamily.of(FontFamily.systemUi, FontFamily.sansSerif),
         ),
-        Selector(Sel.id("root"), height.pct(100)),
+        Selector(
+          Sel.id("root"),
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
+          overflow.hidden,
+        ),
       )
 
   object Shell
       extends CssClass(
         display.flex,
         flexDirection.column,
+        width.pct(100),
         height.pct(100),
+        overflow.hidden,
         boxSizing.borderBox,
       )
 
   object Toolbar
       extends CssClass(
         display.flex,
+        alignItems.center,
+        gap.px(6),
+        flexShrink(0),
         padding(8.px, 12.px),
         borderBottom(Border.solid(1.px, widgetBorder)),
+      )
+
+  object Stage
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
       )
 
   object Chip
@@ -104,16 +142,57 @@ object ChatApp:
         fontSize.px(14),
       )
 
+  object OccupancyMeter
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        gap.px(6),
+        minWidth.px(0),
+        flexGrow(1.0),
+        color(muted),
+        fontSize.px(11),
+      )
+
+  object OccupancyTrack
+      extends CssClass(
+        width.px(36),
+        height.px(4),
+        borderRadius.px(2),
+        backgroundColor(widgetBorder),
+        overflow.hidden,
+        flexShrink(0),
+      )
+
+  object OccupancyFill
+      extends CssClass(
+        height.pct(100),
+        backgroundColor(Color.hex("#6b4a32")),
+      )
+
+  object OccupancyFillWarn extends CssClass(backgroundColor(orange))
+
+  object OccupancyFillHot extends CssClass(backgroundColor(Color.hex("#a33b12")))
+
+  object OccupancyCopy
+      extends CssClass(
+        overflow.hidden,
+        fontSize.px(11),
+        color(muted),
+      )
+
   object Empty
       extends CssClass(
         display.flex,
         flexDirection.column,
         alignItems.center,
-        paddingTop.px(48),
-        minHeight.px(180),
+        justifyContent.center,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
+        padding.px(16),
       )
 
-  object Logo extends CssClass(width.px(132), height.px(132))
+  object Logo extends CssClass(width.px(96), height.px(96))
 
   object Title
       extends CssClass(
@@ -133,8 +212,18 @@ object ChatApp:
       extends CssClass(
         display.flex,
         flexDirection.column,
+        flexShrink(0),
         padding.px(12),
         borderTop(Border.solid(1.px, widgetBorder)),
+      )
+
+  object ComposerBar
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        justifyContent.flexEnd,
+        gap.px(8),
+        marginTop.px(8),
       )
 
   object Draft
@@ -235,7 +324,20 @@ object ChatApp:
         padding.px(10),
         display.flex,
         flexDirection.column,
+        flexShrink(0),
         gap.px(8),
+      )
+
+  object CardBtn
+      extends CssClass(
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(4),
+        padding(6.px, 8.px),
+        backgroundColor(inputBg),
+        color(fg),
+        cursor.pointer,
+        textAlign.left,
+        fontSize.px(13),
       )
 
   object Toast
@@ -364,6 +466,48 @@ object ChatApp:
         chat.update(m => m.copy(chips = m.chips.filterNot(PromptChip.sameRange(_, chip)))) *>
           ZIO.succeed(bridge.post(WebviewMsg.RemoveChip(chip.absPath, chip.startLine, chip.endLine)))
 
+      def parkPermission: UIO[Unit] =
+        chat.get.flatMap { c =>
+          c.permission match
+            case None       => ZIO.unit
+            case Some(card) =>
+              chat.update(_.copy(permission = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.PermissionPark(card.requestId)))
+        }
+
+      def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
+        val key        = e.key
+        val ctrlOrMeta = e.ctrlKey || e.metaKey
+        chat.get.flatMap { c =>
+          if key == "Escape" then
+            e.preventDefault()
+            openMenu.get.flatMap {
+              case Some(_) => openMenu.set(None)
+              case None    =>
+                mentionShown.get.flatMap { mentions =>
+                  if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                  else if c.permission.isDefined then parkPermission
+                  else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                  else ZIO.unit
+                }
+            }
+          else if e.shiftKey && key == "Tab" && !ctrlOrMeta then
+            e.preventDefault()
+            openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+          else
+            c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
+              case Some(opt) =>
+                e.preventDefault()
+                ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
+              case None =>
+                c.question.flatMap(q => ComposerQuery.questionOption(key, q.questions)) match
+                  case Some((qid, oid)) =>
+                    e.preventDefault()
+                    ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(c.question.get.requestId, qid, oid)))
+                  case None => ZIO.unit
+        }
+      end onCardKey
+
       def pickSlash(name: String): UIO[Unit] =
         draft.set(s"/$name ") *>
           ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -394,6 +538,7 @@ object ChatApp:
       E.div(
         Shell,
         Page,
+        Ev.onKeyDown(onCardKey),
         E.div(
           Toolbar,
           E.button(
@@ -422,24 +567,27 @@ object ChatApp:
             "Settings",
           ),
         ),
-        when(chat.map(_.turns.isEmpty))(
-          E.div(
-            Empty,
-            logoSrc match
-              case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
-              case None      => E.span(),
-            E.h1(Title, chat.map(_.title)),
-            E.p(Copy, "Ask Grok anything."),
-          )
-        ),
-        when(chat.map(_.turns.nonEmpty))(
-          E.div(
-            Transcript,
-            TestId("transcript"),
-            forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
-              renderTurn(bridge, id, turn)
-            },
-          )
+        E.div(
+          Stage,
+          when(chat.map(_.turns.isEmpty))(
+            E.div(
+              Empty,
+              logoSrc match
+                case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
+                case None      => E.span(),
+              E.h1(Title, chat.map(_.title)),
+              E.p(Copy, "Ask Grok anything."),
+            )
+          ),
+          when(chat.map(_.turns.nonEmpty))(
+            E.div(
+              Transcript,
+              TestId("transcript"),
+              forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
+                renderTurn(bridge, id, turn)
+              },
+            )
+          ),
         ),
         renderCards(bridge, chat),
         renderDiff(bridge, chat),
@@ -588,8 +736,7 @@ object ChatApp:
                 idx      <- mentionIdx.get
                 s        <- chat.get.map(_.settings)
                 out      <-
-                  if key == "Escape" then go(openMenu.set(None) *> dismissed.set(true) *> mentionIdx.set(None))
-                  else if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
+                  if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
                     go(mentionIdx.set(ComposerQuery.moveMentionIndex(idx, key, mentions.size)))
                   else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
                     mentions.lift(idx.getOrElse(0)) match
@@ -608,17 +755,23 @@ object ChatApp:
               end for
             },
           ),
-          E.button(
-            Send,
-            TestId("send"),
-            A.`type`("button"),
-            Ev.onClick(_ =>
-              chat.get.flatMap { c =>
-                if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                else sendDraft
-              }
+          E.div(
+            ComposerBar,
+            when(chat.map(_.occupancy.exists(_.size > 0)))(
+              occupancyEl(chat)
             ),
-            chat.map(c => if ChatModel.turnIsRunning(c) then "Stop" else "Send"),
+            E.button(
+              Send,
+              TestId("send"),
+              A.`type`("button"),
+              Ev.onClick(_ =>
+                chat.get.flatMap { c =>
+                  if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                  else sendDraft
+                }
+              ),
+              chat.map(c => if ChatModel.turnIsRunning(c) then "Stop" else "Send"),
+            ),
           ),
         ),
       )
@@ -710,8 +863,9 @@ object ChatApp:
       TestId("cards"),
       forEach(chat.map(_.permission.toList))(_.requestId) { card =>
         val choices = card.options.zipWithIndex.map { (opt, idx) =>
+          val skin = if idx == 0 then Send else CardBtn
           E.button(
-            MenuItem,
+            skin,
             TestId(s"perm-${opt.optionId}"),
             A.title(ToolView.permissionTip(opt.name, opt.kind)),
             Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(card.requestId, opt.optionId)))),
@@ -722,7 +876,7 @@ object ChatApp:
           if card.hasDiff then
             List(
               E.button(
-                MenuItem,
+                CardBtn,
                 TestId("open-diff"),
                 Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(card.requestId)))),
                 "Open diff",
@@ -887,4 +1041,24 @@ object ChatApp:
 
   private def statsEl(add: Int, del: Int): ascent.ast.UI[Any] =
     E.span(E.span(StatAdd, s"+$add"), E.span(StatDel, s"/-$del"))
+
+  private def occupancyEl(chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    forEach(chat.map(_.occupancy.toList))(o => s"${o.used}/${o.size}") { o =>
+      val pct  = Occupancy.percent(o.used, o.size)
+      val fill =
+        Occupancy.tone(o.used, o.size) match
+          case "hot"  => OccupancyFillHot
+          case "warn" => OccupancyFillWarn
+          case _      => OccupancyFill
+      E.span(
+        OccupancyMeter,
+        TestId("occupancy"),
+        A.title(s"Context used this session: ${Occupancy.label(o.used, o.size)}"),
+        E.span(
+          OccupancyTrack,
+          E.span(fill, Attr.StaticAttr("style", AttrValue.Str(s"width:${pct}%;height:100%;display:block"))),
+        ),
+        E.span(OccupancyCopy, Occupancy.label(o.used, o.size)),
+      )
+    }
 end ChatApp

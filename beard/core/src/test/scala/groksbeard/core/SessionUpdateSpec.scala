@@ -28,6 +28,20 @@ object SessionUpdateSpec extends ZIOSpecDefault:
         )
         assertTrue(msgs == List(HostMsg.AvailableCommands(List(SlashCommand("compact", "Compact context")))))
       },
+      test("usage_update becomes occupancy on sessionMeta") {
+        val msgs = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("usage_update"),
+              "used"          -> Json.Num(80),
+              "size"          -> Json.Num(500),
+            ),
+          ),
+          "t1",
+        )
+        assertTrue(msgs == List(HostMsg.SessionMeta("", "", "", occupancy = Some(Occupancy(80, 500)))))
+      },
       test("unknown sessionUpdate is ignored") {
         val msgs = SessionUpdate.hostMsgs(
           Json.Obj(

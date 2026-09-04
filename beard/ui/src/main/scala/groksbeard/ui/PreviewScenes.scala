@@ -12,6 +12,7 @@ object PreviewScenes:
     scene match
       case Scene.Transcript =>
         ChatModel.empty.copy(
+          occupancy = Some(Occupancy(12_000, 500_000)),
           turns = List(
             TurnView(
               id = "t1",
@@ -30,10 +31,11 @@ object PreviewScenes:
               thought = "Need the file first.",
               stopReason = Some("end_turn"),
             )
-          )
+          ),
         )
       case Scene.Permission =>
         ChatModel.empty.copy(
+          occupancy = Some(Occupancy(80, 100)),
           turns = List(
             TurnView(
               id = "t2",

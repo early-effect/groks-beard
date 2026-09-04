@@ -86,6 +86,24 @@ object ChatApp:
         cursor.pointer,
       )
 
+  object ChipRow
+      extends CssClass(
+        display.flex,
+        flexWrap.wrap,
+        gap.px(6),
+        marginBottom.px(8),
+      )
+
+  object ChipRemove
+      extends CssClass(
+        border.none,
+        backgroundColor(Color.transparent),
+        color(muted),
+        cursor.pointer,
+        padding(0.px, 4.px),
+        fontSize.px(14),
+      )
+
   object Empty
       extends CssClass(
         display.flex,
@@ -332,28 +350,35 @@ object ChatApp:
 
       def sendDraft: UIO[Unit] =
         draft.get.flatMap { text =>
-          val trimmed = text.trim
-          if trimmed.isEmpty then ZIO.unit
-          else
-            chat.get.flatMap { c =>
+          chat.get.flatMap { c =>
+            val trimmed = text.trim
+            if trimmed.isEmpty && c.chips.isEmpty then ZIO.unit
+            else
               val msg =
                 if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed) else WebviewMsg.Send(trimmed)
               ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false)
-            }
+          }
         }
+
+      def dropChip(chip: PromptChip): UIO[Unit] =
+        chat.update(m => m.copy(chips = m.chips.filterNot(PromptChip.sameRange(_, chip)))) *>
+          ZIO.succeed(bridge.post(WebviewMsg.RemoveChip(chip.absPath, chip.startLine, chip.endLine)))
 
       def pickSlash(name: String): UIO[Unit] =
         draft.set(s"/$name ") *>
           ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
 
       def pickMention(file: MentionFile): UIO[Unit] =
+        val chip = PromptChip(file.path, file.absPath, source = "mention")
         draft.update { d =>
           d.replaceFirst("(?:^|\\s)@[^\\s]*$", " ").trim
         } *>
           dismissed.set(false) *>
           mentionIdx.set(None) *>
+          chat.update(m => m.copy(chips = PromptChip.upsert(m.chips, chip))) *>
           ZIO.succeed(bridge.post(WebviewMsg.MentionPick(file.path, file.absPath))) *>
           ZIO.succeed(bridge.post(WebviewMsg.MentionQuery("")))
+      end pickMention
 
       def onDraft(text: String): UIO[Unit] =
         draft.set(text) *>
@@ -517,6 +542,28 @@ object ChatApp:
         ),
         E.div(
           Composer,
+          when(chat.map(_.chips.nonEmpty))(
+            E.div(
+              ChipRow,
+              TestId("chips"),
+              forEach(chat.map(_.chips))(PromptChip.key) { chip =>
+                val label = PromptChip.formatAtRef(chip)
+                E.span(
+                  Chip,
+                  TestId(s"chip-${label.stripPrefix("@")}"),
+                  E.span(label),
+                  E.button(
+                    ChipRemove,
+                    TestId(s"chip-remove-${label.stripPrefix("@")}"),
+                    A.`type`("button"),
+                    A.title(s"Remove $label from chat"),
+                    Ev.onClick(_ => dropChip(chip)),
+                    "×",
+                  ),
+                )
+              },
+            )
+          ),
           E.textarea(
             Draft,
             TestId("draft"),

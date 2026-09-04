@@ -25,7 +25,7 @@ object Extension:
     val tree                         =
       new ChangesTree(() => chatRef.toList.flatMap(_.current.toList.flatMap(_.pendingChanges)) ++ mcpHost.sidecar)
     treeRef = Some(tree)
-    val chat = new ChatView(context, review, tree, status, line => out.appendLine(line))
+    val chat = new ChatView(context, review, tree, status, line => out.appendLine(line), mcpHost.rememberSelection)
     chatRef = Some(chat)
     activeChat = Some(chat)
     val bridge  = new TuiBridge(mcpHost.asToolHost, _ => ())
@@ -89,6 +89,18 @@ object Extension:
           val path = Extension.asString(arg)
           if path.nonEmpty then chat.current.foreach(_.undo(path)),
       )
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.addSelection", () => chat.addSelection())
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.addFile", () => chat.addFile())
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.copySelectionAsGrokRef", () => chat.copySelectionAsGrokRef())
+    )
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration(_ => chat.refreshSettings())
     )
     context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.enableTuiBridge", () => enableBridge(context, mcpHost, bridge))

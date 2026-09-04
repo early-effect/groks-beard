@@ -64,21 +64,25 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           !ChatModel.turnIsRunning(model),
         )
       },
-      test("send while a turn is running posts queued") {
+      test("send while a turn is running queues the follow-up until the turn ends") {
         val posted               = scala.collection.mutable.ListBuffer.empty[HostMsg]
         lazy val rt: ChatRuntime = ChatRuntime { msg =>
           posted += msg
           msg match
-            case HostMsg.UserMessage(_, _, _, _) => rt.send("later")
-            case _                               => ()
+            case HostMsg.UserMessage(_, "hello", _, _) => rt.send("later")
+            case _                                     => ()
         }
         rt.ready()
         posted.clear()
         rt.send("hello")
-        assertTrue(posted.exists {
-          case HostMsg.Queued(1) => true
-          case _                 => false
-        })
+        val users = posted.toList.collect { case HostMsg.UserMessage(_, text, _, _) => text }
+        assertTrue(
+          posted.exists {
+            case HostMsg.Queued(1) => true
+            case _                 => false
+          },
+          users == List("hello", "later"),
+        )
       },
       test("empty send is a no-op") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
@@ -143,6 +147,92 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.ready()
         rt.setMode("plan")
         assertTrue(rt.state.modeId.contains("plan"), rt.state.planActive)
+      },
+      test("permissionChoice answers the inbound request") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val lines  = scala.collection.mutable.ListBuffer.empty[String]
+        val inner  = AcpTransport.fake()
+        val wrap   = new AcpTransport:
+          def onData(next: String => Unit): Unit = inner.onData(next)
+          def write(data: String): Unit          =
+            lines += data
+            inner.write(data)
+          def close(): Unit = inner.close()
+        val rt = ChatRuntime(posted += _, wrap)
+        rt.ready()
+        posted.clear()
+        rt.send("hello")
+        assertTrue(posted.exists {
+          case p: HostMsg.Permission => p.requestId == "perm-1"
+          case _                     => false
+        })
+        lines.clear()
+        rt.permissionChoice("perm-1", "allow-once")
+        assertTrue(lines.exists(l => l.contains("\"selected\"") && l.contains("allow-once")))
+      },
+      test("addChip is included in the next prompt") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val lines  = scala.collection.mutable.ListBuffer.empty[String]
+        val inner  = AcpTransport.fake()
+        val wrap   = new AcpTransport:
+          def onData(next: String => Unit): Unit = inner.onData(next)
+          def write(data: String): Unit          =
+            lines += data
+            inner.write(data)
+          def close(): Unit = inner.close()
+        val rt = ChatRuntime(posted += _, wrap)
+        rt.ready()
+        posted.clear()
+        lines.clear()
+        rt.addChip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50)))
+        rt.send("explain")
+        assertTrue(
+          posted.exists {
+            case HostMsg.UserMessage(_, "explain", chips, _) =>
+              chips.exists(c => PromptChip.formatAtRef(c) == "@src/Foo.scala:10-50")
+            case _ => false
+          },
+          lines.exists(l => l.contains("@src/Foo.scala:10-50") && l.contains("explain")),
+        )
+      },
+      test("mentionQuery uses the search port") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val files  = List(MentionFile("src/Main.scala", "/repo/src/Main.scala"))
+        val rt     = ChatRuntime(posted += _, searchFiles = q => if q == "Main" then files else Nil)
+        rt.mentionQuery("Main")
+        assertTrue(posted.toList == List(HostMsg.MentionResults("Main", files)))
+      },
+      test("empty send still runs when a chip is pending") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.addChip(PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo")))
+        rt.send("   ")
+        assertTrue(posted.exists {
+          case HostMsg.UserMessage(_, "", chips, _) => chips.exists(_.path == "src/Foo.scala")
+          case _                                    => false
+        })
+      },
+      test("removeChip drops a pending chip so empty send is a no-op") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val chip   = PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50))
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        rt.addChip(chip)
+        posted.clear()
+        rt.removeChip(chip.absPath, chip.startLine, chip.endLine)
+        rt.send("")
+        assertTrue(posted.isEmpty)
+      },
+      test("setSetting posts the patched settings") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.setSetting("useCtrlEnterToSend", true)
+        assertTrue(posted.exists {
+          case s: HostMsg.Settings => s.useCtrlEnterToSend
+          case _                   => false
+        })
       },
     )
 end ChatRuntimeSpec

@@ -45,7 +45,13 @@ enum HostMsg derives JsonCodec:
       useCtrlEnterToSend: Boolean,
       changesPresentation: String,
   )
-  @jsonHint("composerChip") case ComposerChip(path: String, absPath: String, source: String)
+  @jsonHint("composerChip") case ComposerChip(
+      path: String,
+      absPath: String,
+      source: String,
+      startLine: Option[Int] = None,
+      endLine: Option[Int] = None,
+  )
   @jsonHint("userMessage") case UserMessage(
       turnId: String,
       text: String,
@@ -107,6 +113,9 @@ object HostMsg:
 
   def changes(summary: ChangesSummary): HostMsg =
     Changes(summary.fileCount, summary.additions, summary.deletions, summary.files)
+
+  def chip(p: PromptChip): HostMsg =
+    ComposerChip(p.path, p.absPath, p.source, p.startLine, p.endLine)
 end HostMsg
 
 @jsonDiscriminator("_tag")
@@ -118,6 +127,12 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("slashPick") case SlashPick(name: String)
   @jsonHint("mentionQuery") case MentionQuery(query: String)
   @jsonHint("mentionPick") case MentionPick(path: String, absPath: String)
+  @jsonHint("addSelection") case AddSelection
+  @jsonHint("removeChip") case RemoveChip(
+      absPath: String,
+      startLine: Option[Int] = None,
+      endLine: Option[Int] = None,
+  )
   @jsonHint("cycleMode") case CycleMode
   @jsonHint("setMode") case SetMode(modeId: String)
   @jsonHint("openSettings") case OpenSettings

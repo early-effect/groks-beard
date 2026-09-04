@@ -103,7 +103,10 @@ final class PreviewBridge extends HostBridge:
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
         emit(HostMsg.TurnEnd("t2", "end_turn"))
-      case WebviewMsg.SlashPick(_) | WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) =>
+      case WebviewMsg.MentionPick(path, absPath) =>
+        emit(HostMsg.chip(PromptChip(path, absPath, source = "mention")))
+      case WebviewMsg.SlashPick(_) | WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection |
+          WebviewMsg.RemoveChip(_, _, _) =>
         ()
       case WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
         emit(

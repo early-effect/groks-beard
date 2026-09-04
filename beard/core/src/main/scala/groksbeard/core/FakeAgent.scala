@@ -70,6 +70,26 @@ final class FakeAgent(
           thought("Considering the selection.\n"),
           thought("Then I'll answer.\n"),
           agent("hello"),
+          Rpc.request(
+            RpcId.Str("perm-1"),
+            "session/request_permission",
+            PermissionRequestParams(
+              toolCall = AcpToolCall(
+                toolCallId = "call_1",
+                title = "Edit Main.scala",
+                kind = "edit",
+                status = "pending",
+                content = List(
+                  AcpContent.Diff(
+                    path = "/tmp/Main.scala",
+                    oldText = Some("object Main"),
+                    newText = Some("object Main:\n  def run = ()"),
+                  )
+                ),
+              ),
+              options = List(PermissionOption("allow-once", "Allow once", "allow_once")),
+            ),
+          ),
           Rpc.notifyOf(
             "session/update",
             AcpSessionNotify(

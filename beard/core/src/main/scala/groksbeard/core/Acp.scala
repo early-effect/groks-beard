@@ -100,6 +100,8 @@ final case class PermissionRequestParams(
     options: List[PermissionOption] = Nil,
 ) derives JsonCodec
 
+final case class AskUserQuestionParams(questions: List[AgentQuestion] = Nil) derives JsonCodec
+
 final case class RawEditInput(
     path: Option[String] = None,
     old_string: Option[String] = None,

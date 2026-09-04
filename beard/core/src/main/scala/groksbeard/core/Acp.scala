@@ -40,7 +40,7 @@ final case class InitializeResult(protocolVersion: Int, agentCapabilities: Agent
 final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil) derives JsonCodec
 final case class SessionModeState(currentModeId: String, availableModes: List[ModeOption] = Nil) derives JsonCodec
 final case class SessionNewResult(sessionId: String, modes: Option[SessionModeState] = None) derives JsonCodec
-final case class SessionLoadParams(sessionId: String) derives JsonCodec
+final case class SessionLoadParams(sessionId: String, cwd: String = ".", mcpServers: List[Json] = Nil) derives JsonCodec
 final case class SessionLoadResult(sessionId: String) derives JsonCodec
 final case class SessionSetModeParams(sessionId: String, modeId: String) derives JsonCodec
 final case class SessionCancelParams(sessionId: String) derives JsonCodec
@@ -69,6 +69,7 @@ final case class AcpToolCall(
 enum AcpUpdate derives JsonCodec:
   @jsonHint("agent_thought_chunk") case Thought(content: AcpContent)
   @jsonHint("agent_message_chunk") case Agent(content: AcpContent)
+  @jsonHint("user_message_chunk") case User(content: AcpContent)
   @jsonHint("available_commands_update") case Commands(availableCommands: List[SlashCommand] = Nil)
   @jsonHint("tool_call") case ToolCall(
       toolCallId: String = "tool",

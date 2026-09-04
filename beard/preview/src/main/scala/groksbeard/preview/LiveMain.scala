@@ -94,6 +94,7 @@ object LiveSession:
           log(s"spawning $cmd ${args.mkString(" ")}")
           ProcessTransport.spawn(cmd, args, cwd).orDie.flatMap { transport =>
             val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+            val home = GrokHome(env)
             val rt   = ChatRuntime(
               emit,
               transport,
@@ -101,6 +102,15 @@ object LiveSession:
               capabilities = caps,
               searchFiles = q => MentionWalk.fromDisk(cwd, q),
               includeActiveFile = () => true,
+              listSessions = () => SessionWalk.fromDisk(home, cwd),
+              scheduleEmptyDelete = id =>
+                val path = SessionIndex.sessionPath(home, cwd, id)
+                val t    = new Thread(() =>
+                  Thread.sleep(SessionIndex.EmptyGraceMs)
+                  NioSessionFs.deleteTree(path)
+                )
+                t.setDaemon(true)
+                t.start(),
             )
             ZIO.addFinalizer(ZIO.succeed {
               log(s"closing grok agent (pid ${transport.pid})")

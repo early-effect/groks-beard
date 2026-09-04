@@ -9,9 +9,11 @@ object SessionUpdateSpec extends ZIOSpecDefault:
       test("thought and agent chunks become HostMsg") {
         val thought = SessionUpdate.hostMsgs(chunk("agent_thought_chunk", "hmm"), "t1")
         val agent   = SessionUpdate.hostMsgs(chunk("agent_message_chunk", "hi"), "t1")
+        val user    = SessionUpdate.hostMsgs(chunk("user_message_chunk", "hello from disk"), "t1")
         assertTrue(
           thought == List(HostMsg.ThoughtChunk("t1", "hmm")),
           agent == List(HostMsg.AgentChunk("t1", "hi")),
+          user == List(HostMsg.UserMessage("t1", "hello from disk")),
         )
       },
       test("available_commands_update becomes commands") {

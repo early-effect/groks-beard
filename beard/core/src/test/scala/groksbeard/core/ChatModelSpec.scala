@@ -5,6 +5,19 @@ import zio.test.*
 object ChatModelSpec extends ZIOSpecDefault:
   def spec =
     suite("ChatModel")(
+      test("sessionList opens the picker and ClearTranscript closes it") {
+        val listed = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.SessionList(List(SessionRow("s1", "Plan")), currentId = "s1", openPicker = true),
+        )
+        val closed = ChatModel.applyMsg(listed, HostMsg.ClearTranscript)
+        assertTrue(
+          listed.pickerOpen,
+          listed.sessions.head.title == "Plan",
+          !closed.pickerOpen,
+          closed.sessions.size == 1,
+        )
+      },
       test("user and agent chunks fold into one turn") {
         val model =
           ChatModel.applyMsg(ChatModel.empty, HostMsg.UserMessage("t1", "hello"))

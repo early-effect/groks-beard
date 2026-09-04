@@ -31,6 +31,15 @@ object nodeFs extends js.Object:
   def existsSync(path: String): Boolean                            = js.native
   def readFileSync(path: String, enc: String): String              = js.native
   def writeFileSync(path: String, data: String, enc: String): Unit = js.native
+  def readdirSync(path: String): js.Array[String]                  = js.native
+  def statSync(path: String): NodeFsStats                          = js.native
+  def rmSync(path: String, options: js.Dynamic): Unit              = js.native
+end nodeFs
+
+@js.native
+trait NodeFsStats extends js.Object:
+  def isDirectory(): Boolean = js.native
+  def mtimeMs: Double        = js.native
 
 @js.native
 trait NodeHash extends js.Object:

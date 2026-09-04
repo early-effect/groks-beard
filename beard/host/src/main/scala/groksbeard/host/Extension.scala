@@ -94,6 +94,12 @@ object Extension:
       vscode.commands.registerCommand("groksBeard.cancel", () => chat.current.foreach(_.cancel()))
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.newSession", () => chat.current.foreach(_.newSession()))
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.resumeSession", () => chat.current.foreach(_.openPicker()))
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.cycleMode", () => chat.current.foreach(_.cycleMode()))
     )
     context.subscriptions.push(

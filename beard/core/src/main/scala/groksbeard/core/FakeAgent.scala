@@ -1,5 +1,7 @@
 package groksbeard.core
 
+import zio.json.*
+
 final class FakeAgent(
     val sessionId: String = "sess_test",
     pairSetModeWithTerminal: Boolean = false,
@@ -7,13 +9,13 @@ final class FakeAgent(
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
-      case Rpc.Request(id, method, _) => repliesFor(id, method)
-      case _                          => Nil
+      case Rpc.Request(id, method, params) => repliesFor(id, method, params)
+      case _                               => Nil
 
   def encodeReplies(msg: Rpc): String =
     Ndjson.encodeChunk(replies(msg).map(Rpc.toLine))
 
-  private def repliesFor(id: RpcId, method: String): List[Rpc] =
+  private def repliesFor(id: RpcId, method: String, params: zio.json.ast.Json): List[Rpc] =
     method match
       case "initialize" =>
         List(Rpc.ok(id, InitializeResult(1, AgentCapabilities(loadSession = true)).asJson))
@@ -51,7 +53,13 @@ final class FakeAgent(
         )
       case "session/load" =>
         if lockLoad then List(Rpc.fail(id, Rpc.MethodNotFound, "session locked"))
-        else List(Rpc.ok(id, SessionLoadResult(sessionId).asJson))
+        else
+          val sid = params.as[SessionLoadParams].toOption.map(_.sessionId).filter(_.nonEmpty).getOrElse(sessionId)
+          List(
+            chunk(AcpUpdate.User(AcpContent.Text("hello from disk")), sid),
+            chunk(AcpUpdate.Agent(AcpContent.Text("welcome back")), sid),
+            Rpc.ok(id, SessionLoadResult(sid).asJson),
+          )
       case "session/set_mode" =>
         val result = Rpc.ok(id, EmptyObject().asJson)
         if !pairSetModeWithTerminal then List(result)
@@ -120,6 +128,6 @@ final class FakeAgent(
   private def agent(text: String): Rpc.Notify =
     chunk(AcpUpdate.Agent(AcpContent.Text(text)))
 
-  private def chunk(update: AcpUpdate): Rpc.Notify =
-    Rpc.notifyOf("session/update", AcpSessionNotify(sessionId, update))
+  private def chunk(update: AcpUpdate, sid: String = sessionId): Rpc.Notify =
+    Rpc.notifyOf("session/update", AcpSessionNotify(sid, update))
 end FakeAgent

@@ -37,6 +37,12 @@ enum HostMsg derives JsonCodec:
       availableModes: List[ModeOption] = Nil,
       occupancy: Option[Occupancy] = None,
   )
+  @jsonHint("sessionList") case SessionList(
+      sessions: List[SessionRow],
+      currentId: String = "",
+      openPicker: Boolean = false,
+  )
+  @jsonHint("sessionLocked") case SessionLocked(sessionId: String, message: String)
   @jsonHint("availableCommands") case AvailableCommands(commands: List[SlashCommand])
   @jsonHint("mentionResults") case MentionResults(query: String, files: List[MentionFile])
   @jsonHint("settingsState") case Settings(
@@ -150,4 +156,8 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("keepChange") case KeepChange(path: String)
   @jsonHint("undoChange") case UndoChange(path: String)
   @jsonHint("closeDiff") case CloseDiff
+  @jsonHint("newSession") case NewSession
+  @jsonHint("resumeSession") case ResumeSession(sessionId: String)
+  @jsonHint("openSessionPicker") case OpenSessionPicker
+  @jsonHint("closeSessionPicker") case CloseSessionPicker
 end WebviewMsg

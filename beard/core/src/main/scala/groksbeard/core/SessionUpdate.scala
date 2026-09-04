@@ -9,6 +9,8 @@ object SessionUpdate:
         textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.ThoughtChunk(turnId, t))
       case Some(AcpUpdate.Agent(content)) =>
         textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.AgentChunk(turnId, t))
+      case Some(AcpUpdate.User(content)) =>
+        textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.UserMessage(turnId, t))
       case Some(AcpUpdate.Commands(commands)) =>
         List(HostMsg.AvailableCommands(commands))
       case Some(call: AcpUpdate.ToolCall) =>

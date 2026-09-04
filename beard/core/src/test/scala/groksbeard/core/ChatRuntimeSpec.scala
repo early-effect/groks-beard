@@ -259,6 +259,93 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.cancel()
         assertTrue(lines.exists(_.contains("session/cancel")))
       },
+      test("ready posts a sessionList after session/new") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rows   = List(SessionRow("disk-1", "Earlier work", activityMs = 9))
+        val rt     = ChatRuntime(posted += _, listSessions = () => rows)
+        rt.ready()
+        assertTrue(
+          posted.exists {
+            case HostMsg.SessionList(sessions, _, false) => sessions == rows
+            case _                                       => false
+          },
+          posted.exists {
+            case HostMsg.AvailableCommands(cmds) => cmds.exists(_.name == "new") && cmds.exists(_.name == "resume")
+            case _                               => false
+          },
+        )
+      },
+      test("resumeSession replays disk history into the transcript") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.resumeSession("sess_disk")
+        val model = posted.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        assertTrue(
+          posted.exists {
+            case HostMsg.UserMessage(_, "hello from disk", _, _) => true
+            case _                                               => false
+          },
+          posted.exists {
+            case HostMsg.AgentChunk(_, "welcome back", _) => true
+            case _                                        => false
+          },
+          model.turns.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
+        )
+      },
+      test("locked session/load posts SessionLocked and leaves the current session") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, AcpTransport.fake(FakeAgent(lockLoad = true)))
+        rt.ready()
+        posted.clear()
+        rt.resumeSession("sess_live")
+        assertTrue(
+          posted.exists {
+            case HostMsg.SessionLocked("sess_live", msg) => msg.contains("TUI")
+            case _                                       => false
+          },
+          !posted.exists {
+            case _: HostMsg.UserMessage => true
+            case _                      => false
+          },
+        )
+      },
+      test("newSession deletes an unused session this process created") {
+        val deleted = scala.collection.mutable.ListBuffer.empty[String]
+        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt      = ChatRuntime(posted += _, scheduleEmptyDelete = deleted += _)
+        rt.ready()
+        rt.newSession()
+        assertTrue(deleted.contains("sess_test"))
+      },
+      test("newSession keeps a session that already has a prompt") {
+        val deleted = scala.collection.mutable.ListBuffer.empty[String]
+        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt      = ChatRuntime(posted += _, scheduleEmptyDelete = deleted += _)
+        rt.ready()
+        rt.send("hello")
+        deleted.clear()
+        rt.newSession()
+        assertTrue(deleted.isEmpty)
+      },
+      test("/new in the composer starts a new session") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.send("/new")
+        assertTrue(
+          posted.exists {
+            case HostMsg.ClearTranscript => true
+            case _                       => false
+          },
+          !posted.exists {
+            case HostMsg.UserMessage(_, "/new", _, _) => true
+            case _                                    => false
+          },
+        )
+      },
       test("setSetting posts the patched settings") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rt     = ChatRuntime(posted += _)

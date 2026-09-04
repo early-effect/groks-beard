@@ -15,6 +15,21 @@ object ProtocolSpec extends ZIOSpecDefault:
         val json = msg.toJson
         assertTrue(json.fromJson[HostMsg] == Right(msg))
       },
+      test("sessionList and resumeSession round-trip") {
+        val list: HostMsg =
+          HostMsg.SessionList(
+            List(SessionRow("s1", "Effect plan", activityMs = 9)),
+            currentId = "s2",
+            openPicker = true,
+          )
+        val resume: WebviewMsg = WebviewMsg.ResumeSession("s1")
+        val neu: WebviewMsg    = WebviewMsg.NewSession
+        assertTrue(
+          list.toJson.fromJson[HostMsg] == Right(list),
+          resume.toJson.fromJson[WebviewMsg] == Right(resume),
+          neu.toJson.fromJson[WebviewMsg] == Right(neu),
+        )
+      },
       test("WebviewMsg send round-trips") {
         val msg = WebviewMsg.Send("hello")
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))

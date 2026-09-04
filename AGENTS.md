@@ -6,12 +6,13 @@
 
 Playwright is not a substitute for that window.
 
-## Visual review: fill the window, hunt gutters
+## Visual review: click through, then hunt gutters
 
-Chekhov passing is not visual review. Before asking for commit approval:
+Chekhov passing is not visual review. A screenshot of the default scene is not visual review. Before asking for commit approval, and again before every PR that touches UI:
 
 1. Open the live preview in a real Firefox window the human can see (`http://localhost:8765/` and the `?scene=` fixtures).
-2. Measure, do not guess:
+2. **Use the thing you changed.** Click it, type in it, open it, close it, pick a row, send, cancel. If you added a picker, open the picker. If you added a chip, add and remove it. A passing `?scene=` that never expands the new control does not count.
+3. Measure, do not guess:
 
 ```js
 ({
@@ -22,9 +23,9 @@ Chekhov passing is not visual review. Before asking for commit approval:
 ```
 
    `#root` width/height must match `innerWidth`/`innerHeight` within a few pixels. If `innerWidth` disagrees with `outerWidth` by more than chrome (roughly 20px), Playwright has frozen a layout viewport inside the window. Resizing that window will do nothing. That is a miss. Never `setViewportSize` on a headed Firefox the human is watching. Review in a normal Firefox window (`open -a Firefox http://localhost:8765/`) and stretch *that* window.
-3. html/body/#root share the app background. A transparent `html` plus a short `body` paints browser white.
-4. Stretch the window. The composer stays on the bottom edge; unused height is the transcript/empty stage, not a void under Send.
-5. Walk empty, slash, mentions, permission, plan, question, changes. Click, type, send. Look for clipped chips, full-width accidents, ghost buttons, occupancy crowding the toolbar.
+4. html/body/#root share the app background. A transparent `html` plus a short `body` paints browser white.
+5. Stretch the window. The composer stays on the bottom edge; unused height is the transcript/empty stage, not a void under Send.
+6. Walk empty, slash, mentions, permission, plan, question, changes, resume. Click, type, send. Open the session picker. Look for clipped chips, full-width accidents, ghost buttons, occupancy crowding the toolbar.
 
 ## Clean review artifacts before the PR
 

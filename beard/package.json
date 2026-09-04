@@ -80,6 +80,14 @@
         "title": "Grok's Beard: Open"
       },
       {
+        "command": "groksBeard.cancel",
+        "title": "Grok's Beard: Stop"
+      },
+      {
+        "command": "groksBeard.cycleMode",
+        "title": "Grok's Beard: Cycle Mode"
+      },
+      {
         "command": "groksBeard.addSelection",
         "title": "Grok's Beard: Add Selection to Chat"
       },
@@ -187,6 +195,11 @@
         "key": "ctrl+shift+;",
         "mac": "cmd+shift+;",
         "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "groksBeard.cancel",
+        "key": "escape",
+        "when": "groksBeard.turnRunning && (focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary)"
       }
     ]
   }

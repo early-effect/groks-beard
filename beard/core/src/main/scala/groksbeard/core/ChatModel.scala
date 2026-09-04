@@ -94,6 +94,7 @@ final case class ChatModel(
     plan: Option[PlanCard] = None,
     question: Option[QuestionCard] = None,
     elicit: Option[ElicitCard] = None,
+    occupancy: Option[Occupancy] = None,
     queued: Int = 0,
     changes: Option[ChangesSummary] = None,
     diff: Option[DiffView] = None,
@@ -110,12 +111,13 @@ object ChatModel:
     msg match
       case HostMsg.Ready =>
         model
-      case HostMsg.SessionMeta(sessionId, title, modeId, modes) =>
+      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy) =>
         model.copy(
           sessionId = if sessionId.nonEmpty then sessionId else model.sessionId,
           title = if title.nonEmpty then title else model.title,
           modeId = if modeId.nonEmpty then modeId else model.modeId,
           modes = if modes.nonEmpty then modes else model.modes,
+          occupancy = occupancy.orElse(model.occupancy),
         )
       case HostMsg.AvailableCommands(commands) =>
         model.copy(commands = commands)

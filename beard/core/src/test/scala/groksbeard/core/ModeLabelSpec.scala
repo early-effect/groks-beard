@@ -13,6 +13,20 @@ object ModeLabelSpec extends ZIOSpecDefault:
           ModeLabel.modeLabel("normal", List(ModeOption("normal", "Ask"))) == "Ask",
         )
       },
+      test("cycles Normal, Plan, Auto, Always-approve") {
+        val modes = List(
+          ModeOption("normal", "Normal"),
+          ModeOption("auto", "Auto"),
+          ModeOption("plan", "Plan"),
+          ModeOption("always-approve", "Always approve"),
+        )
+        assertTrue(
+          ModeLabel.nextMode("normal", modes) == "plan",
+          ModeLabel.nextMode("plan", modes) == "auto",
+          ModeLabel.nextMode("auto", modes) == "always-approve",
+          ModeLabel.nextMode("always-approve", modes) == "normal",
+        )
+      },
       test("explains modes") {
         assertTrue(
           ModeLabel.modeTip("plan").contains("plan"),

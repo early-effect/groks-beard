@@ -50,7 +50,14 @@ final class ChatView(
             if fileCount == 0 then "$(beard) Grok"
             else s"$$(diff) $fileCount  +$additions/-$deletions"
           if fileCount > 0 then status.show() else status.hide()
+        case HostMsg.UserMessage(_, _, _, _) =>
+          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", true)
+        case HostMsg.TurnEnd(_, _) =>
+          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
+        case HostMsg.ClearTranscript =>
+          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
         case _ => ()
+      end match
       ()
     end post
     val ports = ReviewPorts(

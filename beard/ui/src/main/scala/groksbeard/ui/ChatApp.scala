@@ -104,6 +104,13 @@ object ChatApp:
         fontSize.px(14),
       )
 
+  object OccupancyCopy
+      extends CssClass(
+        marginLeft.auto,
+        fontSize.px(11),
+        color(muted),
+      )
+
   object Empty
       extends CssClass(
         display.flex,
@@ -364,6 +371,48 @@ object ChatApp:
         chat.update(m => m.copy(chips = m.chips.filterNot(PromptChip.sameRange(_, chip)))) *>
           ZIO.succeed(bridge.post(WebviewMsg.RemoveChip(chip.absPath, chip.startLine, chip.endLine)))
 
+      def parkPermission: UIO[Unit] =
+        chat.get.flatMap { c =>
+          c.permission match
+            case None       => ZIO.unit
+            case Some(card) =>
+              chat.update(_.copy(permission = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.PermissionPark(card.requestId)))
+        }
+
+      def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
+        val key        = e.key
+        val ctrlOrMeta = e.ctrlKey || e.metaKey
+        chat.get.flatMap { c =>
+          if key == "Escape" then
+            e.preventDefault()
+            openMenu.get.flatMap {
+              case Some(_) => openMenu.set(None)
+              case None    =>
+                mentionShown.get.flatMap { mentions =>
+                  if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                  else if c.permission.isDefined then parkPermission
+                  else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                  else ZIO.unit
+                }
+            }
+          else if e.shiftKey && key == "Tab" && !ctrlOrMeta then
+            e.preventDefault()
+            openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+          else
+            c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
+              case Some(opt) =>
+                e.preventDefault()
+                ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
+              case None =>
+                c.question.flatMap(q => ComposerQuery.questionOption(key, q.questions)) match
+                  case Some((qid, oid)) =>
+                    e.preventDefault()
+                    ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(c.question.get.requestId, qid, oid)))
+                  case None => ZIO.unit
+        }
+      end onCardKey
+
       def pickSlash(name: String): UIO[Unit] =
         draft.set(s"/$name ") *>
           ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -394,6 +443,7 @@ object ChatApp:
       E.div(
         Shell,
         Page,
+        Ev.onKeyDown(onCardKey),
         E.div(
           Toolbar,
           E.button(
@@ -420,6 +470,14 @@ object ChatApp:
               }
             ),
             "Settings",
+          ),
+          when(chat.map(_.occupancy.exists(_.size > 0)))(
+            E.span(
+              OccupancyCopy,
+              TestId("occupancy"),
+              A.title(chat.map(_.occupancy.fold("")(o => Occupancy.tone(o.used, o.size)))),
+              chat.map(_.occupancy.fold("")(o => Occupancy.label(o.used, o.size))),
+            )
           ),
         ),
         when(chat.map(_.turns.isEmpty))(
@@ -588,8 +646,7 @@ object ChatApp:
                 idx      <- mentionIdx.get
                 s        <- chat.get.map(_.settings)
                 out      <-
-                  if key == "Escape" then go(openMenu.set(None) *> dismissed.set(true) *> mentionIdx.set(None))
-                  else if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
+                  if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
                     go(mentionIdx.set(ComposerQuery.moveMentionIndex(idx, key, mentions.size)))
                   else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
                     mentions.lift(idx.getOrElse(0)) match

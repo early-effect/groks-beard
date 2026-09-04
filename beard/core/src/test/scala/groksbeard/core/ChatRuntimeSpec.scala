@@ -10,19 +10,19 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         val rt     = ChatRuntime(posted += _)
         rt.ready()
         val tags = posted.toList.map {
-          case HostMsg.Ready                   => "ready"
-          case HostMsg.SessionMeta(_, _, _, _) => "sessionMeta"
-          case HostMsg.AvailableCommands(_)    => "availableCommands"
-          case _: HostMsg.Settings             => "settings"
-          case other                           => other.toString
+          case HostMsg.Ready                      => "ready"
+          case HostMsg.SessionMeta(_, _, _, _, _) => "sessionMeta"
+          case HostMsg.AvailableCommands(_)       => "availableCommands"
+          case _: HostMsg.Settings                => "settings"
+          case other                              => other.toString
         }
         assertTrue(
           tags.contains("ready"),
           tags.contains("sessionMeta"),
           tags.contains("availableCommands"),
           posted.exists {
-            case HostMsg.SessionMeta(_, _, "normal", modes) => modes.exists(_.id == "plan")
-            case _                                          => false
+            case HostMsg.SessionMeta(_, _, "normal", modes, _) => modes.exists(_.id == "plan")
+            case _                                             => false
           },
         )
       },
@@ -224,6 +224,40 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.removeChip(chip.absPath, chip.startLine, chip.endLine)
         rt.send("")
         assertTrue(posted.isEmpty)
+      },
+      test("cycleMode walks Normal to Plan") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.cycleMode()
+        assertTrue(
+          rt.state.modeId.contains("plan"),
+          rt.state.planActive,
+          posted.exists {
+            case HostMsg.SessionMeta(_, _, "plan", _, _) => true
+            case _                                       => false
+          },
+        )
+      },
+      test("cancel notifies session/cancel and does not answer a parked permission") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val lines  = scala.collection.mutable.ListBuffer.empty[String]
+        val inner  = AcpTransport.fake()
+        val wrap   = new AcpTransport:
+          def onData(next: String => Unit): Unit = inner.onData(next)
+          def write(data: String): Unit          =
+            lines += data
+            inner.write(data)
+          def close(): Unit = inner.close()
+        val rt = ChatRuntime(posted += _, wrap)
+        rt.ready()
+        rt.send("hello")
+        lines.clear()
+        HostDispatch(rt, WebviewMsg.PermissionPark("perm-1"), _ => ())
+        assertTrue(!lines.exists(_.contains("selected")))
+        rt.cancel()
+        assertTrue(lines.exists(_.contains("session/cancel")))
       },
       test("setSetting posts the patched settings") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]

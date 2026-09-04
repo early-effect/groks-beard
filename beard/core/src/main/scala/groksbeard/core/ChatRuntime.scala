@@ -30,6 +30,7 @@ final class ChatRuntime(
   private var chips                     = List.empty[PromptChip]
   private var pendingQueue              = Vector.empty[(String, List[PromptChip])]
   private var settingsState             = ChatRuntime.seedSettings(settings(), includeActiveFile)
+  private var occupancy                 = Option.empty[Occupancy]
   private var pendingPerm               = Map.empty[String, Json]
   private var inbound                   = Map.empty[String, RpcId]
   private var pendingMethod             = Map.empty[RpcId, String]
@@ -68,11 +69,16 @@ final class ChatRuntime(
   def cancel(): Unit = this.synchronized {
     queued = 0
     pendingQueue = Vector.empty
-    running = false
     pendingPerm.keys.toList.foreach { id =>
       respond(id, Json.Obj("outcome" -> Json.Obj("outcome" -> Json.Str("cancelled"))))
     }
+    val sid = sessionId.getOrElse(fallbackSessionId)
+    notify("session/cancel", SessionCancelParams(sid).asJson)
     post(HostMsg.Queued(0))
+    if running then
+      running = false
+      post(HostMsg.TurnEnd(currentTurn, "cancelled"))
+    else running = false
   }
 
   def addChip(chip: PromptChip): Unit = this.synchronized {
@@ -148,6 +154,10 @@ final class ChatRuntime(
     modeId = id
     framed.state.commitMode(id)
     postMeta()
+  }
+
+  def cycleMode(): Unit = this.synchronized {
+    setMode(ModeLabel.nextMode(modeId, modes))
   }
 
   def openDiff(requestId: String): Unit = this.synchronized {
@@ -255,6 +265,9 @@ final class ChatRuntime(
   private def grokMethod(method: String): String =
     if method.startsWith("x.ai/") && !method.startsWith("_x.ai/") then s"_$method" else method
 
+  private def notify(method: String, params: Json): Unit =
+    transport.write(Ndjson.encode(Rpc.toLine(Rpc.notify(method, params))))
+
   private def rpc(method: String, params: Json): Unit =
     rpcId += 1
     val id  = RpcId.Num(rpcId)
@@ -266,7 +279,12 @@ final class ChatRuntime(
   private def ingest(msgs: List[Rpc]): Unit =
     msgs.foreach {
       case Rpc.Notify("session/update", p) =>
-        SessionUpdate.hostMsgs(p, currentTurn).foreach(post)
+        SessionUpdate.hostMsgs(p, currentTurn).foreach { msg =>
+          msg match
+            case HostMsg.SessionMeta(_, _, _, _, Some(occ)) => occupancy = Some(occ)
+            case _                                          => ()
+          post(msg)
+        }
         ingestUpdate(p)
       case Rpc.Request(rid, rawMethod, params) =>
         val reqId  = requestKey(rid)
@@ -369,7 +387,7 @@ final class ChatRuntime(
     if pairs.nonEmpty then ports.openNativeDiffs(heading, pairs)
 
   private def postMeta(): Unit =
-    post(HostMsg.SessionMeta(sessionId.getOrElse(""), title, modeId, modes))
+    post(HostMsg.SessionMeta(sessionId.getOrElse(""), title, modeId, modes, occupancy))
 
   private def jsonStr(json: Json, key: String): Option[String] =
     json match

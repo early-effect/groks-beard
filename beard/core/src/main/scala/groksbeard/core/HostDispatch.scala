@@ -8,6 +8,8 @@ object HostDispatch:
       case WebviewMsg.Queue(text)                      => runtime.queue(text)
       case WebviewMsg.Cancel                           => runtime.cancel()
       case WebviewMsg.SetMode(id)                      => runtime.setMode(id)
+      case WebviewMsg.CycleMode                        => runtime.cycleMode()
+      case WebviewMsg.SlashPick(_)                     => ()
       case WebviewMsg.MentionQuery(q)                  => runtime.mentionQuery(q)
       case WebviewMsg.MentionPick(path, absPath)       => runtime.mentionPick(path, absPath)
       case WebviewMsg.AddSelection                     => ()
@@ -26,5 +28,4 @@ object HostDispatch:
       case WebviewMsg.QuestionDismiss(id)              => runtime.questionDismiss(id)
       case WebviewMsg.ElicitAccept(id)                 => runtime.elicitAccept(id)
       case WebviewMsg.ElicitDecline(id)                => runtime.elicitDecline(id)
-      case _                                           => ()
 end HostDispatch

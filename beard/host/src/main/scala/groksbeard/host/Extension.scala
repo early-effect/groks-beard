@@ -91,6 +91,12 @@ object Extension:
       )
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.cancel", () => chat.current.foreach(_.cancel()))
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.cycleMode", () => chat.current.foreach(_.cycleMode()))
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.addSelection", () => chat.addSelection())
     )
     context.subscriptions.push(

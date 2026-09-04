@@ -18,7 +18,16 @@ object SessionUpdate:
       case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
         val mode = modeId.orElse(currentModeId).getOrElse("")
         if mode.isEmpty then Nil else List(HostMsg.SessionMeta("", "", mode, Nil))
+      case Some(AcpUpdate.Usage(used, size)) =>
+        occupancyMsg(used, size).orElse(Occupancy.fromJson(params)).toList.map { occ =>
+          HostMsg.SessionMeta("", "", "", occupancy = Some(occ))
+        }
       case None => Nil
+
+  private def occupancyMsg(used: Option[Int], size: Option[Int]): Option[Occupancy] =
+    (used, size) match
+      case (Some(u), Some(s)) if s > 0 => Some(Occupancy(u, s))
+      case _                           => None
 
   private def textOf(content: AcpContent): Option[String] =
     content match

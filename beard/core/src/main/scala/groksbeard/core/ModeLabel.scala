@@ -20,6 +20,16 @@ object ModeLabel:
       titleFromId(if modeId.isEmpty then "normal" else modeId)
     }
 
+  def nextMode(current: String, modes: List[ModeOption]): String =
+    val available = if modes.isEmpty then List("normal", "plan", "always-approve") else modes.map(_.id)
+    val preferred = List("normal", "plan", "auto", "always-approve").filter(available.contains)
+    val extras    = available.filterNot(preferred.contains)
+    val order     = preferred ++ extras
+    val idx       = order.indexOf(current)
+    if order.isEmpty then "normal"
+    else if idx < 0 then order.head
+    else order((idx + 1) % order.size)
+
   def modeTip(modeId: String): String =
     modeId match
       case "normal"         => "Ask before Grok runs tools"

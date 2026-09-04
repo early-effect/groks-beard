@@ -4,8 +4,11 @@ import zio.json.ast.Json
 
 final class ChatRuntime(
     post: HostMsg => Unit,
-    agent: FakeAgent = FakeAgent(),
+    transport: AcpTransport = AcpTransport.fake(),
     ports: ReviewPorts = ReviewPorts.ignore,
+    cwd: String = ".",
+    capabilities: ClientCapabilities = ClientCapabilities.fake,
+    fallbackSessionId: String = "sess_test",
 ):
   private val framed                    = Framed(SessionState())
   private val store                     = ChangeStore()
@@ -20,54 +23,52 @@ final class ChatRuntime(
   private var running                   = false
   private var queued                    = 0
   private var pendingPerm               = Map.empty[String, Json]
+  private var pendingMethod             = Map.empty[RpcId, String]
+
+  transport.onData(chunk => this.synchronized { ingest(framed.feed(chunk)) })
 
   def state: SessionState = framed.state
 
-  def ready(): Unit =
-    post(HostMsg.Ready)
-    call("initialize", InitializeParams(1).asJson)
-    val result = call("session/new", SessionNewParams(".").asJson)
-    result.foreach { json =>
-      json.as[SessionNewResult].foreach { decoded =>
-        sessionId = Some(decoded.sessionId)
-        decoded.modes.foreach { state =>
-          modeId = state.currentModeId
-          framed.state.commitMode(state.currentModeId)
-          if state.availableModes.nonEmpty then modes = state.availableModes
-        }
-      }
-    }
-    if sessionId.isEmpty then sessionId = Some(agent.sessionId)
-    postMeta()
-    post(HostMsg.settings(SettingsState.defaults))
-  end ready
+  def close(): Unit = transport.close()
 
-  def send(text: String): Unit =
+  def ready(): Unit = this.synchronized {
+    post(HostMsg.Ready)
+    rpc(
+      "initialize",
+      InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
+    )
+  }
+
+  def send(text: String): Unit = this.synchronized {
     val trimmed = text.trim
     if trimmed.isEmpty then ()
     else if running then
       queued += 1
       post(HostMsg.Queued(queued))
     else runTurn(trimmed)
+  }
 
-  def queue(text: String): Unit =
+  def queue(text: String): Unit = this.synchronized {
     if text.trim.nonEmpty then
       queued += 1
       post(HostMsg.Queued(queued))
+  }
 
-  def cancel(): Unit =
+  def cancel(): Unit = this.synchronized {
     queued = 0
     running = false
     post(HostMsg.Queued(0))
+  }
 
-  def setMode(id: String): Unit =
-    val sid = sessionId.getOrElse(agent.sessionId)
-    call("session/set_mode", SessionSetModeParams(sid, id).asJson)
+  def setMode(id: String): Unit = this.synchronized {
+    val sid = sessionId.getOrElse(fallbackSessionId)
+    rpc("session/set_mode", SessionSetModeParams(sid, id).asJson)
     modeId = id
     framed.state.commitMode(id)
     postMeta()
+  }
 
-  def openDiff(requestId: String): Unit =
+  def openDiff(requestId: String): Unit = this.synchronized {
     pendingPerm.get(requestId) match
       case Some(params) =>
         val diffs = DiffContent.reconstruct(
@@ -79,9 +80,40 @@ final class ChatRuntime(
       case None =>
         store.pending.find(f => f.toolCallId == requestId || f.path == requestId) match
           case Some(file) => showFile(file)
-          case None       => openChanges()
+          case None       => openChangesUnlocked()
+  }
 
-  def openChanges(): Unit =
+  def openChanges(): Unit = this.synchronized { openChangesUnlocked() }
+
+  def keep(path: String): Unit = this.synchronized {
+    store.keep(path)
+    postChanges()
+    if store.get(path).isEmpty then post(HostMsg.ClearDiff)
+  }
+
+  def undo(path: String): Unit = this.synchronized {
+    store.get(path) match
+      case None       => ()
+      case Some(file) =>
+        val disk = ports.readDisk(file.path)
+        ChangeSet.resolveUndo(file, disk, ports.confirmDirty(file.path)) match
+          case UndoResolution.Apply(mutations) =>
+            ports.applyUndo(mutations)
+            store.drop(path)
+            postChanges()
+            post(HostMsg.ClearDiff)
+          case UndoResolution.Disabled(reason) =>
+            post(HostMsg.Error(s"Undo unavailable: $reason"))
+          case UndoResolution.Cancelled =>
+            ()
+        end match
+  }
+
+  def closeDiff(): Unit = this.synchronized { post(HostMsg.ClearDiff) }
+
+  def pendingChanges: List[FileChange] = this.synchronized { store.pending }
+
+  private def openChangesUnlocked(): Unit =
     val files = store.pending
     if files.isEmpty then ()
     else
@@ -99,34 +131,7 @@ final class ChatRuntime(
       )
       showDiffs("Grok Changes", diffs)
     end if
-  end openChanges
-
-  def keep(path: String): Unit =
-    store.keep(path)
-    postChanges()
-    if store.get(path).isEmpty then post(HostMsg.ClearDiff)
-
-  def undo(path: String): Unit =
-    store.get(path) match
-      case None       => ()
-      case Some(file) =>
-        val disk = ports.readDisk(file.path)
-        ChangeSet.resolveUndo(file, disk, ports.confirmDirty(file.path)) match
-          case UndoResolution.Apply(mutations) =>
-            ports.applyUndo(mutations)
-            store.drop(path)
-            postChanges()
-            post(HostMsg.ClearDiff)
-          case UndoResolution.Disabled(reason) =>
-            post(HostMsg.Error(s"Undo unavailable: $reason"))
-          case UndoResolution.Cancelled =>
-            ()
-        end match
-
-  def closeDiff(): Unit =
-    post(HostMsg.ClearDiff)
-
-  def pendingChanges: List[FileChange] = store.pending
+  end openChangesUnlocked
 
   private def runTurn(text: String): Unit =
     running = true
@@ -134,35 +139,59 @@ final class ChatRuntime(
     currentTurn = s"turn_$turnSeq"
     currentTitle = ChangeSet.turnTitle(text)
     post(HostMsg.UserMessage(currentTurn, text))
-    val sid    = sessionId.getOrElse(agent.sessionId)
-    val result = call("session/prompt", SessionPromptParams(sid, List(PromptText(text = text))).asJson)
-    val reason = result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse("end_turn")
-    post(HostMsg.TurnEnd(currentTurn, reason))
-    running = false
-  end runTurn
+    val sid = sessionId.getOrElse(fallbackSessionId)
+    rpc("session/prompt", SessionPromptParams(sid, List(PromptText(text = text))).asJson)
 
-  private def call(method: String, params: Json): Option[Json] =
+  private def rpc(method: String, params: Json): Unit =
     rpcId += 1
     val id  = RpcId.Num(rpcId)
     val req = Rpc.Request(id, method, params)
+    pendingMethod = pendingMethod.updated(id, method)
     framed.recordOutgoing(req)
-    val msgs              = framed.feed(agent.encodeReplies(req))
-    var out: Option[Json] = None
+    transport.write(Ndjson.encode(Rpc.toLine(req)))
+
+  private def ingest(msgs: List[Rpc]): Unit =
     msgs.foreach {
       case Rpc.Notify("session/update", p) =>
         SessionUpdate.hostMsgs(p, currentTurn).foreach(post)
         ingestUpdate(p)
       case Rpc.Request(rid, "session/request_permission", params) =>
-        val reqId = RpcId.key(rid)
+        val reqId = rid match
+          case RpcId.Str(s) => s
+          case RpcId.Num(n) => n.toString
         pendingPerm = pendingPerm.updated(reqId, params)
         post(HostMsg.permission(DiffContent.permissionCard(params, reqId)))
-      case Rpc.Response(rid, result, error) if rid == id =>
+      case Rpc.Response(id, result, error) =>
+        val method = pendingMethod.getOrElse(id, "")
+        pendingMethod -= id
         error.foreach(e => post(HostMsg.Error(e.message)))
-        out = result
+        method match
+          case "initialize" =>
+            rpc("session/new", SessionNewParams(cwd).asJson)
+          case "session/new" | "session/load" =>
+            result.foreach(applySession)
+            if sessionId.isEmpty then sessionId = Some(fallbackSessionId)
+            postMeta()
+            post(HostMsg.settings(SettingsState.defaults))
+          case "session/prompt" =>
+            val reason =
+              result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse("end_turn")
+            post(HostMsg.TurnEnd(currentTurn, reason))
+            running = false
+          case _ => ()
+        end match
       case _ => ()
     }
-    out
-  end call
+
+  private def applySession(json: Json): Unit =
+    json.as[SessionNewResult].foreach { decoded =>
+      sessionId = Some(decoded.sessionId)
+      decoded.modes.foreach { state =>
+        modeId = state.currentModeId
+        framed.state.commitMode(state.currentModeId)
+        if state.availableModes.nonEmpty then modes = state.availableModes
+      }
+    }
 
   private def ingestUpdate(params: Json): Unit =
     SessionState.decodeUpdate(params) match
@@ -176,7 +205,7 @@ final class ChatRuntime(
     val diffs = DiffContent.reconstruct(body.asJson, ports.readDisk, DiffContent.diskIsBefore(status))
     if diffs.nonEmpty then
       store.ingest(
-        sessionId.getOrElse(agent.sessionId),
+        sessionId.getOrElse(fallbackSessionId),
         currentTurn,
         currentTitle,
         diffs.map(DiffContent.fileChangeFrom),

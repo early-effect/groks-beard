@@ -7,8 +7,9 @@ import scala.scalajs.js
 import scala.scalajs.js.annotation.JSExportTopLevel
 
 object Extension:
-  private val ChatViewId          = "groksBeard.chat"
-  private val ChatViewIdSecondary = "groksBeard.chatSecondary"
+  private val ChatViewId                   = "groksBeard.chat"
+  private val ChatViewIdSecondary          = "groksBeard.chatSecondary"
+  private var activeChat: Option[ChatView] = None
 
   @JSExportTopLevel("activate")
   def activate(context: ExtensionContext): Unit =
@@ -17,14 +18,16 @@ object Extension:
     val status = vscode.window.createStatusBarItem(2, 80)
     status.command = "groksBeard.openChangesReview"
     status.text = "$(diff) Grok Changes"
+    val out                          = vscode.window.createOutputChannel("Grok's Beard")
     var chatRef: Option[ChatView]    = None
     var treeRef: Option[ChangesTree] = None
     val mcpHost                      = new McpHost(review, () => treeRef.foreach(_.refresh()))
     val tree                         =
       new ChangesTree(() => chatRef.toList.flatMap(_.current.toList.flatMap(_.pendingChanges)) ++ mcpHost.sidecar)
     treeRef = Some(tree)
-    val chat = new ChatView(context, review, tree, status)
+    val chat = new ChatView(context, review, tree, status, line => out.appendLine(line))
     chatRef = Some(chat)
+    activeChat = Some(chat)
     val bridge  = new TuiBridge(mcpHost.asToolHost, _ => ())
     val enabled =
       context.workspaceState.get[Boolean](TuiBridge.StateKey).toOption.contains(true)
@@ -97,7 +100,9 @@ object Extension:
   end activate
 
   @JSExportTopLevel("deactivate")
-  def deactivate(): Unit = ()
+  def deactivate(): Unit =
+    activeChat.foreach(_.dispose())
+    activeChat = None
 
   private def enableBridge(context: ExtensionContext, mcpHost: McpHost, bridge: TuiBridge): Unit =
     val workspace = mcpHost.workspaceFolder

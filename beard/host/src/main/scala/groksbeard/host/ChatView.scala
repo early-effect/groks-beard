@@ -1,17 +1,28 @@
 package groksbeard.host
 
-import groksbeard.core.{ChatHtml, ChatRuntime, HostMsg, ReviewPorts, SettingsState, WebviewMsg}
+import groksbeard.core.*
 import groksbeard.host.vscode.*
 import zio.json.*
 
 import scala.scalajs.js
 
-final class ChatView(context: ExtensionContext, review: Review, tree: ChangesTree, status: StatusBarItem)
-    extends WebviewViewProvider:
+final class ChatView(
+    context: ExtensionContext,
+    review: Review,
+    tree: ChangesTree,
+    status: StatusBarItem,
+    log: String => Unit,
+) extends WebviewViewProvider:
 
   private var runtime: Option[ChatRuntime] = None
+  private var missingCli: Option[String]   = None
 
   def current: Option[ChatRuntime] = runtime
+
+  def dispose(): Unit =
+    runtime.foreach(_.close())
+    runtime = None
+
   def resolveWebviewView(
       webviewView: WebviewView,
       ctx: WebviewViewResolveContext,
@@ -41,33 +52,45 @@ final class ChatView(context: ExtensionContext, review: Review, tree: ChangesTre
         case _ => ()
       ()
     end post
-    val rt = ChatRuntime(
-      post,
-      ports = ReviewPorts(
-        readDisk = review.readDisk,
-        openNativeDiffs = review.open,
-        applyUndo = review.applyUndo,
-        onStoreChange = () => tree.refresh(),
-      ),
+    val ports = ReviewPorts(
+      readDisk = review.readDisk,
+      openNativeDiffs = review.open,
+      applyUndo = review.applyUndo,
+      onStoreChange = () => tree.refresh(),
     )
-    runtime = Some(rt)
+    bindAgent(post, ports)
     webview.onDidReceiveMessage { raw =>
-      js.JSON.stringify(raw).fromJson[WebviewMsg].foreach {
-        case WebviewMsg.Ready               => rt.ready()
-        case WebviewMsg.Send(text)          => rt.send(text)
-        case WebviewMsg.Queue(text)         => rt.queue(text)
-        case WebviewMsg.Cancel              => rt.cancel()
-        case WebviewMsg.SetMode(id)         => rt.setMode(id)
-        case WebviewMsg.MentionQuery(query) => post(HostMsg.MentionResults(query, Nil))
-        case WebviewMsg.OpenSettings        => post(HostMsg.settings(SettingsState.defaults))
-        case WebviewMsg.OpenDiff(id)        => rt.openDiff(id)
-        case WebviewMsg.OpenChanges         => rt.openChanges()
-        case WebviewMsg.KeepChange(path)    => rt.keep(path)
-        case WebviewMsg.UndoChange(path)    => rt.undo(path)
-        case WebviewMsg.CloseDiff           => rt.closeDiff()
-        case _                              => ()
+      js.JSON.stringify(raw).fromJson[WebviewMsg].foreach { msg =>
+        runtime match
+          case Some(rt) => HostDispatch(rt, msg, post)
+          case None     =>
+            val err = missingCli.getOrElse("Grok CLI not found.")
+            msg match
+              case WebviewMsg.Ready =>
+                post(HostMsg.Ready)
+                post(HostMsg.Error(err))
+              case _ => post(HostMsg.Error(err))
       }
     }
     ()
   end resolveWebviewView
+
+  private def bindAgent(post: HostMsg => Unit, ports: ReviewPorts): Unit =
+    val cwd     = vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath).getOrElse(".")
+    val cliPath = vscode.workspace.getConfiguration("groksBeard").get[String]("cliPath").toOption.filter(_.nonEmpty)
+    val env     = (k: String) => nodeProcess.env.get(k).flatMap(_.toOption)
+    val win     = nodeProcess.platform == "win32"
+    CliLocator.locate(LocateGrok(cliPath, env, win, nodeFs.existsSync)) match
+      case Left(searched) =>
+        val err = Onboarding.missingCliMessage(searched)
+        missingCli = Some(err)
+        log(err)
+      case Right(cmd) =>
+        val args = Spawn.grokAgentStdioArgs()
+        log(s"spawning $cmd ${args.mkString(" ")}")
+        val transport = NodeTransport.spawn(cmd, args, cwd, log)
+        val caps      = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+        runtime = Some(ChatRuntime(post, transport, ports, cwd, caps))
+    end match
+  end bindAgent
 end ChatView

@@ -1,0 +1,4 @@
+-J-Xms512m
+-J-Xmx2G
+-J-XX:ReservedCodeCacheSize=256m
+-J-XX:+UseG1GC

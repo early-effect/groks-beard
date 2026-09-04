@@ -120,12 +120,15 @@ lazy val facade = (project in file("beard/facade"))
 
 lazy val preview = (project in file("beard/preview"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
+  .dependsOn(LocalProject("core"))
   .settings(
     name := "groks-beard-preview",
     skipPublish,
     scalaVersion := scala3Version,
     scalacOptions ++= commonScalacOptions,
     MyVersions.previewServer,
+    Compile / mainClass       := Def.uncached(Some("groksbeard.preview.LiveMain")),
+    Compile / run / mainClass := Def.uncached(Some("groksbeard.preview.LiveMain")),
   )
 
 lazy val ui = (projectMatrix in file("beard/ui"))
@@ -156,8 +159,9 @@ lazy val ui = (projectMatrix in file("beard/ui"))
           spliceFullOutput                := Def.uncached(
             (ThisBuild / baseDirectory).value / "beard" / "ui" / "target" / "splice" / "full.js"
           ),
-          ascentPreviewAutoServe          := true,
-          ascentPreviewClasspath          := Def.uncached((LocalProject("preview") / Compile / fullClasspath).value),
+          ascentPreviewAutoServe := true,
+          ascentPreviewServe     := Def.uncached(BeardPreview.serveLive.value),
+          ascentPreviewClasspath := Def.uncached((LocalProject("preview") / Compile / fullClasspath).value),
           ascentPreviewRebuild            := Def.uncached {
             val dest = ascentPreviewStage.value
             val logo = (ThisBuild / baseDirectory).value / "beard" / "media" / "logo.png"

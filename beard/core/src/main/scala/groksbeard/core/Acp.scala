@@ -3,7 +3,37 @@ package groksbeard.core
 import zio.json.*
 import zio.json.ast.Json
 
-final case class InitializeParams(protocolVersion: Int) derives JsonCodec
+final case class ClientInfo(name: String, title: String, version: String) derives JsonCodec
+final case class FsCaps(readTextFile: Boolean = true) derives JsonCodec
+final case class SessionCaps(configOptions: EmptyObject = EmptyObject()) derives JsonCodec
+final case class ClientCapabilities(
+    fs: Option[FsCaps] = None,
+    terminal: Option[Boolean] = None,
+    session: Option[SessionCaps] = Some(SessionCaps()),
+) derives JsonCodec
+
+object ClientCapabilities:
+  val FsReadFloorMajor = 1
+  val FsReadFloorMinor = 0
+  val FsReadFloorPatch = 4
+
+  val fake: ClientCapabilities =
+    ClientCapabilities(fs = Some(FsCaps(true)), terminal = None)
+
+  def forSpawn(version: Option[GrokVersion], verified: Boolean, terminalHandlersReady: Boolean): ClientCapabilities =
+    val fs =
+      if verified && version.exists(v => GrokVersion.isAtLeast(v, FsReadFloorMajor, FsReadFloorMinor, FsReadFloorPatch))
+      then None
+      else Some(FsCaps(true))
+    val terminal = if terminalHandlersReady then Some(true) else None
+    ClientCapabilities(fs = fs, terminal = terminal)
+end ClientCapabilities
+
+final case class InitializeParams(
+    protocolVersion: Int,
+    clientCapabilities: ClientCapabilities = ClientCapabilities.fake,
+    clientInfo: ClientInfo = ClientInfo("groks-beard", "Grok's Beard", "0.2.0"),
+) derives JsonCodec
 final case class AgentCapabilities(loadSession: Boolean = false) derives JsonCodec
 final case class InitializeResult(protocolVersion: Int, agentCapabilities: AgentCapabilities) derives JsonCodec
 

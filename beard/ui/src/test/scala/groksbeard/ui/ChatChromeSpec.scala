@@ -3,6 +3,7 @@ package groksbeard.ui
 import ascent.chekhov.AscentChekhov.withMounted
 import ascent.chekhov.AscentRoot
 import ascent.chekhov.value
+import groksbeard.core.*
 import zio.*
 import zio.test.*
 
@@ -152,7 +153,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
-      test("Send clears the draft") {
+      test("Send shows the user turn and agent echo") {
         val bridge = PreviewBridge()
         for
           ui     <- ChatApp.component(bridge, None, Scene.Empty)
@@ -161,7 +162,35 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _     <- root.textarea("draft").fill("hello")
               _     <- root.button("send").click
               draft <- waitValue(root, "")
-            yield assertTrue(draft == "")
+              user  <- waitPresent(root, "user-preview-turn") *>
+                root.getByTestId("user-preview-turn").innerText
+              agent <- waitPresent(root, "agent-preview-turn") *>
+                root.getByTestId("agent-preview-turn").innerText
+            yield assertTrue(draft == "", user.contains("hello"), agent.contains("hello"))
+          }
+        yield result
+        end for
+      },
+      test("a live ACP burst still paints the agent reply") {
+        val bridge   = PushBridge()
+        val commands = HostMsg.AvailableCommands(
+          (1 to 40).toList.map(i => SlashCommand(s"skill-$i", "hint " * 40))
+        )
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("turn_1", "hello"))
+                bridge.push(commands)
+                List("The", " user", " wants", " hi").foreach(t => bridge.push(HostMsg.ThoughtChunk("turn_1", t)))
+                bridge.push(HostMsg.AgentChunk("turn_1", "Hi."))
+                bridge.push(commands)
+                bridge.push(HostMsg.TurnEnd("turn_1", "end_turn"))
+              }
+              user  <- waitPresent(root, "user-turn_1") *> root.getByTestId("user-turn_1").innerText
+              agent <- waitPresent(root, "agent-turn_1") *> root.getByTestId("agent-turn_1").innerText
+            yield assertTrue(user.contains("hello"), agent.contains("Hi"))
           }
         yield result
         end for
@@ -198,3 +227,10 @@ object ChatChromeSpec extends ZIOSpecDefault:
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to disappear"))(5.seconds)
 end ChatChromeSpec
+
+/** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */
+final class PushBridge extends HostBridge:
+  private var listener: HostMsg => Unit = _ => ()
+  def post(msg: WebviewMsg): Unit       = ()
+  def onHost(f: HostMsg => Unit): Unit  = listener = f
+  def push(msg: HostMsg): Unit          = listener(msg)

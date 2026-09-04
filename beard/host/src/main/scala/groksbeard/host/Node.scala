@@ -57,3 +57,27 @@ object nodeOs extends js.Object:
 @JSImport("path", JSImport.Namespace)
 object nodePath extends js.Object:
   def dirname(p: String): String = js.native
+
+@js.native
+trait NodeWritable extends js.Object:
+  def write(data: String): Boolean = js.native
+  def end(): Unit                  = js.native
+
+@js.native
+trait NodeReadable extends js.Object:
+  def setEncoding(enc: String): NodeReadable                               = js.native
+  def on(event: String, listener: js.Function1[js.Any, Any]): NodeReadable = js.native
+
+@js.native
+trait ChildProcessHandle extends js.Object:
+  def stdin: NodeWritable                                                        = js.native
+  def stdout: NodeReadable                                                       = js.native
+  def stderr: NodeReadable                                                       = js.native
+  def kill(): Boolean                                                            = js.native
+  def on(event: String, listener: js.Function1[js.Any, Any]): ChildProcessHandle = js.native
+
+@js.native
+@JSImport("child_process", JSImport.Namespace)
+object nodeChildProcess extends js.Object:
+  def spawn(command: String, args: js.Array[String], options: js.Dynamic): ChildProcessHandle =
+    js.native

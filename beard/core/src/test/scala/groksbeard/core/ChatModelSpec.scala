@@ -88,5 +88,30 @@ object ChatModelSpec extends ZIOSpecDefault:
         val next = ChatModel.applyMsg(model, HostMsg.ClearTranscript)
         assertTrue(next.turns.isEmpty, next.title == "Stay", next.commands.head.name == "compact")
       },
+      test("a live grok burst keeps agent text after a fat commands dump") {
+        val commands = HostMsg.AvailableCommands(
+          (1 to 40).toList.map(i => SlashCommand(s"skill-$i", "hint " * 40))
+        )
+        val events = List(
+          HostMsg.UserMessage("turn_1", "hello"),
+          commands,
+        ) ++
+          List("The", " user", " wants", " hi").map(HostMsg.ThoughtChunk("turn_1", _)) ++
+          List(
+            HostMsg.AgentChunk("turn_1", "Hi"),
+            HostMsg.AgentChunk("turn_1", "."),
+            commands,
+            HostMsg.TurnEnd("turn_1", "end_turn"),
+          )
+        val model = events.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        val turn  = model.turns.head
+        assertTrue(
+          turn.user.exists(_.text == "hello"),
+          turn.thought.contains("wants"),
+          turn.agent == "Hi.",
+          turn.stopReason.contains("end_turn"),
+          model.commands.size == 40,
+        )
+      },
     )
 end ChatModelSpec

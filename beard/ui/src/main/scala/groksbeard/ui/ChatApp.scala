@@ -7,6 +7,7 @@ import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
 import zio.*
+import zio.stream.ZStream
 
 enum OpenMenu:
   case Mode, Settings
@@ -284,7 +285,11 @@ object ChatApp:
 
   object CtxLine extends CssClass(whiteSpace.preWrap, color(muted), padding(0.px, 6.px))
 
-  def component(bridge: HostBridge, logoSrc: Option[String], scene: Scene = Scene.Empty): UIO[ascent.ast.UI[Any]] =
+  def component(
+      bridge: HostBridge,
+      logoSrc: Option[String],
+      scene: Scene = Scene.Empty,
+  ): ZIO[Scope, Nothing, ascent.ast.UI[Any]] =
     val initialDraft = scene match
       case Scene.Slash    => "/"
       case Scene.Mentions => "@"
@@ -298,21 +303,24 @@ object ChatApp:
       dismissed  <- sq(false)
       mentionIdx <- sq(Option.empty[Int])
       openMenu   <- sq(initialMenu)
+      bound      <- Promise.make[Nothing, Unit]
+      _          <- ZStream
+        .asyncScoped[Any, Nothing, HostMsg](
+          emit =>
+            ZIO.succeed {
+              bridge.onHost(msg => emit(ZIO.succeed(Chunk.single(msg))))
+              bridge.post(WebviewMsg.Ready)
+              ComposerQuery.mentionQuery(initialDraft).foreach { q =>
+                bridge.post(WebviewMsg.MentionQuery(q))
+              }
+            } *> bound.succeed(()),
+          outputBuffer = 4096,
+        )
+        .mapZIO(msg => chat.update(ChatModel.applyMsg(_, msg)))
+        .runDrain
+        .forkScoped
+      _ <- bound.await
     yield
-      def run(effect: UIO[Unit]): Unit =
-        Unsafe.unsafe { implicit u =>
-          Runtime.default.unsafe.fork(effect)
-          ()
-        }
-
-      def applyHost(msg: HostMsg): UIO[Unit] =
-        chat.update(ChatModel.applyMsg(_, msg))
-
-      bridge.onHost(msg => run(applyHost(msg)))
-      bridge.post(WebviewMsg.Ready)
-      ComposerQuery.mentionQuery(initialDraft).foreach { q =>
-        bridge.post(WebviewMsg.MentionQuery(q))
-      }
 
       val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
         ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(c.commands, q)).getOrElse(Nil)
@@ -403,8 +411,8 @@ object ChatApp:
           E.div(
             Transcript,
             TestId("transcript"),
-            forEach(chat.map(_.turns))(_.id) { turn =>
-              renderTurn(bridge, turn)
+            forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
+              renderTurn(bridge, id, turn)
             },
           )
         ),
@@ -570,42 +578,54 @@ object ChatApp:
     end for
   end component
 
-  private def renderTurn(bridge: HostBridge, turn: TurnView): ascent.ast.UI[Any] =
-    val (earlier, visible) = ToolView.splitTail(turn.tools)
-    val userText           = turn.user.map { u =>
-      val refs = u.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
-      (refs :+ u.text).filter(_.nonEmpty).mkString("\n")
-    }
+  private def renderTurn(bridge: HostBridge, id: String, turn: Squawk[TurnView]): ascent.ast.UI[Any] =
     E.section(
       Turn,
-      TestId(s"turn-${turn.id}"),
-      userText.filter(_.nonEmpty).fold(E.span())(text => E.div(UserMsg, TestId(s"user-${turn.id}"), text)),
-      if turn.thought.nonEmpty then
+      TestId(s"turn-$id"),
+      when(turn.map(_.user.exists(_.text.nonEmpty)))(
+        E.div(UserMsg, TestId(s"user-$id"), turn.map(userTextOf))
+      ),
+      when(turn.map(_.thought.nonEmpty))(
         E.details(
           ThoughtBox,
-          TestId(s"thought-${turn.id}"),
-          E.summary(Thought.summaryLabel(turn.thought, turn.stopReason.nonEmpty)),
-          E.pre(turn.thought),
+          TestId(s"thought-$id"),
+          E.summary(turn.map(t => Thought.summaryLabel(t.thought, t.stopReason.nonEmpty))),
+          E.pre(turn.map(_.thought)),
         )
-      else E.span(),
-      if turn.tools.nonEmpty then
-        val rolled: List[ascent.ast.UI[Any]] =
-          if earlier.nonEmpty then
-            List(
-              E.details(
-                ToolBox,
-                E.summary(ToolView.rollupLabel(earlier.size)),
-                Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(bridge, t)))),
-              )
-            )
-          else Nil
-        E.div(Arg.ArgsArg((rolled ++ visible.map(t => renderTool(bridge, t))).map(Arg.ChildArg(_))))
-      else E.span(),
-      if turn.agent.nonEmpty then E.div(AgentMsg, TestId(s"agent-${turn.id}"), ChatMarkdown.render(turn.agent))
-      else E.span(),
-      turn.stopReason.filter(r => r != "end_turn").fold(E.span())(r => E.div(StopReason, r)),
+      ),
+      turn.map(t => renderTools(bridge, t.tools)),
+      when(turn.map(_.agent.nonEmpty))(
+        E.div(AgentMsg, TestId(s"agent-$id"), turn.map(t => ChatMarkdown.render(t.agent)))
+      ),
+      when(turn.map(t => t.stopReason.exists(_ != "end_turn")))(
+        E.div(StopReason, turn.map(_.stopReason.getOrElse("")))
+      ),
     )
   end renderTurn
+
+  private def userTextOf(turn: TurnView): String =
+    turn.user
+      .map { u =>
+        val refs = u.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
+        (refs :+ u.text).filter(_.nonEmpty).mkString("\n")
+      }
+      .getOrElse("")
+
+  private def renderTools(bridge: HostBridge, tools: List[ToolRow]): ascent.ast.UI[Any] =
+    if tools.isEmpty then E.span()
+    else
+      val (earlier, visible)               = ToolView.splitTail(tools)
+      val rolled: List[ascent.ast.UI[Any]] =
+        if earlier.nonEmpty then
+          List(
+            E.details(
+              ToolBox,
+              E.summary(ToolView.rollupLabel(earlier.size)),
+              Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(bridge, t)))),
+            )
+          )
+        else Nil
+      E.div(Arg.ArgsArg((rolled ++ visible.map(t => renderTool(bridge, t))).map(Arg.ChildArg(_))))
 
   private def renderTool(bridge: HostBridge, tool: ToolRow): ascent.ast.UI[Any] =
     val stats =

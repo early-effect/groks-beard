@@ -132,6 +132,9 @@ final class PreviewBridge extends HostBridge:
 end PreviewBridge
 
 object PreviewBridge:
+  def hasSceneQuery: Boolean =
+    ascent.dom.window.location.search.contains("scene=")
+
   def sceneFromLocation: String =
     val search = ascent.dom.window.location.search
     val key    = "scene="

@@ -77,5 +77,31 @@ object ProtocolSpec extends ZIOSpecDefault:
           diff.toJson.fromJson[HostMsg] == Right(diff),
         )
       },
+      test("live SSE payloads from grok agent stdio decode") {
+        val user =
+          """{"_tag":"userMessage","turnId":"turn_1","text":"hello","chips":[],"steer":false}"""
+        val thought =
+          """{"_tag":"thoughtChunk","turnId":"turn_1","text":"The"}"""
+        val agent =
+          """{"_tag":"agentChunk","turnId":"turn_1","text":"Hi"}"""
+        val end =
+          """{"_tag":"turnEnd","turnId":"turn_1","stopReason":"end_turn"}"""
+        val commands = HostMsg.AvailableCommands(
+          (1 to 40).toList.map(i => SlashCommand(s"skill-$i", "hint " * 40))
+        )
+        assertTrue(
+          user.fromJson[HostMsg] == Right(HostMsg.UserMessage("turn_1", "hello")),
+          thought.fromJson[HostMsg] == Right(HostMsg.ThoughtChunk("turn_1", "The")),
+          agent.fromJson[HostMsg] == Right(HostMsg.AgentChunk("turn_1", "Hi")),
+          end.fromJson[HostMsg] == Right(HostMsg.TurnEnd("turn_1", "end_turn")),
+          commands.toJson.fromJson[HostMsg] == Right(commands),
+        )
+      },
+      test("slash commands with ACP extra input still decode") {
+        val json =
+          """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"Compact context","input":{"hint":"optional"}}]}"""
+        val got = json.fromJson[AcpUpdate]
+        assertTrue(got == Right(AcpUpdate.Commands(List(SlashCommand("compact", "Compact context")))))
+      },
     )
 end ProtocolSpec

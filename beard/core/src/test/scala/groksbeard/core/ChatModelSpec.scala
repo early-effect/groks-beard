@@ -79,6 +79,25 @@ object ChatModelSpec extends ZIOSpecDefault:
           cleared.changes.nonEmpty,
         )
       },
+      test("composerChip upserts by path and range") {
+        val first = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.chip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50))),
+        )
+        val second = ChatModel.applyMsg(
+          first,
+          HostMsg.chip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(80))),
+        )
+        val third = ChatModel.applyMsg(
+          second,
+          HostMsg.chip(PromptChip.fromFile("/repo/src/Bar.scala", Some("/repo"))),
+        )
+        assertTrue(
+          first.chips.map(PromptChip.formatAtRef) == List("@src/Foo.scala:10-50"),
+          second.chips.map(PromptChip.formatAtRef) == List("@src/Foo.scala:10-80"),
+          third.chips.map(_.path) == List("src/Foo.scala", "src/Bar.scala"),
+        )
+      },
       test("clearTranscript keeps session chrome") {
         val model = ChatModel.empty.copy(
           title = "Stay",

@@ -26,7 +26,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
-      test("mentions scene lists files and picking one dismisses the list") {
+      test("mentions scene lists files and picking one chips the path") {
         val bridge = PreviewBridge()
         for
           ui     <- ChatApp.component(bridge, None, Scene.Mentions)
@@ -35,7 +35,24 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _     <- root.button("mention-src/Main.scala").click
               draft <- waitValue(root, "")
               _     <- waitGone(root, "mentions")
-            yield assertTrue(draft == "")
+              chip  <- waitPresent(root, "chip-src/Main.scala") *>
+                root.getByTestId("chip-src/Main.scala").innerText
+            yield assertTrue(draft == "", chip.contains("@src/Main.scala"))
+          }
+        yield result
+        end for
+      },
+      test("removing a mention chip hides the chip row") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Mentions)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("mention-src/Main.scala").click
+              _ <- waitPresent(root, "chip-src/Main.scala")
+              _ <- root.button("chip-remove-src/Main.scala").click
+              _ <- waitGone(root, "chips")
+            yield assertTrue(true)
           }
         yield result
         end for

@@ -88,7 +88,34 @@ trait WindowNs extends js.Object:
   def createOutputChannel(name: String): OutputChannel                                       = js.native
   def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem                      = js.native
   def registerTreeDataProvider[T](viewId: String, provider: TreeDataProvider[T]): Disposable = js.native
+  def activeTextEditor: js.UndefOr[TextEditor]                                               = js.native
 end WindowNs
+
+@js.native
+trait Position extends js.Object:
+  def line: Int      = js.native
+  def character: Int = js.native
+
+@js.native
+trait Range extends js.Object:
+  def start: Position = js.native
+  def end: Position   = js.native
+
+@js.native
+trait Selection extends Range:
+  def isEmpty: Boolean = js.native
+
+@js.native
+trait TextDocument extends js.Object:
+  def uri: Uri                      = js.native
+  def languageId: String            = js.native
+  def getText(): String             = js.native
+  def getText(range: Range): String = js.native
+
+@js.native
+trait TextEditor extends js.Object:
+  def document: TextDocument = js.native
+  def selection: Selection   = js.native
 
 @js.native
 trait OutputChannel extends js.Object:
@@ -109,7 +136,11 @@ trait CommandsNs extends js.Object:
 
 @js.native
 trait WorkspaceConfiguration extends js.Object:
-  def get[T](section: String): js.UndefOr[T] = js.native
+  def get[T](section: String): js.UndefOr[T]                                             = js.native
+  def update(section: String, value: js.Any, configurationTarget: Int): js.Promise[Unit] = js.native
+
+object ConfigurationTarget:
+  val Global: Int = 1
 
 @js.native
 trait WorkspaceFolder extends js.Object:
@@ -125,6 +156,11 @@ trait WorkspaceNs extends js.Object:
       scheme: String,
       provider: TextDocumentContentProvider,
   ): Disposable = js.native
+  def findFiles(
+      include: String,
+      exclude: js.UndefOr[String] = js.undefined,
+      maxResults: js.UndefOr[Int] = js.undefined,
+  ): js.Promise[js.Array[Uri]] = js.native
 end WorkspaceNs
 
 @js.native

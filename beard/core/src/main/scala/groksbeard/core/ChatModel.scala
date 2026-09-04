@@ -87,6 +87,7 @@ final case class ChatModel(
     commands: List[SlashCommand] = Nil,
     mentionQuery: String = "",
     mentionFiles: List[MentionFile] = Nil,
+    chips: List[PromptChip] = Nil,
     settings: SettingsState = SettingsState.defaults,
     turns: List[TurnView] = Nil,
     permission: Option[PermissionCard] = None,
@@ -122,10 +123,11 @@ object ChatModel:
         model.copy(mentionQuery = query, mentionFiles = files)
       case HostMsg.Settings(cliPath, nodePath, include, ctrl, pres) =>
         model.copy(settings = SettingsState(cliPath, nodePath, include, ctrl, pres))
-      case HostMsg.ComposerChip(_, _, _) =>
-        model
+      case HostMsg.ComposerChip(path, absPath, source, startLine, endLine) =>
+        model.copy(chips = PromptChip.upsert(model.chips, PromptChip(path, absPath, source, startLine, endLine)))
       case HostMsg.UserMessage(turnId, text, chips, steer) =>
-        upsert(model, turnId)(_.copy(user = Some(TurnUser(text, chips, steer))))
+        upsert(model.copy(chips = Nil), turnId)(_.copy(user = Some(TurnUser(text, chips, steer))))
+
       case HostMsg.AgentChunk(turnId, text, _) =>
         upsert(model, turnId)(t => t.copy(agent = t.agent + text))
       case HostMsg.ThoughtChunk(turnId, text) =>
@@ -159,6 +161,7 @@ object ChatModel:
       case HostMsg.ClearTranscript =>
         model.copy(
           turns = Nil,
+          chips = Nil,
           permission = None,
           plan = None,
           question = None,

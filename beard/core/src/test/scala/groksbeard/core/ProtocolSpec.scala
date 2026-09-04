@@ -29,6 +29,17 @@ object ProtocolSpec extends ZIOSpecDefault:
         val q: WebviewMsg    = WebviewMsg.MentionQuery("src")
         assertTrue(mode.toJson.fromJson[WebviewMsg] == Right(mode), q.toJson.fromJson[WebviewMsg] == Right(q))
       },
+      test("composerChip and removeChip round-trip") {
+        val chip: HostMsg =
+          HostMsg.chip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50)))
+        val drop: WebviewMsg = WebviewMsg.RemoveChip("/repo/src/Foo.scala", Some(10), Some(50))
+        val add: WebviewMsg  = WebviewMsg.AddSelection
+        assertTrue(
+          chip.toJson.fromJson[HostMsg] == Right(chip),
+          drop.toJson.fromJson[WebviewMsg] == Right(drop),
+          add.toJson.fromJson[WebviewMsg] == Right(add),
+        )
+      },
       test("unknown HostMsg tag is a decode error") {
         val got = """{"_tag":"not-a-real-tag"}""".fromJson[HostMsg]
         assertTrue(got.isLeft)

@@ -15,7 +15,7 @@ enum OpenMenu:
   case Mode, Settings
 
 enum Scene:
-  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes
+  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume
 
 object Scene:
   def from(name: String): Scene =
@@ -29,6 +29,7 @@ object Scene:
       case "question"   => Scene.Question
       case "elicit"     => Scene.Elicit
       case "changes"    => Scene.Changes
+      case "resume"     => Scene.Resume
       case _            => Scene.Empty
 end Scene
 
@@ -178,6 +179,132 @@ object ChatApp:
         overflow.hidden,
         fontSize.px(11),
         color(muted),
+      )
+
+  object SessionChip
+      extends CssClass(
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(4),
+        padding(2.px, 8.px),
+        backgroundColor(inputBg),
+        color(fg),
+        fontSize.px(12),
+        cursor.pointer,
+        overflow.hidden,
+        maxWidth.px(180),
+        flexShrink(1),
+        textAlign.left,
+        whiteSpace.nowrap,
+      )
+
+  object ToolbarGrow
+      extends CssClass(
+        flexGrow(1.0),
+        minWidth.px(0),
+      )
+
+  object Picker
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflow.hidden,
+        padding.px(8),
+        gap.px(6),
+      )
+
+  object PickerHead
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        justifyContent.spaceBetween,
+        width.pct(100),
+        flexShrink(0),
+      )
+
+  object PickerList
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
+      )
+
+  object Filter
+      extends CssClass(
+        minHeight.px(32),
+        width.pct(100),
+        boxSizing.borderBox,
+        fontFamily.inherit,
+        fontSize.px(13),
+        color(inputFg),
+        backgroundColor(inputBg),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(6),
+        padding(6.px, 8.px),
+        flexShrink(0),
+      )
+
+  object SessionItem
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        alignItems.flexStart,
+        width.pct(100),
+        boxSizing.borderBox,
+        border.none,
+        backgroundColor(Color.transparent),
+        color(fg),
+        textAlign.left,
+        padding(8.px, 8.px),
+        cursor.pointer,
+        fontSize.px(13),
+        gap.px(2),
+      )
+
+  object SessionTitle
+      extends CssClass(
+        width.pct(100),
+        overflow.hidden,
+      )
+
+  object SessionMetaLine
+      extends CssClass(
+        fontSize.px(11),
+        color(muted),
+      )
+
+  object WelcomePane
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflow.hidden,
+      )
+
+  object WelcomeList
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        alignItems.stretch,
+        width.pct(100),
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
+        padding(8.px, 12.px, 12.px, 12.px),
+        boxSizing.borderBox,
+      )
+
+  object EmptyHero
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        alignItems.center,
+        flexShrink(0),
+        padding(16.px, 16.px),
       )
 
   object Empty
@@ -418,13 +545,14 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
-      chat       <- sq(PreviewScenes.seed(scene))
-      draft      <- sq(initialDraft)
-      dismissed  <- sq(false)
-      mentionIdx <- sq(Option.empty[Int])
-      openMenu   <- sq(initialMenu)
-      bound      <- Promise.make[Nothing, Unit]
-      _          <- ZStream
+      chat        <- sq(PreviewScenes.seed(scene))
+      draft       <- sq(initialDraft)
+      dismissed   <- sq(false)
+      mentionIdx  <- sq(Option.empty[Int])
+      openMenu    <- sq(initialMenu)
+      pickerQuery <- sq("")
+      bound       <- Promise.make[Nothing, Unit]
+      _           <- ZStream
         .asyncScoped[Any, Nothing, HostMsg](
           emit =>
             ZIO.succeed {
@@ -486,6 +614,7 @@ object ChatApp:
               case None    =>
                 mentionShown.get.flatMap { mentions =>
                   if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                  else if c.pickerOpen then closePicker
                   else if c.permission.isDefined then parkPermission
                   else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
                   else ZIO.unit
@@ -509,8 +638,23 @@ object ChatApp:
       end onCardKey
 
       def pickSlash(name: String): UIO[Unit] =
-        draft.set(s"/$name ") *>
-          ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
+        if SessionCommands.isNew(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.NewSession))
+        else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then
+          pickerQuery.set("") *>
+            draft.set("") *>
+            ZIO.succeed(bridge.post(WebviewMsg.OpenSessionPicker))
+        else
+          draft.set(s"/$name ") *>
+            ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
+
+      def openPicker: UIO[Unit] =
+        pickerQuery.set("") *>
+          openMenu.set(None) *>
+          ZIO.succeed(bridge.post(WebviewMsg.OpenSessionPicker))
+
+      def closePicker: UIO[Unit] =
+        pickerQuery.set("") *>
+          ZIO.succeed(bridge.post(WebviewMsg.CloseSessionPicker))
 
       def pickMention(file: MentionFile): UIO[Unit] =
         val chip = PromptChip(file.path, file.absPath, source = "mention")
@@ -554,6 +698,21 @@ object ChatApp:
             chat.map(c => ModeLabel.modeLabel(c.modeId, c.modes)),
           ),
           E.button(
+            SessionChip,
+            TestId("sessions"),
+            A.title("Resume a previous session"),
+            Ev.onClick(_ => openPicker),
+            chat.map(sessionLabel),
+          ),
+          E.div(ToolbarGrow),
+          E.button(
+            Chip,
+            TestId("new-session"),
+            A.title("Start a new session"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.NewSession))),
+            "New",
+          ),
+          E.button(
             Chip,
             TestId("settings"),
             Ev.onClick(_ =>
@@ -569,7 +728,10 @@ object ChatApp:
         ),
         E.div(
           Stage,
-          when(chat.map(_.turns.isEmpty))(
+          when(chat.map(_.pickerOpen))(
+            renderPicker(bridge, chat, pickerQuery, s => pickerQuery.set(s), closePicker)
+          ),
+          when(chat.map(c => !c.pickerOpen && c.turns.isEmpty && resumeRows(c).isEmpty))(
             E.div(
               Empty,
               logoSrc match
@@ -579,7 +741,28 @@ object ChatApp:
               E.p(Copy, "Ask Grok anything."),
             )
           ),
-          when(chat.map(_.turns.nonEmpty))(
+          when(chat.map(c => !c.pickerOpen && c.turns.isEmpty && resumeRows(c).nonEmpty))(
+            E.div(
+              WelcomePane,
+              E.div(
+                EmptyHero,
+                logoSrc match
+                  case Some(src) => E.img(Logo, A.src(src), A.alt("Grok's Beard"))
+                  case None      => E.span(),
+                E.h1(Title, chat.map(_.title)),
+                E.p(Copy, "Ask Grok anything."),
+              ),
+              E.div(
+                WelcomeList,
+                TestId("welcome-sessions"),
+                E.p(Copy, "Recent sessions"),
+                forEach(chat.map(c => resumeRows(c).take(SessionIndex.WelcomeLimit)))(_.id) { row =>
+                  sessionButton(bridge, row)
+                },
+              ),
+            )
+          ),
+          when(chat.map(c => !c.pickerOpen && c.turns.nonEmpty))(
             E.div(
               Transcript,
               TestId("transcript"),
@@ -1041,6 +1224,64 @@ object ChatApp:
 
   private def statsEl(add: Int, del: Int): ascent.ast.UI[Any] =
     E.span(E.span(StatAdd, s"+$add"), E.span(StatDel, s"/-$del"))
+
+  private def resumeRows(c: ChatModel): List[SessionRow] =
+    c.sessions.filterNot(r => r.id == c.sessionId && c.turns.isEmpty)
+
+  private def sessionLabel(c: ChatModel): String =
+    if c.turns.isEmpty then "Resume"
+    else c.sessions.find(_.id == c.sessionId).map(_.title).filter(_.nonEmpty).getOrElse(c.title)
+
+  private def sessionSubline(row: SessionRow): String =
+    List(row.lastTurn.orElse(row.summary), row.modelId).flatten.mkString(" · ")
+
+  private def sessionButton(bridge: HostBridge, row: SessionRow): ascent.ast.UI[Any] =
+    E.button(
+      SessionItem,
+      TestId(s"session-${row.id}"),
+      A.title(row.id),
+      Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.ResumeSession(row.id)))),
+      E.span(SessionTitle, row.title),
+      E.span(SessionMetaLine, sessionSubline(row)),
+    )
+
+  private def renderPicker(
+      bridge: HostBridge,
+      chat: ascent.Source[ChatModel],
+      query: ascent.Source[String],
+      onQuery: String => UIO[Unit],
+      close: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    val shown = Squawk.zipWith(chat, query) { (c, q) => SessionIndex.filter(resumeRows(c), q) }
+    E.div(
+      Picker,
+      TestId("session-picker"),
+      E.div(
+        PickerHead,
+        E.span("Resume session"),
+        E.button(
+          Chip,
+          TestId("picker-close"),
+          Ev.onClick(_ => close),
+          "Close",
+        ),
+      ),
+      when(chat.map(_.locked.nonEmpty))(
+        E.p(Copy, TestId("session-locked"), chat.map(_.locked.getOrElse("")))
+      ),
+      E.textarea(
+        Filter,
+        TestId("session-filter"),
+        A.value(query),
+        A.placeholder("Filter by title"),
+        Events.onInput(e => onQuery(e.targetValue.getOrElse(""))),
+      ),
+      E.div(
+        PickerList,
+        forEach(shown)(_.id) { row => sessionButton(bridge, row) },
+      ),
+    )
+  end renderPicker
 
   private def occupancyEl(chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
     forEach(chat.map(_.occupancy.toList))(o => s"${o.used}/${o.size}") { o =>

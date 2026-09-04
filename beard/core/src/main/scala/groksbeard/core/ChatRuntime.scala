@@ -14,9 +14,12 @@ final class ChatRuntime(
     activeFile: () => Option[PromptChip] = () => None,
     includeActiveFile: () => Boolean = () => false,
     settings: () => SettingsState = () => SettingsState.defaults,
+    listSessions: () => List[SessionRow] = () => Nil,
+    scheduleEmptyDelete: String => Unit = _ => (),
 ):
   private val framed                    = Framed(SessionState())
   private val store                     = ChangeStore()
+  private val empty                     = EmptySessionTracker()
   private var rpcId                     = 0
   private var turnSeq                   = 0
   private var currentTurn               = "turn_0"
@@ -34,6 +37,9 @@ final class ChatRuntime(
   private var pendingPerm               = Map.empty[String, Json]
   private var inbound                   = Map.empty[String, RpcId]
   private var pendingMethod             = Map.empty[RpcId, String]
+  private var loading                   = false
+  private var loadCleared               = false
+  private var pendingResume             = Option.empty[String]
 
   transport.onData(chunk => this.synchronized { ingest(framed.feed(chunk)) })
 
@@ -51,12 +57,19 @@ final class ChatRuntime(
 
   def send(text: String): Unit = this.synchronized {
     val trimmed = text.trim
-    val chosen  = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
-    if trimmed.isEmpty && chosen.isEmpty then ()
-    else if running then enqueue(trimmed, chosen)
-    else
-      chips = Nil
-      runTurn(trimmed, chosen)
+    SessionCommands.intercept(trimmed) match
+      case Some(name) if SessionCommands.isNew(name) =>
+        newSession()
+      case Some(name) if SessionCommands.isResume(name) || SessionCommands.isHome(name) =>
+        openPicker()
+      case _ =>
+        val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
+        if trimmed.isEmpty && chosen.isEmpty then ()
+        else if running then enqueue(trimmed, chosen)
+        else
+          chips = Nil
+          runTurn(trimmed, chosen)
+    end match
   }
 
   def queue(text: String): Unit = this.synchronized {
@@ -205,6 +218,32 @@ final class ChatRuntime(
 
   def pendingChanges: List[FileChange] = this.synchronized { store.pending }
 
+  def slashPick(name: String): Unit = this.synchronized {
+    if SessionCommands.isNew(name) then newSession()
+    else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then openPicker()
+  }
+
+  def newSession(): Unit = this.synchronized {
+    leaveCurrent()
+    resetLocal()
+    post(HostMsg.ClearTranscript)
+    rpc("session/new", SessionNewParams(cwd).asJson)
+  }
+
+  def resumeSession(id: String): Unit = this.synchronized {
+    if id.isEmpty then openPicker()
+    else if sessionId.contains(id) then postList(open = false)
+    else
+      loading = true
+      loadCleared = false
+      pendingResume = Some(id)
+      rpc("session/load", SessionLoadParams(id, cwd).asJson)
+  }
+
+  def openPicker(): Unit = this.synchronized { postList(open = true) }
+
+  def closePicker(): Unit = this.synchronized { postList(open = false) }
+
   private def openChangesUnlocked(): Unit =
     val files = store.pending
     if files.isEmpty then ()
@@ -245,10 +284,35 @@ final class ChatRuntime(
     turnSeq += 1
     currentTurn = s"turn_$turnSeq"
     currentTitle = ChangeSet.turnTitle(if text.nonEmpty then text else chosen.headOption.map(_.path).getOrElse("chip"))
+    sessionId.foreach(empty.markHasHistory)
     post(HostMsg.UserMessage(currentTurn, text, chosen))
     val body = PromptChip.buildPromptText(text, chosen)
     val sid  = sessionId.getOrElse(fallbackSessionId)
     rpc("session/prompt", SessionPromptParams(sid, List(PromptText(text = body))).asJson)
+  end runTurn
+
+  private def leaveCurrent(): Unit =
+    sessionId.foreach { id =>
+      if empty.shouldDelete(id) then scheduleEmptyDelete(id)
+      empty.forget(id)
+    }
+
+  private def resetLocal(): Unit =
+    turnSeq = 0
+    currentTurn = "turn_0"
+    currentTitle = "Untitled"
+    chips = Nil
+    queued = 0
+    pendingQueue = Vector.empty
+    occupancy = None
+    running = false
+    loading = false
+    loadCleared = false
+    pendingResume = None
+  end resetLocal
+
+  private def postList(open: Boolean): Unit =
+    post(HostMsg.SessionList(listSessions(), sessionId.getOrElse(""), openPicker = open))
 
   private def respond(requestId: String, result: Json): Unit =
     inbound.get(requestId).foreach { id =>
@@ -279,11 +343,28 @@ final class ChatRuntime(
   private def ingest(msgs: List[Rpc]): Unit =
     msgs.foreach {
       case Rpc.Notify("session/update", p) =>
+        if loading then
+          SessionState.decodeUpdate(p) match
+            case Some(_: AcpUpdate.User) =>
+              if !loadCleared then
+                post(HostMsg.ClearTranscript)
+                loadCleared = true
+                turnSeq = 0
+              turnSeq += 1
+              currentTurn = s"turn_$turnSeq"
+            case _ =>
+              if !loadCleared then
+                post(HostMsg.ClearTranscript)
+                loadCleared = true
+        end if
         SessionUpdate.hostMsgs(p, currentTurn).foreach { msg =>
-          msg match
+          val out = msg match
+            case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
+            case other                           => other
+          out match
             case HostMsg.SessionMeta(_, _, _, _, Some(occ)) => occupancy = Some(occ)
             case _                                          => ()
-          post(msg)
+          post(out)
         }
         ingestUpdate(p)
       case Rpc.Request(rid, rawMethod, params) =>
@@ -313,15 +394,44 @@ final class ChatRuntime(
       case Rpc.Response(id, result, error) =>
         val method = pendingMethod.getOrElse(id, "")
         pendingMethod -= id
-        error.foreach(e => post(HostMsg.Error(e.message)))
+        if method != "session/load" then error.foreach(e => post(HostMsg.Error(e.message)))
         method match
           case "initialize" =>
             rpc("session/new", SessionNewParams(cwd).asJson)
-          case "session/new" | "session/load" =>
+          case "session/new" =>
             result.foreach(applySession)
             if sessionId.isEmpty then sessionId = Some(fallbackSessionId)
+            sessionId.foreach(empty.markCreated)
             postMeta()
             post(HostMsg.settings(settingsState))
+            postList(open = false)
+          case "session/load" =>
+            loading = false
+            error match
+              case Some(err) =>
+                val kind = SessionLoad.classify(err.message)
+                val sid  = pendingResume.getOrElse("")
+                post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind)))
+                if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message))
+                pendingResume = None
+              case None =>
+                val previous = sessionId
+                if !loadCleared then post(HostMsg.ClearTranscript)
+                previous.foreach { id =>
+                  if !pendingResume.contains(id) then
+                    if empty.shouldDelete(id) then scheduleEmptyDelete(id)
+                    empty.forget(id)
+                }
+                result.foreach(applySession)
+                pendingResume.foreach { id =>
+                  if sessionId.isEmpty then sessionId = Some(id)
+                  empty.markHasHistory(sessionId.getOrElse(id))
+                }
+                pendingResume = None
+                postMeta()
+                post(HostMsg.settings(settingsState))
+                postList(open = false)
+            end match
           case "session/prompt" =>
             val reason =
               result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse("end_turn")

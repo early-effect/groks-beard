@@ -111,6 +111,21 @@ object PreviewScenes:
             )
           ),
         )
+      case Scene.Resume =>
+        ChatModel.empty.copy(
+          sessionId = "preview",
+          pickerOpen = true,
+          sessions = List(
+            SessionRow("preview", "New session", activityMs = 20),
+            SessionRow(
+              "disk-1",
+              "Effect-TS Grok Build VS Code Plugin Plan",
+              activityMs = 10,
+              lastTurn = Some("Continue the plan"),
+            ),
+            SessionRow("disk-2", "Ascent chat chrome", activityMs = 5, summary = Some("Composer and cards")),
+          ),
+        )
       case _ => ChatModel.empty
 end PreviewScenes
 

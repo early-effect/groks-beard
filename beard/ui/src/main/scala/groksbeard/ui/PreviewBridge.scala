@@ -14,10 +14,23 @@ final class PreviewBridge extends HostBridge:
     ModeOption("always-approve", "Always approve"),
   )
 
-  private val commands = List(
-    SlashCommand("compact", "Compact context"),
-    SlashCommand("always-approve", "Skip permission prompts"),
-    SlashCommand("init", "Initialize project memory"),
+  private val commands = SessionCommands.merge(
+    List(
+      SlashCommand("compact", "Compact context"),
+      SlashCommand("always-approve", "Skip permission prompts"),
+      SlashCommand("init", "Initialize project memory"),
+    )
+  )
+
+  private val sessions = List(
+    SessionRow("preview", "New session", activityMs = 20),
+    SessionRow(
+      "disk-1",
+      "Effect-TS Grok Build VS Code Plugin Plan",
+      activityMs = 10,
+      lastTurn = Some("Continue the plan"),
+    ),
+    SessionRow("disk-2", "Ascent chat chrome", activityMs = 5, summary = Some("Composer and cards")),
   )
 
   private val files = List(
@@ -36,6 +49,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
         emit(HostMsg.AvailableCommands(commands))
         emit(HostMsg.settings(settings))
+        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
       case WebviewMsg.MentionQuery(query) =>
         val q    = query.toLowerCase
         val hits =
@@ -105,8 +119,26 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.TurnEnd("t2", "end_turn"))
       case WebviewMsg.MentionPick(path, absPath) =>
         emit(HostMsg.chip(PromptChip(path, absPath, source = "mention")))
-      case WebviewMsg.SlashPick(_) | WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection |
-          WebviewMsg.RemoveChip(_, _, _) =>
+      case WebviewMsg.SlashPick(name) =>
+        if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
+        else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
+      case WebviewMsg.NewSession =>
+        emit(HostMsg.ClearTranscript)
+        emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
+        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
+      case WebviewMsg.ResumeSession(id) =>
+        val title = sessions.find(_.id == id).map(_.title).getOrElse(id)
+        emit(HostMsg.ClearTranscript)
+        emit(HostMsg.SessionMeta(id, title, modeId, modes))
+        emit(HostMsg.UserMessage("resume-turn", "hello from disk"))
+        emit(HostMsg.AgentChunk("resume-turn", s"Resumed **$title**."))
+        emit(HostMsg.TurnEnd("resume-turn", "end_turn"))
+        emit(HostMsg.SessionList(sessions, id, openPicker = false))
+      case WebviewMsg.OpenSessionPicker =>
+        emit(HostMsg.SessionList(sessions, "preview", openPicker = true))
+      case WebviewMsg.CloseSessionPicker =>
+        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
+      case WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
         ()
       case WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
         emit(

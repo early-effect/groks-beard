@@ -95,6 +95,9 @@ final case class ChatModel(
     question: Option[QuestionCard] = None,
     elicit: Option[ElicitCard] = None,
     occupancy: Option[Occupancy] = None,
+    sessions: List[SessionRow] = Nil,
+    pickerOpen: Boolean = false,
+    locked: Option[String] = None,
     queued: Int = 0,
     changes: Option[ChangesSummary] = None,
     diff: Option[DiffView] = None,
@@ -119,6 +122,15 @@ object ChatModel:
           modes = if modes.nonEmpty then modes else model.modes,
           occupancy = occupancy.orElse(model.occupancy),
         )
+      case HostMsg.SessionList(sessions, currentId, openPicker) =>
+        model.copy(
+          sessions = sessions,
+          sessionId = if currentId.nonEmpty then currentId else model.sessionId,
+          pickerOpen = openPicker,
+          locked = if openPicker then model.locked else None,
+        )
+      case HostMsg.SessionLocked(_, message) =>
+        model.copy(locked = Some(message), pickerOpen = true)
       case HostMsg.AvailableCommands(commands) =>
         model.copy(commands = commands)
       case HostMsg.MentionResults(query, files) =>
@@ -172,6 +184,8 @@ object ChatModel:
           changes = None,
           diff = None,
           error = None,
+          pickerOpen = false,
+          locked = None,
         )
 
   private def upsert(model: ChatModel, turnId: String)(patch: TurnView => TurnView): ChatModel =

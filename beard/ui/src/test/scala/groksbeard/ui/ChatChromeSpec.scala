@@ -213,6 +213,51 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("resume scene lists sessions and picking one restores a turn") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Resume)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "sessions")
+              _    <- root.button("sessions").click
+              _    <- waitPresent(root, "session-picker")
+              _    <- root.button("session-disk-1").click
+              user <- waitPresent(root, "user-resume-turn") *>
+                root.getByTestId("user-resume-turn").innerText
+            yield assertTrue(user.contains("hello from disk"))
+          }
+        yield result
+        end for
+      },
+      test("New in the toolbar clears a transcript") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "transcript")
+              _ <- root.button("new-session").click
+              _ <- waitGone(root, "transcript")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("slash resume opens the session picker") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "slash-resume")
+              _ <- root.button("slash-resume").click
+              _ <- waitPresent(root, "session-picker")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("Send shows the user turn and agent echo") {
         val bridge = PreviewBridge()
         for

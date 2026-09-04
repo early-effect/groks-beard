@@ -35,7 +35,7 @@ Search **Grok's Beard** in Cursor, or install `early-effect.groks-beard`.
 
 https://open-vsx.org/extension/early-effect/groks-beard
 
-**From source** (Scala rewrite under `beard/`; `packages/` is frozen spec):
+**From source** (product is the Scala rewrite under `beard/`; `packages/` is a historical TypeScript prototype, not the spec):
 
 ```bash
 sbt --no-server host/packageVsix

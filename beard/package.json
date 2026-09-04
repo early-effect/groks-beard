@@ -84,6 +84,14 @@
         "title": "Grok's Beard: Stop"
       },
       {
+        "command": "groksBeard.newSession",
+        "title": "Grok's Beard: New Session"
+      },
+      {
+        "command": "groksBeard.resumeSession",
+        "title": "Grok's Beard: Resume Session"
+      },
+      {
         "command": "groksBeard.cycleMode",
         "title": "Grok's Beard: Cycle Mode"
       },

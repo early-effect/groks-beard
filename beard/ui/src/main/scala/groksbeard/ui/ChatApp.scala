@@ -50,24 +50,47 @@ object ChatApp:
 
   object Page
       extends GlobalStyle(
-        Selector(Elem.html, height.pct(100)),
+        Selector(
+          Elem.html,
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
+          overflow.hidden,
+          backgroundColor(bg),
+        ),
         Selector(
           Elem.body,
-          height.pct(100),
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
           margin.zero,
+          overflow.hidden,
           color(fg),
           backgroundColor(bg),
           fontFamily.of(FontFamily.systemUi, FontFamily.sansSerif),
         ),
-        Selector(Sel.id("root"), height.pct(100)),
+        Selector(
+          Sel.id("root"),
+          position.fixed,
+          top.px(0),
+          right.px(0),
+          bottom.px(0),
+          left.px(0),
+          overflow.hidden,
+        ),
       )
 
   object Shell
       extends CssClass(
         display.flex,
         flexDirection.column,
+        width.pct(100),
         height.pct(100),
-        minHeight.pct(100),
+        overflow.hidden,
         boxSizing.borderBox,
       )
 

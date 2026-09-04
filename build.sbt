@@ -7,7 +7,7 @@ import rocks.earlyeffect.splice.SplicePlugin.autoImport.*
 
 MyVersions.settings
 
-val scala3Version: String = MyVersions.scala
+ThisBuild / scalaVersion := (MyVersions.scala: String)
 
 organization         := "rocks.earlyeffect"
 organizationName     := "Early Effect"
@@ -65,7 +65,7 @@ val commonScalacOptions = Seq(
   "-language:implicitConversions",
 )
 
-val scalaVersions = Seq(scala3Version)
+val scalaVersions = Seq[String](MyVersions.scala)
 
 val zioTestSettings = MyVersions.zioTests
 
@@ -113,7 +113,6 @@ lazy val facade = (project in file("beard/facade"))
   .settings(
     name := "groks-beard-facade",
     skipPublish,
-    scalaVersion := scala3Version,
     scalacOptions ++= commonScalacOptions,
     javaTimePolyfill,
   )
@@ -124,7 +123,6 @@ lazy val preview = (project in file("beard/preview"))
   .settings(
     name := "groks-beard-preview",
     skipPublish,
-    scalaVersion := scala3Version,
     scalacOptions ++= commonScalacOptions,
     MyVersions.previewServer,
     Compile / mainClass       := Def.uncached(Some("groksbeard.preview.LiveMain")),
@@ -184,7 +182,6 @@ lazy val host = (project in file("beard/host"))
   .settings(
     name := "groks-beard-host",
     skipPublish,
-    scalaVersion := scala3Version,
     scalacOptions ++= commonScalacOptions,
     javaTimePolyfill,
     MyVersions.zioLib,
@@ -232,7 +229,6 @@ lazy val mcp = (project in file("beard/mcp"))
   .settings(
     name := "groks-beard-mcp",
     skipPublish,
-    scalaVersion := scala3Version,
     scalacOptions ++= commonScalacOptions,
     javaTimePolyfill,
     MyVersions.zioLib,

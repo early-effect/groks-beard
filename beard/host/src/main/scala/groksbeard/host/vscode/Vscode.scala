@@ -22,9 +22,15 @@ trait UriNs extends js.Object:
   def joinPath(base: Uri, pathSegments: String*): Uri = js.native
 
 @js.native
+trait Memento extends js.Object:
+  def get[T](key: String): js.UndefOr[T]                   = js.native
+  def update(key: String, value: js.Any): js.Promise[Unit] = js.native
+
+@js.native
 trait ExtensionContext extends js.Object:
   val subscriptions: js.Array[Disposable] = js.native
   val extensionUri: Uri                   = js.native
+  def workspaceState: Memento             = js.native
 
 /** Options we send into a webview. Not `@js.native`: we construct these in Scala. */
 class WebviewOptions(
@@ -73,9 +79,12 @@ trait WindowNs extends js.Object:
       viewId: String,
       provider: WebviewViewProvider,
       options: js.UndefOr[WebviewViewProviderOptions] = js.undefined,
-  ): Disposable                                                                              = js.native
-  def showErrorMessage(message: String): js.Promise[js.Any]                                  = js.native
-  def showInformationMessage(message: String): js.Promise[js.Any]                            = js.native
+  ): Disposable                                                                               = js.native
+  def showErrorMessage(message: String): js.Promise[js.Any]                                   = js.native
+  def showInformationMessage(message: String): js.Promise[js.UndefOr[String]]                 = js.native
+  def showInformationMessage(message: String, items: String*): js.Promise[js.UndefOr[String]] =
+    js.native
+  def showWarningMessage(message: String, items: String*): js.Promise[js.UndefOr[String]]    = js.native
   def createOutputChannel(name: String): OutputChannel                                       = js.native
   def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem                      = js.native
   def registerTreeDataProvider[T](viewId: String, provider: TreeDataProvider[T]): Disposable = js.native
@@ -119,8 +128,13 @@ trait WorkspaceNs extends js.Object:
 end WorkspaceNs
 
 @js.native
+trait Clipboard extends js.Object:
+  def writeText(text: String): js.Promise[Unit] = js.native
+
+@js.native
 trait EnvNs extends js.Object:
-  def appName: String = js.native
+  def appName: String      = js.native
+  def clipboard: Clipboard = js.native
 
 @js.native
 trait FileSystem extends js.Object:

@@ -14,30 +14,21 @@ object SessionState:
   val CommitBeforeContinue: Set[String] = Set("session/set_mode")
 
   def modeIdFromSessionResult(result: Json): Option[String] =
-    result match
-      case obj: Json.Obj =>
-        obj.get("modes") match
-          case Some(modes: Json.Obj) =>
-            modes.get("currentModeId") match
-              case Some(Json.Str(id)) if id.nonEmpty => Some(id)
-              case _                                 => None
-          case _ => None
-      case _ => None
+    result
+      .as[SessionNewResult]
+      .toOption
+      .flatMap(_.modes)
+      .map(_.currentModeId)
+      .filter(_.nonEmpty)
 
   def modeIdFromSessionUpdate(params: Json): Option[String] =
-    val update = unwrapUpdate(params)
-    update.get("sessionUpdate") match
-      case Some(Json.Str("current_mode_update")) =>
-        (update.get("modeId") orElse update.get("currentModeId")) match
-          case Some(Json.Str(id)) if id.nonEmpty => Some(id)
-          case _                                 => None
-      case _ => None
+    decodeUpdate(params).collect { case AcpUpdate.CurrentMode(modeId, currentModeId) =>
+      modeId.orElse(currentModeId).filter(_.nonEmpty)
+    }.flatten
 
-  private[core] def unwrapUpdate(params: Json): Json.Obj =
-    params match
-      case obj: Json.Obj =>
-        obj.get("update") match
-          case Some(u: Json.Obj) => u
-          case _                 => obj
-      case _ => Json.Obj()
+  def decodeNotify(params: Json): Option[AcpSessionNotify] =
+    params.as[AcpSessionNotify].toOption
+
+  def decodeUpdate(params: Json): Option[AcpUpdate] =
+    decodeNotify(params).map(_.update).orElse(params.as[AcpUpdate].toOption)
 end SessionState

@@ -35,13 +35,19 @@ Search **Grok's Beard** in Cursor, or install `early-effect.groks-beard`.
 
 https://open-vsx.org/extension/early-effect/groks-beard
 
-**From source:**
+**From source** (Scala rewrite under `beard/`; `packages/` is frozen spec):
 
 ```bash
-pnpm install
-pnpm pack:vscode
-code --install-extension packages/vscode/groks-beard.vsix --force
-# Cursor: cursor --install-extension packages/vscode/groks-beard.vsix --force
+sbt --no-server host/packageVsix
+code --install-extension beard/groks-beard.vsix --force
+# Cursor: cursor --install-extension beard/groks-beard.vsix --force
+```
+
+Or iterate without packing:
+
+```bash
+sbt --no-server host/stageExtension
+code --extensionDevelopmentPath=beard
 ```
 
 ## Requirements
@@ -72,15 +78,16 @@ Not in v1: Electron desktop, phone remote, voice, Codex/Claude, telemetry.
 
 ## Modules
 
-| Package | Role |
-| --- | --- |
-| `@groks-beard/core` | Schema, tagged errors, chips, change-sets, session index |
-| `@groks-beard/acp` | Effect wrapper around `grok agent stdio` |
-| `@groks-beard/mcp` | TUI sidecar tools and stdio proxy |
-| `@groks-beard/vscode` | Extension host, diffs, commands |
-| `@groks-beard/webview` | Chat UI (dumb renderer) |
+The product lives under `beard/` (Scala 3, Scala.js, Ascent, zio-json). `packages/` is the frozen TypeScript spec.
 
-Stack: Effect 4 RC, TypeScript 7, pnpm workspaces, vitest. The CLI owns tools, skills, MCP, memory, and compaction.
+| Path | Role |
+| --- | --- |
+| `beard/core` | Protocol, ChatRuntime, diffs, MCP tool dispatch (JVM + JS; `sbt testCore`) |
+| `beard/ui` | Ascent chat webview |
+| `beard/host` | VS Code / Cursor extension |
+| `beard/mcp` | stdio MCP proxy for the external TUI |
+
+The CLI owns tools, skills, MCP, memory, and compaction. The sidecar is path-only eyes (no writes).
 
 ## Copyright and license
 

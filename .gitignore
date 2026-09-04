@@ -6,6 +6,7 @@ node_modules/
 dist/
 out/
 *.vsix
+beard/LICENSE
 .vscode-test/
 coverage/
 *.tsbuildinfo

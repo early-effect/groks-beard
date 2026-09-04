@@ -1,5 +1,7 @@
 package groksbeard.core
 
+import zio.json.*
+
 final case class ToolRow(
     id: String,
     title: String,
@@ -9,7 +11,7 @@ final case class ToolRow(
     deletions: Option[Int] = None,
     input: Option[String] = None,
     output: Option[String] = None,
-)
+) derives JsonCodec
 
 final case class TurnView(
     id: String,
@@ -22,7 +24,7 @@ final case class TurnView(
 
 final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false)
 
-final case class PermissionOption(optionId: String, name: String, kind: String)
+final case class PermissionOption(optionId: String, name: String, kind: String) derives JsonCodec
 
 final case class PermissionCard(
     requestId: String,
@@ -30,21 +32,21 @@ final case class PermissionCard(
     title: String,
     options: List[PermissionOption],
     hasDiff: Boolean,
-)
+) derives JsonCodec
 
-final case class PlanCard(requestId: String, planMarkdown: String)
+final case class PlanCard(requestId: String, planMarkdown: String) derives JsonCodec
 
-final case class QuestionOption(id: String, label: String)
+final case class QuestionOption(id: String, label: String) derives JsonCodec
 
 final case class AgentQuestion(
     id: String,
     prompt: String,
     options: List[QuestionOption],
-    allowMultiple: Boolean = false,
-    allowFreeText: Boolean = false,
-)
+    @jsonExclude allowMultiple: Boolean = false,
+    @jsonExclude allowFreeText: Boolean = false,
+) derives JsonCodec
 
-final case class QuestionCard(requestId: String, questions: List[AgentQuestion])
+final case class QuestionCard(requestId: String, questions: List[AgentQuestion]) derives JsonCodec
 
 final case class ElicitCard(
     requestId: String,
@@ -52,7 +54,7 @@ final case class ElicitCard(
     mode: String,
     title: String,
     url: Option[String] = None,
-)
+) derives JsonCodec
 
 final case class ChangeFileView(
     path: String,
@@ -61,14 +63,14 @@ final case class ChangeFileView(
     deletions: Int,
     wholeFile: Boolean = true,
     undoDisabled: Option[String] = None,
-)
+) derives JsonCodec
 
 final case class ChangesSummary(
     fileCount: Int,
     additions: Int,
     deletions: Int,
     files: List[ChangeFileView] = Nil,
-)
+) derives JsonCodec
 
 final case class DiffView(
     path: String,
@@ -118,8 +120,8 @@ object ChatModel:
         model.copy(commands = commands)
       case HostMsg.MentionResults(query, files) =>
         model.copy(mentionQuery = query, mentionFiles = files)
-      case HostMsg.Settings(state) =>
-        model.copy(settings = state)
+      case HostMsg.Settings(cliPath, nodePath, include, ctrl, pres) =>
+        model.copy(settings = SettingsState(cliPath, nodePath, include, ctrl, pres))
       case HostMsg.ComposerChip(_, _, _) =>
         model
       case HostMsg.UserMessage(turnId, text, chips, steer) =>
@@ -130,14 +132,14 @@ object ChatModel:
         upsert(model, turnId)(t => t.copy(thought = t.thought + text))
       case HostMsg.ToolGroup(turnId, tools) =>
         upsert(model, turnId)(t => t.copy(tools = mergeTools(t.tools, tools)))
-      case HostMsg.Permission(card) =>
-        model.copy(permission = Some(card))
-      case HostMsg.Plan(card) =>
-        model.copy(plan = Some(card))
-      case HostMsg.Question(card) =>
-        model.copy(question = Some(card))
-      case HostMsg.Elicit(card) =>
-        model.copy(elicit = Some(card))
+      case HostMsg.Permission(requestId, toolCallId, title, options, hasDiff) =>
+        model.copy(permission = Some(PermissionCard(requestId, toolCallId, title, options, hasDiff)))
+      case HostMsg.Plan(requestId, markdown) =>
+        model.copy(plan = Some(PlanCard(requestId, markdown)))
+      case HostMsg.Question(requestId, questions) =>
+        model.copy(question = Some(QuestionCard(requestId, questions)))
+      case HostMsg.Elicit(requestId, serverName, mode, title, url) =>
+        model.copy(elicit = Some(ElicitCard(requestId, serverName, mode, title, url)))
       case HostMsg.TurnEnd(turnId, reason) =>
         upsert(
           model.copy(permission = None, plan = None, question = None, elicit = None, queued = 0),
@@ -145,8 +147,9 @@ object ChatModel:
         )(_.copy(stopReason = Some(reason)))
       case HostMsg.Queued(count) =>
         model.copy(queued = count)
-      case HostMsg.Changes(summary) =>
-        model.copy(changes = if summary.fileCount > 0 then Some(summary) else None)
+      case HostMsg.Changes(fileCount, additions, deletions, files) =>
+        val summary = ChangesSummary(fileCount, additions, deletions, files)
+        model.copy(changes = if fileCount > 0 then Some(summary) else None)
       case HostMsg.DiffPreview(path, oldText, newText, wholeFile) =>
         model.copy(diff = Some(DiffView(path, oldText, newText, wholeFile)))
       case HostMsg.ClearDiff =>

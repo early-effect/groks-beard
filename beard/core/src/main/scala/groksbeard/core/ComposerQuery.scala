@@ -1,10 +1,13 @@
 package groksbeard.core
 
-final case class SlashCommand(name: String, description: String, hint: Option[String] = None)
+import zio.json.*
 
-final case class MentionFile(path: String, absPath: String)
+final case class SlashCommand(name: String, description: String, @jsonExclude hint: Option[String] = None)
+    derives JsonCodec
 
-final case class ModeOption(id: String, name: String)
+final case class MentionFile(path: String, absPath: String) derives JsonCodec
+
+final case class ModeOption(id: String, name: String) derives JsonCodec
 
 object ComposerQuery:
 

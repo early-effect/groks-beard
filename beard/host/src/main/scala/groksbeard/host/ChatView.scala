@@ -33,11 +33,11 @@ final class ChatView(context: ExtensionContext, review: Review, tree: ChangesTre
     def post(msg: HostMsg): Unit =
       val _ = webview.postMessage(js.JSON.parse(msg.toJson))
       msg match
-        case HostMsg.Changes(summary) =>
+        case HostMsg.Changes(fileCount, additions, deletions, _) =>
           status.text =
-            if summary.fileCount == 0 then "$(beard) Grok"
-            else s"$$(diff) ${summary.fileCount}  +${summary.additions}/-${summary.deletions}"
-          if summary.fileCount > 0 then status.show() else status.hide()
+            if fileCount == 0 then "$(beard) Grok"
+            else s"$$(diff) $fileCount  +$additions/-$deletions"
+          if fileCount > 0 then status.show() else status.hide()
         case _ => ()
       ()
     end post
@@ -59,7 +59,7 @@ final class ChatView(context: ExtensionContext, review: Review, tree: ChangesTre
         case WebviewMsg.Cancel              => rt.cancel()
         case WebviewMsg.SetMode(id)         => rt.setMode(id)
         case WebviewMsg.MentionQuery(query) => post(HostMsg.MentionResults(query, Nil))
-        case WebviewMsg.OpenSettings        => post(HostMsg.Settings(SettingsState.defaults))
+        case WebviewMsg.OpenSettings        => post(HostMsg.settings(SettingsState.defaults))
         case WebviewMsg.OpenDiff(id)        => rt.openDiff(id)
         case WebviewMsg.OpenChanges         => rt.openChanges()
         case WebviewMsg.KeepChange(path)    => rt.keep(path)

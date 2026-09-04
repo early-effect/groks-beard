@@ -6,6 +6,11 @@
   "icon": "media/logo.png",
   "version": "0.2.0",
   "private": true,
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -91,8 +96,31 @@
         "command": "groksBeard.undoChange",
         "title": "Grok's Beard: Undo Change",
         "icon": "$(discard)"
+      },
+      {
+        "command": "groksBeard.enableTuiBridge",
+        "title": "Grok's Beard: Enable TUI Bridge"
+      },
+      {
+        "command": "groksBeard.disableTuiBridge",
+        "title": "Grok's Beard: Disable TUI Bridge"
       }
     ],
+    "configuration": {
+      "title": "Grok's Beard",
+      "properties": {
+        "groksBeard.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Node binary used by the TUI bridge. Empty means PATH."
+        },
+        "groksBeard.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the grok binary. Empty means auto-discover."
+        }
+      }
+    },
     "menus": {
       "view/item/context": [
         {

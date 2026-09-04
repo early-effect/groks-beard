@@ -1,0 +1,10 @@
+**
+!package.json
+!README.md
+!LICENSE
+!dist
+!dist/**
+!media
+!media/**
+**/*.map
+ui/target/**

@@ -63,7 +63,7 @@ object ChatModelSpec extends ZIOSpecDefault:
       test("changes summary and diff preview fold into the model") {
         val withFiles = ChatModel.applyMsg(
           ChatModel.empty,
-          HostMsg.Changes(
+          HostMsg.changes(
             ChangesSummary(1, 2, 1, List(ChangeFileView("/tmp/Main.scala", "modify", 2, 1)))
           ),
         )

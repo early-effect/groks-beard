@@ -1,6 +1,5 @@
 package groksbeard.core
 
-import zio.json.*
 import zio.json.ast.Json
 
 final class Framed(val state: SessionState):
@@ -11,9 +10,9 @@ final class Framed(val state: SessionState):
     msg match
       case Rpc.Request(id, method, params) =>
         val mode =
-          if method == "session/set_mode" then stringField(params, "modeId")
+          if method == "session/set_mode" then params.as[SessionSetModeParams].toOption.map(_.modeId)
           else None
-        pending = pending.updated(idKey(id), (method, mode))
+        pending = pending.updated(RpcId.key(id), (method, mode))
       case _ => ()
 
   def feed(chunk: String): List[Rpc] =
@@ -31,7 +30,7 @@ final class Framed(val state: SessionState):
   private def commit(msg: Rpc): Unit =
     msg match
       case Rpc.Response(id, result, error) =>
-        val key      = idKey(id)
+        val key      = RpcId.key(id)
         val recorded = pending.get(key)
         pending = pending - key
         val ok = error.isEmpty
@@ -44,14 +43,4 @@ final class Framed(val state: SessionState):
       case Rpc.Notify(method, params) if method == "session/update" =>
         SessionState.modeIdFromSessionUpdate(params).foreach(state.commitMode)
       case _ => ()
-
-  private def idKey(id: Json): String = id.toJson
-
-  private def stringField(params: Json, key: String): Option[String] =
-    params match
-      case obj: Json.Obj =>
-        obj.get(key) match
-          case Some(Json.Str(s)) if s.nonEmpty => Some(s)
-          case _                               => None
-      case _ => None
 end Framed

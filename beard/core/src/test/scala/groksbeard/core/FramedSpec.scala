@@ -1,6 +1,5 @@
 package groksbeard.core
 
-import zio.json.ast.Json
 import zio.test.*
 
 object FramedSpec extends ZIOSpecDefault:
@@ -11,12 +10,8 @@ object FramedSpec extends ZIOSpecDefault:
         assertTrue(lines == List("""{"a":1}""", """{"b":2}"""), rest == """{"c":""")
       },
       test("encodes two JSON-RPC lines in one stdout chunk") {
-        val fake = FakeAgent(pairSetModeWithTerminal = true)
-        val req  = Rpc.Request(
-          Json.Num(7),
-          "session/set_mode",
-          Json.Obj("sessionId" -> Json.Str("sess_test"), "modeId" -> Json.Str("plan")),
-        )
+        val fake   = FakeAgent(pairSetModeWithTerminal = true)
+        val req    = Rpc.request(RpcId.Num(7), "session/set_mode", SessionSetModeParams("sess_test", "plan"))
         val text   = fake.encodeReplies(req)
         val lines  = text.trim.split("\n").toList
         val first  = Rpc.parse(lines.head)
@@ -24,7 +19,7 @@ object FramedSpec extends ZIOSpecDefault:
         assertTrue(
           lines.size == 2,
           first.exists {
-            case Rpc.Response(id, _, _) => id == Json.Num(7)
+            case Rpc.Response(id, _, _) => id == RpcId.Num(7)
             case _                      => false
           },
           second.exists {
@@ -36,11 +31,7 @@ object FramedSpec extends ZIOSpecDefault:
       test("commits session/set_mode before the next line in the same stdout chunk") {
         val framed = Framed(SessionState())
         val fake   = FakeAgent(pairSetModeWithTerminal = true)
-        val req    = Rpc.Request(
-          Json.Num(7),
-          "session/set_mode",
-          Json.Obj("sessionId" -> Json.Str("sess_test"), "modeId" -> Json.Str("plan")),
-        )
+        val req    = Rpc.request(RpcId.Num(7), "session/set_mode", SessionSetModeParams("sess_test", "plan"))
         framed.recordOutgoing(req)
         var seen: Option[(String, Boolean)] = None
         framed.feed(fake.encodeReplies(req)).foreach {
@@ -52,7 +43,7 @@ object FramedSpec extends ZIOSpecDefault:
       },
       test("session/load lock is a JSON-RPC error") {
         val fake  = FakeAgent(lockLoad = true)
-        val req   = Rpc.Request(Json.Num(1), "session/load", Json.Obj("sessionId" -> Json.Str("sess_test")))
+        val req   = Rpc.request(RpcId.Num(1), "session/load", SessionLoadParams("sess_test"))
         val reply = fake.replies(req).head
         assertTrue(
           reply match
@@ -62,7 +53,7 @@ object FramedSpec extends ZIOSpecDefault:
       },
       test("unknown methods are -32601") {
         val fake  = FakeAgent()
-        val req   = Rpc.Request(Json.Num(1), "_x.ai/not-a-method", Json.Obj())
+        val req   = Rpc.Request(RpcId.Num(1), "_x.ai/not-a-method", zio.json.ast.Json.Obj())
         val reply = fake.replies(req).head
         assertTrue(
           reply match

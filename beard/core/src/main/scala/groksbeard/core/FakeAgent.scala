@@ -1,7 +1,5 @@
 package groksbeard.core
 
-import zio.json.ast.Json
-
 final class FakeAgent(
     val sessionId: String = "sess_test",
     pairSetModeWithTerminal: Boolean = false,
@@ -15,69 +13,55 @@ final class FakeAgent(
   def encodeReplies(msg: Rpc): String =
     Ndjson.encodeChunk(replies(msg).map(Rpc.toLine))
 
-  private def repliesFor(id: Json, method: String): List[Rpc] =
+  private def repliesFor(id: RpcId, method: String): List[Rpc] =
     method match
       case "initialize" =>
-        List(
-          Rpc.ok(
-            id,
-            Json.Obj(
-              "protocolVersion"   -> Json.Num(1),
-              "agentCapabilities" -> Json.Obj("loadSession" -> Json.Bool(true)),
-            ),
-          )
-        )
+        List(Rpc.ok(id, InitializeResult(1, AgentCapabilities(loadSession = true)).asJson))
       case "session/new" =>
         List(
-          Rpc.notify(
+          Rpc.notifyOf(
             "session/update",
-            Json.Obj(
-              "sessionId" -> Json.Str(sessionId),
-              "update"    -> Json.Obj(
-                "sessionUpdate"     -> Json.Str("available_commands_update"),
-                "availableCommands" -> Json.Arr(
-                  Json.Obj("name" -> Json.Str("compact"), "description" -> Json.Str("Compact context")),
-                  Json.Obj(
-                    "name"        -> Json.Str("always-approve"),
-                    "description" -> Json.Str("Skip permission prompts"),
-                  ),
-                ),
+            AcpSessionNotify(
+              sessionId,
+              AcpUpdate.Commands(
+                List(
+                  SlashCommand("compact", "Compact context"),
+                  SlashCommand("always-approve", "Skip permission prompts"),
+                )
               ),
             ),
           ),
           Rpc.ok(
             id,
-            Json.Obj(
-              "sessionId" -> Json.Str(sessionId),
-              "modes"     -> Json.Obj(
-                "currentModeId"  -> Json.Str("normal"),
-                "availableModes" -> Json.Arr(
-                  Json.Obj("id" -> Json.Str("normal"), "name"         -> Json.Str("Normal")),
-                  Json.Obj("id" -> Json.Str("plan"), "name"           -> Json.Str("Plan")),
-                  Json.Obj("id" -> Json.Str("auto"), "name"           -> Json.Str("Auto")),
-                  Json.Obj("id" -> Json.Str("always-approve"), "name" -> Json.Str("Always approve")),
-                ),
+            SessionNewResult(
+              sessionId,
+              Some(
+                SessionModeState(
+                  "normal",
+                  List(
+                    ModeOption("normal", "Normal"),
+                    ModeOption("plan", "Plan"),
+                    ModeOption("auto", "Auto"),
+                    ModeOption("always-approve", "Always approve"),
+                  ),
+                )
               ),
-            ),
+            ).asJson,
           ),
         )
       case "session/load" =>
         if lockLoad then List(Rpc.fail(id, Rpc.MethodNotFound, "session locked"))
-        else List(Rpc.ok(id, Json.Obj("sessionId" -> Json.Str(sessionId))))
+        else List(Rpc.ok(id, SessionLoadResult(sessionId).asJson))
       case "session/set_mode" =>
-        val result = Rpc.ok(id, Json.Obj())
+        val result = Rpc.ok(id, EmptyObject().asJson)
         if !pairSetModeWithTerminal then List(result)
         else
           List(
             result,
-            Rpc.Request(
-              Json.Str("term-1"),
+            Rpc.request(
+              RpcId.Str("term-1"),
               "terminal/create",
-              Json.Obj(
-                "sessionId" -> Json.Str(sessionId),
-                "command"   -> Json.Str("rm"),
-                "args"      -> Json.Arr(Json.Str("-rf"), Json.Str("/tmp/beard-probe")),
-              ),
+              TerminalCreateParams(sessionId, "rm", List("-rf", "/tmp/beard-probe")),
             ),
           )
         end if
@@ -86,47 +70,36 @@ final class FakeAgent(
           thought("Considering the selection.\n"),
           thought("Then I'll answer.\n"),
           agent("hello"),
-          Rpc.notify(
+          Rpc.notifyOf(
             "session/update",
-            Json.Obj(
-              "sessionId" -> Json.Str(sessionId),
-              "update"    -> Json.Obj(
-                "sessionUpdate" -> Json.Str("tool_call"),
-                "toolCallId"    -> Json.Str("call_1"),
-                "title"         -> Json.Str("Edit Main.scala"),
-                "kind"          -> Json.Str("edit"),
-                "status"        -> Json.Str("pending"),
-                "content"       -> Json.Arr(
-                  Json.Obj(
-                    "type"    -> Json.Str("diff"),
-                    "path"    -> Json.Str("/tmp/Main.scala"),
-                    "oldText" -> Json.Str("object Main"),
-                    "newText" -> Json.Str("object Main:\n  def run = ()"),
+            AcpSessionNotify(
+              sessionId,
+              AcpUpdate.ToolCall(
+                toolCallId = "call_1",
+                title = "Edit Main.scala",
+                kind = "edit",
+                status = "pending",
+                content = List(
+                  AcpContent.Diff(
+                    path = "/tmp/Main.scala",
+                    oldText = Some("object Main"),
+                    newText = Some("object Main:\n  def run = ()"),
                   )
                 ),
               ),
             ),
           ),
-          Rpc.ok(id, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+          Rpc.ok(id, SessionPromptResult("end_turn").asJson),
         )
       case _ =>
         List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
 
   private def thought(text: String): Rpc.Notify =
-    chunk("agent_thought_chunk", text)
+    chunk(AcpUpdate.Thought(AcpContent.Text(text)))
 
   private def agent(text: String): Rpc.Notify =
-    chunk("agent_message_chunk", text)
+    chunk(AcpUpdate.Agent(AcpContent.Text(text)))
 
-  private def chunk(kind: String, text: String): Rpc.Notify =
-    Rpc.notify(
-      "session/update",
-      Json.Obj(
-        "sessionId" -> Json.Str(sessionId),
-        "update"    -> Json.Obj(
-          "sessionUpdate" -> Json.Str(kind),
-          "content"       -> Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(text)),
-        ),
-      ),
-    )
+  private def chunk(update: AcpUpdate): Rpc.Notify =
+    Rpc.notifyOf("session/update", AcpSessionNotify(sessionId, update))
 end FakeAgent

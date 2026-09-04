@@ -35,7 +35,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.Ready)
         emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
         emit(HostMsg.AvailableCommands(commands))
-        emit(HostMsg.Settings(settings))
+        emit(HostMsg.settings(settings))
       case WebviewMsg.MentionQuery(query) =>
         val q    = query.toLowerCase
         val hits =
@@ -51,7 +51,7 @@ final class PreviewBridge extends HostBridge:
         modeId = next
         emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
       case WebviewMsg.OpenSettings =>
-        emit(HostMsg.Settings(settings))
+        emit(HostMsg.settings(settings))
       case WebviewMsg.SetSetting(key, value) =>
         settings = key match
           case "useCtrlEnterToSend" =>
@@ -75,7 +75,7 @@ final class PreviewBridge extends HostBridge:
               case s: String => settings.copy(nodePath = s)
               case _         => settings
           case _ => settings
-        emit(HostMsg.Settings(settings))
+        emit(HostMsg.settings(settings))
       case WebviewMsg.Send(text) =>
         emit(HostMsg.UserMessage("preview-turn", text))
         emit(HostMsg.AgentChunk("preview-turn", s"Echo: **$text**"))
@@ -128,7 +128,7 @@ final class PreviewBridge extends HostBridge:
 
   private def emitChanges(): Unit =
     val (add, del) = pending.foldLeft((0, 0)) { case ((a, d), f) => (a + f.additions, d + f.deletions) }
-    emit(HostMsg.Changes(ChangesSummary(pending.size, add, del, pending)))
+    emit(HostMsg.changes(ChangesSummary(pending.size, add, del, pending)))
 end PreviewBridge
 
 object PreviewBridge:

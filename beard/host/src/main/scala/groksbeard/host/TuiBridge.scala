@@ -2,7 +2,6 @@ package groksbeard.host
 
 import groksbeard.core.*
 import zio.json.*
-import zio.json.ast.Json
 
 import scala.scalajs.js
 
@@ -43,15 +42,12 @@ final class TuiBridge(host: McpToolHost, log: String => Unit):
           buffer = rest
           lines.foreach { line =>
             val reply =
-              line.fromJson[Json] match
-                case Left(_)     => McpBridge.fail("", "invalid json")
-                case Right(json) =>
-                  McpBridge.parseRequest(json) match
-                    case None                   => McpBridge.fail("", "invalid request")
-                    case Some((id, tool, args)) =>
-                      McpTools.dispatch(tool, args, host) match
-                        case Left(err)  => McpBridge.fail(id, err)
-                        case Right(res) => McpBridge.ok(id, res)
+              line.fromJson[BridgeRequest] match
+                case Left(_)    => McpBridge.fail("", "invalid json")
+                case Right(req) =>
+                  McpTools.dispatch(req.tool, req.args, host) match
+                    case Left(err)  => McpBridge.fail(req.id, err)
+                    case Right(res) => McpBridge.ok(req.id, res)
             val _ = socket.write(Ndjson.encode(reply.toJson))
             socket.end()
           },

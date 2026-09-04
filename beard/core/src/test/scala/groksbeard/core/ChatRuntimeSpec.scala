@@ -13,7 +13,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           case HostMsg.Ready                   => "ready"
           case HostMsg.SessionMeta(_, _, _, _) => "sessionMeta"
           case HostMsg.AvailableCommands(_)    => "availableCommands"
-          case HostMsg.Settings(_)             => "settings"
+          case _: HostMsg.Settings             => "settings"
           case other                           => other.toString
         }
         assertTrue(
@@ -104,7 +104,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.ready()
         posted.clear()
         rt.send("edit Main")
-        val summary = posted.toList.collect { case HostMsg.Changes(s) => s }.last
+        val summary = posted.toList.collect { case c: HostMsg.Changes => c }.last
         assertTrue(
           summary.fileCount == 1,
           summary.files.head.path == "/tmp/Main.scala",
@@ -121,7 +121,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         assertTrue(
           rt.pendingChanges.isEmpty,
           posted.exists {
-            case HostMsg.Changes(s) => s.fileCount == 0
+            case c: HostMsg.Changes => c.fileCount == 0
             case _                  => false
           },
         )

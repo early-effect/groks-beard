@@ -34,7 +34,7 @@ object ProtocolSpec extends ZIOSpecDefault:
         assertTrue(got.isLeft)
       },
       test("permission card and plan verdict round-trip") {
-        val perm: HostMsg = HostMsg.Permission(
+        val perm: HostMsg = HostMsg.permission(
           PermissionCard(
             "r1",
             "tc",
@@ -44,7 +44,7 @@ object ProtocolSpec extends ZIOSpecDefault:
           )
         )
         val choice: WebviewMsg  = WebviewMsg.PermissionChoice("r1", "allow")
-        val plan: HostMsg       = HostMsg.Plan(PlanCard("p1", "# Plan\n\nDo it."))
+        val plan: HostMsg       = HostMsg.plan(PlanCard("p1", "# Plan\n\nDo it."))
         val verdict: WebviewMsg = WebviewMsg.PlanVerdict("p1", "approved")
         assertTrue(
           perm.toJson.fromJson[HostMsg] == Right(perm),
@@ -59,7 +59,7 @@ object ProtocolSpec extends ZIOSpecDefault:
         assertTrue(chunk.toJson.fromJson[HostMsg] == Right(chunk), end.toJson.fromJson[HostMsg] == Right(end))
       },
       test("changes summary and keep/undo round-trip") {
-        val summary: HostMsg = HostMsg.Changes(
+        val summary: HostMsg = HostMsg.changes(
           ChangesSummary(
             1,
             3,

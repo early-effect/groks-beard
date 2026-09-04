@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.json.*
 import zio.json.ast.Json
 
 enum McpTool:
@@ -37,57 +38,109 @@ object McpTool:
       case McpTool.ShowChanges   => "editor_show_changes"
 end McpTool
 
+final case class JsonSchema(
+    @jsonField("type") schemaType: Option[String] = None,
+    properties: Option[Map[String, JsonSchema]] = None,
+    required: Option[List[String]] = None,
+    additionalProperties: Option[Boolean] = None,
+    description: Option[String] = None,
+    minimum: Option[Int] = None,
+    minItems: Option[Int] = None,
+    items: Option[JsonSchema] = None,
+    @jsonField("enum") enumValues: Option[List[String]] = None,
+) derives JsonCodec
+
 final case class McpToolSpec(
     name: String,
     description: String,
-    inputSchema: Json,
-)
+    inputSchema: JsonSchema,
+) derives JsonCodec
+
+final case class McpToolAnnotations(readOnlyHint: Boolean, destructiveHint: Boolean) derives JsonCodec
+
+final case class McpListedTool(
+    name: String,
+    description: String,
+    inputSchema: JsonSchema,
+    annotations: McpToolAnnotations,
+) derives JsonCodec
+
+final case class WorkspaceRootResult(root: String) derives JsonCodec
+final case class OpenFilesArgs(cursor: Option[String] = None) derives JsonCodec
+final case class OpenFilesResult(
+    tabs: List[String] = Nil,
+    active: Option[String] = None,
+    truncated: Boolean = false,
+    nextCursor: Option[String] = None,
+) derives JsonCodec
+
+@jsonNoExtraFields
+final case class PathLineArgs(path: String, line: Option[Int] = None) derives JsonCodec
+
+final case class OkResult(ok: Boolean = true, reason: Option[String] = None) derives JsonCodec
+
+enum FileKind:
+  case add, modify, delete, move
+
+object FileKind:
+  given JsonCodec[FileKind] = JsonCodec(
+    JsonEncoder[String].contramap(_.toString),
+    JsonDecoder[String].mapOrFail { s =>
+      FileKind.values.find(_.toString == s).toRight(s"unknown kind: $s")
+    },
+  )
+
+@jsonNoExtraFields
+final case class ShowChangesFile(path: String, kind: FileKind) derives JsonCodec
+
+@jsonNoExtraFields
+final case class ShowChangesArgs(title: Option[String] = None, files: List[ShowChangesFile]) derives JsonCodec
+
+final case class ShowChangesResult(ok: Boolean, shown: Int) derives JsonCodec
+
+final case class SelectionResult(
+    truncated: Boolean,
+    path: Option[String] = None,
+    absPath: Option[String] = None,
+    startLine: Option[Int] = None,
+    endLine: Option[Int] = None,
+    startCol: Option[Int] = None,
+    endCol: Option[Int] = None,
+    text: Option[String] = None,
+    languageId: Option[String] = None,
+    atRef: Option[String] = None,
+) derives JsonCodec
 
 trait McpToolHost:
-  def workspaceRoot(): Json
-  def selection(): Json
-  def openFiles(cursor: Option[String]): Json
-  def reveal(path: String, line: Option[Int]): Json
-  def openDiff(path: String, line: Option[Int]): Json
-  def showChanges(title: Option[String], files: List[(String, String)]): Json
+  def workspaceRoot(): WorkspaceRootResult
+  def selection(): SelectionResult
+  def openFiles(cursor: Option[String]): OpenFilesResult
+  def reveal(path: String, line: Option[Int]): OkResult
+  def openDiff(path: String, line: Option[Int]): OkResult
+  def showChanges(title: Option[String], files: List[ShowChangesFile]): ShowChangesResult
 
 object McpTools:
-  val Annotations: Json =
-    Json.Obj("readOnlyHint" -> Json.Bool(true), "destructiveHint" -> Json.Bool(false))
+  val Annotations: McpToolAnnotations =
+    McpToolAnnotations(readOnlyHint = true, destructiveHint = false)
 
-  private val emptyObject: Json =
-    Json.Obj("type" -> Json.Str("object"), "properties" -> Json.Obj())
+  private val emptyObject: JsonSchema =
+    JsonSchema(schemaType = Some("object"), properties = Some(Map.empty))
 
-  private val pathLine: Json =
-    Json.Obj(
-      "type"       -> Json.Str("object"),
-      "properties" -> Json.Obj(
-        "path" -> Json
-          .Obj("type" -> Json.Str("string"), "description" -> Json.Str("Workspace-relative or absolute path.")),
-        "line" -> Json.Obj(
-          "type"        -> Json.Str("integer"),
-          "minimum"     -> Json.Num(1),
-          "description" -> Json.Str("1-based line to reveal."),
-        ),
-      ),
-      "required" -> Json.Arr(Json.Str("path")),
+  private val pathProp: JsonSchema =
+    JsonSchema(schemaType = Some("string"), description = Some("Workspace-relative or absolute path."))
+
+  private val lineProp: JsonSchema =
+    JsonSchema(schemaType = Some("integer"), minimum = Some(1), description = Some("1-based line to reveal."))
+
+  private val pathLine: JsonSchema =
+    JsonSchema(
+      schemaType = Some("object"),
+      properties = Some(Map("path" -> pathProp, "line" -> lineProp)),
+      required = Some(List("path")),
     )
 
-  private val pathLineStrict: Json =
-    Json.Obj(
-      "type"                 -> Json.Str("object"),
-      "additionalProperties" -> Json.Bool(false),
-      "properties"           -> Json.Obj(
-        "path" -> Json
-          .Obj("type" -> Json.Str("string"), "description" -> Json.Str("Workspace-relative or absolute path.")),
-        "line" -> Json.Obj(
-          "type"        -> Json.Str("integer"),
-          "minimum"     -> Json.Num(1),
-          "description" -> Json.Str("1-based line to reveal."),
-        ),
-      ),
-      "required" -> Json.Arr(Json.Str("path")),
-    )
+  private val pathLineStrict: JsonSchema =
+    pathLine.copy(additionalProperties = Some(false))
 
   val Specs: List[McpToolSpec] = List(
     McpToolSpec(
@@ -103,12 +156,14 @@ object McpTools:
     McpToolSpec(
       "editor_open_files",
       "List open editor tab paths and the active file. Paths only, no file bodies. Pass cursor from nextCursor to page; results are capped and set truncated when more remain.",
-      Json.Obj(
-        "type"       -> Json.Str("object"),
-        "properties" -> Json.Obj(
-          "cursor" -> Json.Obj(
-            "type"        -> Json.Str("string"),
-            "description" -> Json.Str("Opaque cursor from a previous nextCursor."),
+      JsonSchema(
+        schemaType = Some("object"),
+        properties = Some(
+          Map(
+            "cursor" -> JsonSchema(
+              schemaType = Some("string"),
+              description = Some("Opaque cursor from a previous nextCursor."),
+            )
           )
         ),
       ),
@@ -126,89 +181,91 @@ object McpTools:
     McpToolSpec(
       "editor_show_changes",
       "Show a path-only Grok Changes navigation tree. Does not write files, invent snapshots, or git-snapshot.",
-      Json.Obj(
-        "type"                 -> Json.Str("object"),
-        "additionalProperties" -> Json.Bool(false),
-        "properties"           -> Json.Obj(
-          "title" -> Json.Obj("type" -> Json.Str("string")),
-          "files" -> Json.Obj(
-            "type"     -> Json.Str("array"),
-            "minItems" -> Json.Num(1),
-            "items"    -> Json.Obj(
-              "type"                 -> Json.Str("object"),
-              "additionalProperties" -> Json.Bool(false),
-              "properties"           -> Json.Obj(
-                "path" -> Json.Obj("type" -> Json.Str("string")),
-                "kind" -> Json.Obj(
-                  "type" -> Json.Str("string"),
-                  "enum" -> Json.Arr(Json.Str("add"), Json.Str("modify"), Json.Str("delete"), Json.Str("move")),
-                ),
+      JsonSchema(
+        schemaType = Some("object"),
+        additionalProperties = Some(false),
+        properties = Some(
+          Map(
+            "title" -> JsonSchema(schemaType = Some("string")),
+            "files" -> JsonSchema(
+              schemaType = Some("array"),
+              minItems = Some(1),
+              items = Some(
+                JsonSchema(
+                  schemaType = Some("object"),
+                  additionalProperties = Some(false),
+                  properties = Some(
+                    Map(
+                      "path" -> JsonSchema(schemaType = Some("string")),
+                      "kind" -> JsonSchema(
+                        schemaType = Some("string"),
+                        enumValues = Some(List("add", "modify", "delete", "move")),
+                      ),
+                    )
+                  ),
+                  required = Some(List("path", "kind")),
+                )
               ),
-              "required" -> Json.Arr(Json.Str("path"), Json.Str("kind")),
             ),
-          ),
+          )
         ),
-        "required" -> Json.Arr(Json.Str("files")),
+        required = Some(List("files")),
       ),
     ),
   )
+
+  def listed: List[McpListedTool] =
+    Specs.map(s => McpListedTool(s.name, s.description, s.inputSchema, Annotations))
 
   def dispatch(name: String, args: Json, host: McpToolHost): Either[String, Json] =
     McpTool.fromName(name) match
       case None       => Left(s"Unknown tool: $name")
       case Some(tool) =>
-        val obj = args match
-          case o: Json.Obj => o
-          case _           => Json.Obj()
         tool match
-          case McpTool.WorkspaceRoot => Right(host.workspaceRoot())
-          case McpTool.Selection     => Right(host.selection())
+          case McpTool.WorkspaceRoot => Right(host.workspaceRoot().asJson)
+          case McpTool.Selection     => Right(host.selection().asJson)
           case McpTool.OpenFiles     =>
-            val cursor = obj.get("cursor") match
-              case Some(Json.Str(s)) => Some(s)
-              case _                 => None
-            Right(host.openFiles(cursor))
+            val cursor = args.as[OpenFilesArgs].toOption.flatMap(_.cursor)
+            Right(host.openFiles(cursor).asJson)
           case McpTool.Reveal =>
-            stringField(obj, "path") match
-              case None       => Left(s"${McpTool.wire(tool)}: invalid arguments")
-              case Some(path) => Right(host.reveal(path, positiveInt(obj, "line")))
+            args.as[PathLineArgs] match
+              case Left(_)        => Left(s"${McpTool.wire(tool)}: invalid arguments")
+              case Right(decoded) => Right(host.reveal(decoded.path, decoded.line).asJson)
           case McpTool.OpenDiff =>
-            if hasExtra(obj, Set("path", "line")) then Left(s"${McpTool.wire(tool)}: invalid arguments")
-            else
-              stringField(obj, "path") match
-                case None       => Left(s"${McpTool.wire(tool)}: invalid arguments")
-                case Some(path) => Right(host.openDiff(path, positiveInt(obj, "line")))
+            args.as[PathLineArgs] match
+              case Left(_)        => Left(s"${McpTool.wire(tool)}: invalid arguments")
+              case Right(decoded) => Right(host.openDiff(decoded.path, decoded.line).asJson)
           case McpTool.ShowChanges =>
-            decodeShowChanges(obj) match
-              case None              => Left(s"${McpTool.wire(tool)}: invalid arguments")
-              case Some((title, fs)) => Right(host.showChanges(title, fs))
-        end match
+            args.as[ShowChangesArgs] match
+              case Right(decoded) if decoded.files.nonEmpty =>
+                Right(host.showChanges(decoded.title, decoded.files).asJson)
+              case _ => Left(s"${McpTool.wire(tool)}: invalid arguments")
 
-  def selectionJson(
+  def selectionResult(
       path: Option[String],
       absPath: Option[String],
       startLine: Option[Int],
       endLine: Option[Int],
       text: Option[String],
       languageId: Option[String],
-  ): Json =
+  ): SelectionResult =
     val truncated = text.exists(t => Utf8.byteLength(t) > McpTool.SelectionCapBytes)
     val clipped   = text.map(Utf8.truncateToByteCap(_, McpTool.SelectionCapBytes))
     val atRef     =
       (path, startLine, endLine) match
         case (Some(p), Some(s), Some(e)) => Some(s"@$p:$s-$e")
         case _                           => None
-    val fields =
-      List("truncated" -> Json.Bool(truncated)) ++
-        path.toList.map(p => "path" -> Json.Str(p)) ++
-        absPath.toList.map(p => "absPath" -> Json.Str(p)) ++
-        startLine.toList.map(n => "startLine" -> Json.Num(n)) ++
-        endLine.toList.map(n => "endLine" -> Json.Num(n)) ++
-        clipped.toList.map(t => "text" -> Json.Str(t)) ++
-        languageId.toList.map(l => "languageId" -> Json.Str(l)) ++
-        atRef.toList.map(a => "atRef" -> Json.Str(a))
-    Json.Obj(fields*)
-  end selectionJson
+    SelectionResult(
+      truncated = truncated,
+      path = path,
+      absPath = absPath,
+      startLine = startLine,
+      endLine = endLine,
+      text = clipped,
+      languageId = languageId,
+      atRef = atRef,
+    )
+  end selectionResult
 
   def sidecarFile(path: String, kind: String): FileChange =
     FileChange(
@@ -220,38 +277,4 @@ object McpTools:
       toolCallId = "sidecar",
       undoDisabled = Some("Undo needs an editor chat snapshot."),
     )
-
-  private def stringField(obj: Json.Obj, key: String): Option[String] =
-    obj.get(key) match
-      case Some(Json.Str(s)) if s.nonEmpty => Some(s)
-      case _                               => None
-
-  private def positiveInt(obj: Json.Obj, key: String): Option[Int] =
-    obj.get(key) match
-      case Some(Json.Num(n)) if n.intValue > 0 => Some(n.intValue)
-      case _                                   => None
-
-  private def hasExtra(obj: Json.Obj, allowed: Set[String]): Boolean =
-    val Json.Obj(fields) = obj
-    fields.exists((k, _) => !allowed.contains(k))
-
-  private def decodeShowChanges(obj: Json.Obj): Option[(Option[String], List[(String, String)])] =
-    if hasExtra(obj, Set("title", "files")) then None
-    else
-      val title = stringField(obj, "title")
-      obj.get("files") match
-        case Some(Json.Arr(items)) if items.nonEmpty =>
-          val files = items.toList.flatMap {
-            case o: Json.Obj =>
-              if hasExtra(o, Set("path", "kind")) then None
-              else
-                (stringField(o, "path"), stringField(o, "kind")) match
-                  case (Some(p), Some(k)) if Set("add", "modify", "delete", "move").contains(k) =>
-                    Some((p, k))
-                  case _ => None
-            case _ => None
-          }
-          if files.size == items.size then Some((title, files)) else None
-        case _ => None
-      end match
 end McpTools

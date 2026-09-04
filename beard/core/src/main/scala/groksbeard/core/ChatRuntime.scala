@@ -1,6 +1,5 @@
 package groksbeard.core
 
-import zio.json.*
 import zio.json.ast.Json
 
 final class ChatRuntime(
@@ -26,27 +25,21 @@ final class ChatRuntime(
 
   def ready(): Unit =
     post(HostMsg.Ready)
-    call("initialize", Json.Obj("protocolVersion" -> Json.Num(1)))
-    val result = call(
-      "session/new",
-      Json.Obj("cwd" -> Json.Str("."), "mcpServers" -> Json.Arr()),
-    )
+    call("initialize", InitializeParams(1).asJson)
+    val result = call("session/new", SessionNewParams(".").asJson)
     result.foreach { json =>
-      json match
-        case obj: Json.Obj =>
-          obj.get("sessionId") match
-            case Some(Json.Str(id)) => sessionId = Some(id)
-            case _                  => ()
-          SessionState.modeIdFromSessionResult(json).foreach { id =>
-            modeId = id
-            framed.state.commitMode(id)
-          }
-          modes = parseModes(obj).getOrElse(modes)
-        case _ => ()
+      json.as[SessionNewResult].foreach { decoded =>
+        sessionId = Some(decoded.sessionId)
+        decoded.modes.foreach { state =>
+          modeId = state.currentModeId
+          framed.state.commitMode(state.currentModeId)
+          if state.availableModes.nonEmpty then modes = state.availableModes
+        }
+      }
     }
     if sessionId.isEmpty then sessionId = Some(agent.sessionId)
     postMeta()
-    post(HostMsg.Settings(SettingsState.defaults))
+    post(HostMsg.settings(SettingsState.defaults))
   end ready
 
   def send(text: String): Unit =
@@ -69,7 +62,7 @@ final class ChatRuntime(
 
   def setMode(id: String): Unit =
     val sid = sessionId.getOrElse(agent.sessionId)
-    call("session/set_mode", Json.Obj("sessionId" -> Json.Str(sid), "modeId" -> Json.Str(id)))
+    call("session/set_mode", SessionSetModeParams(sid, id).asJson)
     modeId = id
     framed.state.commitMode(id)
     postMeta()
@@ -142,21 +135,15 @@ final class ChatRuntime(
     currentTitle = ChangeSet.turnTitle(text)
     post(HostMsg.UserMessage(currentTurn, text))
     val sid    = sessionId.getOrElse(agent.sessionId)
-    val result = call(
-      "session/prompt",
-      Json.Obj(
-        "sessionId" -> Json.Str(sid),
-        "prompt"    -> Json.Arr(Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(text))),
-      ),
-    )
-    val reason = result.flatMap(stopReason).getOrElse("end_turn")
+    val result = call("session/prompt", SessionPromptParams(sid, List(PromptText(text = text))).asJson)
+    val reason = result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse("end_turn")
     post(HostMsg.TurnEnd(currentTurn, reason))
     running = false
   end runTurn
 
   private def call(method: String, params: Json): Option[Json] =
     rpcId += 1
-    val id  = Json.Num(rpcId)
+    val id  = RpcId.Num(rpcId)
     val req = Rpc.Request(id, method, params)
     framed.recordOutgoing(req)
     val msgs              = framed.feed(agent.encodeReplies(req))
@@ -166,11 +153,9 @@ final class ChatRuntime(
         SessionUpdate.hostMsgs(p, currentTurn).foreach(post)
         ingestUpdate(p)
       case Rpc.Request(rid, "session/request_permission", params) =>
-        val reqId = rid match
-          case Json.Str(s) => s
-          case other       => other.toJson
+        val reqId = RpcId.key(rid)
         pendingPerm = pendingPerm.updated(reqId, params)
-        post(HostMsg.Permission(DiffContent.permissionCard(params, reqId)))
+        post(HostMsg.permission(DiffContent.permissionCard(params, reqId)))
       case Rpc.Response(rid, result, error) if rid == id =>
         error.foreach(e => post(HostMsg.Error(e.message)))
         out = result
@@ -180,27 +165,33 @@ final class ChatRuntime(
   end call
 
   private def ingestUpdate(params: Json): Unit =
-    val update = SessionState.unwrapUpdate(params)
-    update.get("sessionUpdate") match
-      case Some(Json.Str("tool_call")) | Some(Json.Str("tool_call_update")) =>
-        val status = update.get("status") match
-          case Some(Json.Str(s)) => s
-          case _                 => "pending"
-        val diffs = DiffContent.reconstruct(update, ports.readDisk, DiffContent.diskIsBefore(status))
-        if diffs.nonEmpty then
-          store.ingest(
-            sessionId.getOrElse(agent.sessionId),
-            currentTurn,
-            currentTitle,
-            diffs.map(DiffContent.fileChangeFrom),
-          )
-          postChanges()
+    SessionState.decodeUpdate(params) match
+      case Some(call: AcpUpdate.ToolCall) =>
+        ingestTool(call.status, toBody(call))
+      case Some(call: AcpUpdate.ToolCallUpdate) =>
+        ingestTool(call.status, toBody(call))
       case _ => ()
-    end match
-  end ingestUpdate
+
+  private def ingestTool(status: String, body: AcpToolCall): Unit =
+    val diffs = DiffContent.reconstruct(body.asJson, ports.readDisk, DiffContent.diskIsBefore(status))
+    if diffs.nonEmpty then
+      store.ingest(
+        sessionId.getOrElse(agent.sessionId),
+        currentTurn,
+        currentTitle,
+        diffs.map(DiffContent.fileChangeFrom),
+      )
+      postChanges()
+  end ingestTool
+
+  private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
+    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
+
+  private def toBody(call: AcpUpdate.ToolCallUpdate): AcpToolCall =
+    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
 
   private def postChanges(): Unit =
-    post(HostMsg.Changes(store.summary))
+    post(HostMsg.changes(store.summary))
     ports.onStoreChange()
 
   private def showFile(file: FileChange): Unit =
@@ -218,29 +209,6 @@ final class ChatRuntime(
 
   private def postMeta(): Unit =
     post(HostMsg.SessionMeta(sessionId.getOrElse(""), title, modeId, modes))
-
-  private def stopReason(result: Json): Option[String] =
-    result match
-      case obj: Json.Obj =>
-        obj.get("stopReason") match
-          case Some(Json.Str(s)) => Some(s)
-          case _                 => None
-      case _ => None
-
-  private def parseModes(obj: Json.Obj): Option[List[ModeOption]] =
-    obj.get("modes") match
-      case Some(modesObj: Json.Obj) =>
-        modesObj.get("availableModes") match
-          case Some(Json.Arr(items)) =>
-            val list = items.toList.collect { case o: Json.Obj =>
-              (o.get("id"), o.get("name")) match
-                case (Some(Json.Str(id)), Some(Json.Str(name))) => Some(ModeOption(id, name))
-                case (Some(Json.Str(id)), _)                    => Some(ModeOption(id, id))
-                case _                                          => None
-            }.flatten
-            if list.isEmpty then None else Some(list)
-          case _ => None
-      case _ => None
 end ChatRuntime
 
 object ChatRuntime:

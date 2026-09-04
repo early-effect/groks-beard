@@ -6,7 +6,21 @@ import zio.json.ast.Json
 enum McpAction:
   case Ignore
   case Reply(json: Json)
-  case CallTool(id: Json, name: String, args: Json)
+  case CallTool(id: RpcId, name: String, args: Json)
+
+final case class McpInitializeParams(protocolVersion: Option[String] = None) derives JsonCodec
+final case class McpToolsCapability() derives JsonCodec
+final case class McpCapabilities(tools: McpToolsCapability = McpToolsCapability()) derives JsonCodec
+final case class McpServerInfo(name: String, version: String) derives JsonCodec
+final case class McpInitializeResult(
+    protocolVersion: String,
+    capabilities: McpCapabilities,
+    serverInfo: McpServerInfo,
+) derives JsonCodec
+final case class McpToolsListResult(tools: List[McpListedTool]) derives JsonCodec
+final case class McpToolCallParams(name: String, arguments: Json = Json.Obj()) derives JsonCodec
+final case class McpTextContent(@jsonField("type") tpe: String = "text", text: String) derives JsonCodec
+final case class McpToolCallResult(content: List[McpTextContent], isError: Boolean) derives JsonCodec
 
 object McpStdio:
   val ProtocolVersion                = "2025-03-26"
@@ -41,69 +55,52 @@ object McpStdio:
   end handle
 
   def classify(message: Json): McpAction =
-    message match
-      case obj: Json.Obj =>
-        val method = obj.get("method") match
-          case Some(Json.Str(m)) => Some(m)
-          case _                 => None
-        val id = obj.get("id")
-        (method, id) match
+    message.as[JsonRpcIncoming] match
+      case Left(_)         => McpAction.Ignore
+      case Right(incoming) =>
+        (incoming.method, incoming.id) match
           case (Some("notifications/initialized" | "notifications/cancelled"), _) => McpAction.Ignore
           case (None, _) | (_, None)                                              => McpAction.Ignore
-          case (Some(m), Some(rid))                                               =>
-            classifyMethod(m, rid, obj.get("params").getOrElse(Json.Obj()))
-      case _ => McpAction.Ignore
+          case (Some(method), Some(id))                                           =>
+            classifyMethod(method, id, incoming.params.getOrElse(Json.Obj()))
 
-  def wrapCall(id: Json, name: String, result: Either[String, Json]): Json =
+  def wrapCall(id: RpcId, name: String, result: Either[String, Json]): Json =
     val _ = name
     result match
       case Left(err) if err == McpToml.EditorDownMessage =>
         rpcError(id, -32002, McpToml.EditorDownMessage)
-      case Left(err)  => ok(id, toolText(err, isError = true))
-      case Right(res) => ok(id, toolTextJson(res, isError = false))
+      case Left(err)  => JsonRpcResponse(id = id, result = Some(toolText(err, isError = true))).asJson
+      case Right(res) => JsonRpcResponse(id = id, result = Some(toolTextJson(res, isError = false))).asJson
 
-  private def classifyMethod(method: String, id: Json, params: Json): McpAction =
+  private def classifyMethod(method: String, id: RpcId, params: Json): McpAction =
     method match
       case "initialize" =>
-        val version = params match
-          case obj: Json.Obj =>
-            obj.get("protocolVersion") match
-              case Some(Json.Str(v)) if SupportedVersions.contains(v) => v
-              case _                                                  => ProtocolVersion
-          case _ => ProtocolVersion
+        val requested = params.as[McpInitializeParams].toOption.flatMap(_.protocolVersion)
+        val version   = requested.filter(SupportedVersions.contains).getOrElse(ProtocolVersion)
         McpAction.Reply(
           ok(
             id,
-            Json.Obj(
-              "protocolVersion" -> Json.Str(version),
-              "capabilities"    -> Json.Obj("tools" -> Json.Obj()),
-              "serverInfo"      -> Json.Obj("name" -> Json.Str(ServerName), "version" -> Json.Str(ServerVersion)),
-            ),
+            McpInitializeResult(
+              protocolVersion = version,
+              capabilities = McpCapabilities(),
+              serverInfo = McpServerInfo(ServerName, ServerVersion),
+            ).asJson,
           )
         )
-      case "ping"       => McpAction.Reply(ok(id, Json.Obj()))
+      case "ping"       => McpAction.Reply(ok(id, EmptyObject().asJson))
       case "tools/list" =>
-        val tools = McpTools.Specs.map { spec =>
-          Json.Obj(
-            "name"        -> Json.Str(spec.name),
-            "description" -> Json.Str(spec.description),
-            "inputSchema" -> spec.inputSchema,
-            "annotations" -> McpTools.Annotations,
-          )
-        }
-        McpAction.Reply(ok(id, Json.Obj("tools" -> Json.Arr(tools*))))
+        McpAction.Reply(ok(id, McpToolsListResult(McpTools.listed).asJson))
       case "tools/call" =>
-        val (name, args) = toolCallParams(params)
-        McpTool.fromName(name) match
-          case None    => McpAction.Reply(rpcError(id, -32602, s"Unknown tool: $name"))
-          case Some(_) => McpAction.CallTool(id, name, args)
+        params.as[McpToolCallParams] match
+          case Left(_)     => McpAction.Reply(rpcError(id, -32602, "Invalid params"))
+          case Right(call) =>
+            McpTool.fromName(call.name) match
+              case None    => McpAction.Reply(rpcError(id, -32602, s"Unknown tool: ${call.name}"))
+              case Some(_) => McpAction.CallTool(id, call.name, call.arguments)
       case other => McpAction.Reply(rpcError(id, -32601, s"Method not found: $other"))
 
   def toolText(value: String, isError: Boolean): Json =
-    Json.Obj(
-      "content" -> Json.Arr(Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(value))),
-      "isError" -> Json.Bool(isError),
-    )
+    McpToolCallResult(List(McpTextContent(text = value)), isError).asJson
 
   def toolTextJson(value: Json, isError: Boolean): Json =
     val text = value match
@@ -111,23 +108,9 @@ object McpStdio:
       case other       => other.toJson
     toolText(text, isError)
 
-  private def toolCallParams(params: Json): (String, Json) =
-    params match
-      case obj: Json.Obj =>
-        val name = obj.get("name") match
-          case Some(Json.Str(n)) => n
-          case _                 => ""
-        val args = obj.get("arguments").getOrElse(Json.Obj())
-        (name, args)
-      case _ => ("", Json.Obj())
+  private def ok(id: RpcId, result: Json): Json =
+    JsonRpcResponse(id = id, result = Some(result)).asJson
 
-  private def ok(id: Json, result: Json): Json =
-    Json.Obj("jsonrpc" -> Json.Str("2.0"), "id" -> id, "result" -> result)
-
-  private def rpcError(id: Json, code: Int, message: String): Json =
-    Json.Obj(
-      "jsonrpc" -> Json.Str("2.0"),
-      "id"      -> id,
-      "error"   -> Json.Obj("code" -> Json.Num(code), "message" -> Json.Str(message)),
-    )
+  private def rpcError(id: RpcId, code: Int, message: String): Json =
+    JsonRpcResponse(id = id, error = Some(RpcError(code, message))).asJson
 end McpStdio

@@ -2,7 +2,6 @@ package groksbeard.host
 
 import groksbeard.core.*
 import groksbeard.host.vscode.*
-import zio.json.ast.Json
 
 import scala.scalajs.js
 
@@ -18,13 +17,13 @@ final class McpHost(review: Review, refreshTree: () => Unit):
   def workspaceFolder: Option[String] =
     vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath)
 
-  def workspaceRoot(): Json =
-    Json.Obj("root" -> Json.Str(workspaceFolder.getOrElse("")))
+  def workspaceRoot(): WorkspaceRootResult =
+    WorkspaceRootResult(workspaceFolder.getOrElse(""))
 
-  def selection(): Json =
+  def selection(): SelectionResult =
     pending match
       case Some(chip) =>
-        McpTools.selectionJson(
+        McpTools.selectionResult(
           Some(chip.path),
           Some(chip.absPath),
           chip.startLine,
@@ -33,38 +32,38 @@ final class McpHost(review: Review, refreshTree: () => Unit):
           chip.languageId,
         )
       case None =>
-        McpTools.selectionJson(None, None, None, None, None, None)
+        McpTools.selectionResult(None, None, None, None, None, None)
 
-  def openFiles(cursor: Option[String]): Json =
+  def openFiles(cursor: Option[String]): OpenFilesResult =
     val _ = cursor
-    Json.Obj("tabs" -> Json.Arr(), "truncated" -> Json.Bool(false))
+    OpenFilesResult(tabs = Nil, truncated = false)
 
-  def reveal(path: String, line: Option[Int]): Json =
+  def reveal(path: String, line: Option[Int]): OkResult =
     val uri = vscode.Uri.file(abs(path))
     val _   = vscode.commands.executeCommand[js.Any]("vscode.open", uri)
     line.foreach { n =>
       val _ = vscode.commands.executeCommand[js.Any]("revealLine", js.Dynamic.literal(lineNumber = n, at = "center"))
     }
-    Json.Obj("ok" -> Json.Bool(true))
+    OkResult()
 
-  def openDiff(path: String, line: Option[Int]): Json =
+  def openDiff(path: String, line: Option[Int]): OkResult =
     val _ = line
     review.open(UnifiedDiff.fileName(path), List(DiffPair(abs(path), "", "", wholeFile = true)))
-    Json.Obj("ok" -> Json.Bool(true))
+    OkResult()
 
-  def showChanges(title: Option[String], files: List[(String, String)]): Json =
+  def showChanges(title: Option[String], files: List[ShowChangesFile]): ShowChangesResult =
     val _ = title
-    sidecarFiles = files.map { (p, kind) => McpTools.sidecarFile(abs(p), kind) }
+    sidecarFiles = files.map { f => McpTools.sidecarFile(abs(f.path), f.kind.toString) }
     refreshTree()
-    Json.Obj("ok" -> Json.Bool(true), "shown" -> Json.Num(files.size))
+    ShowChangesResult(ok = true, shown = files.size)
 
   def asToolHost: McpToolHost = new McpToolHost:
-    def workspaceRoot()                                                   = McpHost.this.workspaceRoot()
-    def selection()                                                       = McpHost.this.selection()
-    def openFiles(cursor: Option[String])                                 = McpHost.this.openFiles(cursor)
-    def reveal(path: String, line: Option[Int])                           = McpHost.this.reveal(path, line)
-    def openDiff(path: String, line: Option[Int])                         = McpHost.this.openDiff(path, line)
-    def showChanges(title: Option[String], files: List[(String, String)]) =
+    def workspaceRoot()                                                  = McpHost.this.workspaceRoot()
+    def selection()                                                      = McpHost.this.selection()
+    def openFiles(cursor: Option[String])                                = McpHost.this.openFiles(cursor)
+    def reveal(path: String, line: Option[Int])                          = McpHost.this.reveal(path, line)
+    def openDiff(path: String, line: Option[Int])                        = McpHost.this.openDiff(path, line)
+    def showChanges(title: Option[String], files: List[ShowChangesFile]) =
       McpHost.this.showChanges(title, files)
 
   private def abs(path: String): String =

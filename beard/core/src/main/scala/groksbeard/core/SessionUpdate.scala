@@ -4,79 +4,41 @@ import zio.json.ast.Json
 
 object SessionUpdate:
   def hostMsgs(params: Json, turnId: String): List[HostMsg] =
-    val update = SessionState.unwrapUpdate(params)
-    update.get("sessionUpdate") match
-      case Some(Json.Str("agent_thought_chunk")) =>
-        textFromContent(update).filter(_.nonEmpty).toList.map(t => HostMsg.ThoughtChunk(turnId, t))
-      case Some(Json.Str("agent_message_chunk")) =>
-        textFromContent(update).filter(_.nonEmpty).toList.map(t => HostMsg.AgentChunk(turnId, t))
-      case Some(Json.Str("available_commands_update")) =>
-        List(HostMsg.AvailableCommands(commands(update)))
-      case Some(Json.Str("tool_call")) | Some(Json.Str("tool_call_update")) =>
-        List(HostMsg.ToolGroup(turnId, List(toolRow(update))))
-      case Some(Json.Str("current_mode_update")) =>
-        val mode = (update.get("modeId") orElse update.get("currentModeId")) match
-          case Some(Json.Str(id)) => id
-          case _                  => ""
-        if mode.isEmpty then Nil
-        else List(HostMsg.SessionMeta("", "", mode, Nil))
-      case _ => Nil
-    end match
-  end hostMsgs
+    SessionState.decodeUpdate(params) match
+      case Some(AcpUpdate.Thought(content)) =>
+        textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.ThoughtChunk(turnId, t))
+      case Some(AcpUpdate.Agent(content)) =>
+        textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.AgentChunk(turnId, t))
+      case Some(AcpUpdate.Commands(commands)) =>
+        List(HostMsg.AvailableCommands(commands))
+      case Some(call: AcpUpdate.ToolCall) =>
+        List(HostMsg.ToolGroup(turnId, List(toolRow(toBody(call)))))
+      case Some(call: AcpUpdate.ToolCallUpdate) =>
+        List(HostMsg.ToolGroup(turnId, List(toolRow(toBody(call)))))
+      case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
+        val mode = modeId.orElse(currentModeId).getOrElse("")
+        if mode.isEmpty then Nil else List(HostMsg.SessionMeta("", "", mode, Nil))
+      case None => Nil
 
-  private def textFromContent(obj: Json.Obj): Option[String] =
-    obj.get("content") match
-      case Some(Json.Str(s)) => Some(s)
-      case Some(c: Json.Obj) =>
-        c.get("text") match
-          case Some(Json.Str(s)) => Some(s)
-          case _                 => None
-      case Some(Json.Arr(items)) =>
-        val texts = items.toList.flatMap {
-          case o: Json.Obj =>
-            o.get("text") match
-              case Some(Json.Str(s)) => Some(s)
-              case _                 => None
-          case Json.Str(s) => Some(s)
-          case _           => None
-        }
-        if texts.isEmpty then None else Some(texts.mkString)
-      case _ => None
+  private def textOf(content: AcpContent): Option[String] =
+    content match
+      case AcpContent.Text(text) => Some(text)
+      case _                     => None
 
-  private def commands(obj: Json.Obj): List[SlashCommand] =
-    obj.get("availableCommands") match
-      case Some(Json.Arr(items)) =>
-        items.toList.collect { case o: Json.Obj =>
-          o.get("name") match
-            case Some(Json.Str(name)) =>
-              val desc = o.get("description") match
-                case Some(Json.Str(d)) => d
-                case _                 => ""
-              Some(SlashCommand(name, desc))
-            case _ => None
-        }.flatten
-      case _ => Nil
+  private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
+    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
 
-  private def toolRow(obj: Json.Obj): ToolRow =
-    val id = obj.get("toolCallId") match
-      case Some(Json.Str(s)) => s
-      case _                 => "tool"
-    val title = obj.get("title") match
-      case Some(Json.Str(s)) => s
-      case _                 => ""
-    val kind = obj.get("kind") match
-      case Some(Json.Str(s)) => s
-      case _                 => ""
-    val status = obj.get("status") match
-      case Some(Json.Str(s)) => s
-      case _                 => "pending"
-    val extracted = DiffContent.diffsFromToolCall(obj)
+  private def toBody(call: AcpUpdate.ToolCallUpdate): AcpToolCall =
+    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
+
+  private def toolRow(toolCall: AcpToolCall): ToolRow =
+    val extracted = DiffContent.diffsFromToolCall(toolCall.asJson)
     val stats     = extracted.diffs.headOption.map(d => ChangeSet.lineDiffStats(d.oldText, d.newText))
     ToolRow(
-      id,
-      title,
-      kind,
-      status,
+      extracted.toolCallId,
+      extracted.title,
+      extracted.kind,
+      extracted.status,
       additions = stats.map(_._1),
       deletions = stats.map(_._2),
       input = extracted.diffs.headOption.map(_.path),

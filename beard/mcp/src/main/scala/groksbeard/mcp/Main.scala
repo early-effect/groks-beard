@@ -125,7 +125,9 @@ object Main:
         val (lines, rest) = Ndjson.split(buf, "" + chunk)
         buf = rest
         lines.headOption.foreach { line =>
-          val parsed = line.fromJson[Json].left.map(_ => "invalid json").flatMap(McpBridge.parseResponse)
+          val parsed = line.fromJson[BridgeResponse].left.map(_ => "invalid json").flatMap { resp =>
+            McpBridge.parseResponse(resp.asJson)
+          }
           finish(parsed, isDown = false)
         },
     )

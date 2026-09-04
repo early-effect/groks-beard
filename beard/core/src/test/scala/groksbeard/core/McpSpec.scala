@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.json.*
 import zio.json.ast.Json
 import zio.test.*
 
@@ -140,34 +141,34 @@ object McpSpec extends ZIOSpecDefault:
           assertTrue(
             extraDiff.isLeft,
             extraShow.isLeft,
-            diffSpec.inputSchema.toString.contains("additionalProperties"),
-            showSpec.inputSchema.toString.contains("additionalProperties"),
+            diffSpec.inputSchema.toJson.contains("additionalProperties"),
+            showSpec.inputSchema.toJson.contains("additionalProperties"),
           )
         },
         test("dispatches editor_show_changes with a non-empty files list") {
           val host = FakeHost()
           val got  = McpTools.dispatch(
             "editor_show_changes",
-            Json.Obj(
-              "title" -> Json.Str("TUI edits"),
-              "files" -> Json.Arr(Json.Obj("path" -> Json.Str("src/a.ts"), "kind" -> Json.Str("modify"))),
-            ),
+            ShowChangesArgs(
+              title = Some("TUI edits"),
+              files = List(ShowChangesFile("src/a.ts", FileKind.modify)),
+            ).asJson,
             host,
           )
-          assertTrue(got == Right(Json.Obj("ok" -> Json.Bool(true), "shown" -> Json.Num(1))), host.shown == 1)
+          assertTrue(
+            got.toOption.flatMap(_.as[ShowChangesResult].toOption).contains(ShowChangesResult(true, 1)),
+            host.shown == 1,
+          )
         },
         test("selection truncates over the MCP byte cap and still emits atRef") {
           val big  = "x" * (McpTool.SelectionCapBytes + 50)
-          val json = McpTools.selectionJson(Some("a.ts"), Some("/repo/a.ts"), Some(1), Some(4), Some(big), None)
-          json match
-            case obj: Json.Obj =>
-              val text = obj.get("text").collect { case Json.Str(s) => s }.getOrElse("")
-              assertTrue(
-                obj.get("truncated") == Some(Json.Bool(true)),
-                Utf8.byteLength(text) <= McpTool.SelectionCapBytes,
-                obj.get("atRef") == Some(Json.Str("@a.ts:1-4")),
-              )
-            case _ => assertTrue(false)
+          val got  = McpTools.selectionResult(Some("a.ts"), Some("/repo/a.ts"), Some(1), Some(4), Some(big), None)
+          val text = got.text.getOrElse("")
+          assertTrue(
+            got.truncated,
+            Utf8.byteLength(text) <= McpTool.SelectionCapBytes,
+            got.atRef.contains("@a.ts:1-4"),
+          )
         },
       ),
       suite("McpStdio")(
@@ -180,106 +181,63 @@ object McpSpec extends ZIOSpecDefault:
         },
         test("initialize lists the negotiated protocol and tools/list is read-only") {
           val init = McpStdio.handle(
-            Json.Obj(
-              "jsonrpc" -> Json.Str("2.0"),
-              "id"      -> Json.Num(1),
-              "method"  -> Json.Str("initialize"),
-              "params"  -> Json.Obj("protocolVersion" -> Json.Str("2025-03-26")),
-            ),
+            JsonRpcCall(
+              id = RpcId.Num(1),
+              method = "initialize",
+              params = McpInitializeParams(Some("2025-03-26")).asJson,
+            ).asJson,
             FakeHost(),
           )
           val listed = McpStdio.handle(
-            Json.Obj("jsonrpc" -> Json.Str("2.0"), "id" -> Json.Num(2), "method" -> Json.Str("tools/list")),
+            JsonRpcCall(id = RpcId.Num(2), method = "tools/list").asJson,
             FakeHost(),
           )
-          val initOk = init.exists {
-            case obj: Json.Obj =>
-              obj.get("result") match
-                case Some(r: Json.Obj) =>
-                  r.get("protocolVersion") == Some(Json.Str("2025-03-26")) &&
-                  r.get("serverInfo").isDefined
-                case _ => false
-            case _ => false
-          }
-          val listOk = listed.exists {
-            case obj: Json.Obj =>
-              obj.get("result") match
-                case Some(r: Json.Obj) =>
-                  r.get("tools") match
-                    case Some(Json.Arr(tools)) =>
-                      tools.size == 6 && tools.forall {
-                        case t: Json.Obj =>
-                          t.get("annotations") == Some(McpTools.Annotations)
-                        case _ => false
-                      }
-                    case _ => false
-                case _ => false
-            case _ => false
-          }
+          val initOk = init
+            .flatMap(_.as[JsonRpcResponse].toOption)
+            .flatMap(_.result)
+            .flatMap(_.as[McpInitializeResult].toOption)
+            .exists(r => r.protocolVersion == "2025-03-26" && r.serverInfo.name == McpStdio.ServerName)
+          val listOk = listed
+            .flatMap(_.as[JsonRpcResponse].toOption)
+            .flatMap(_.result)
+            .flatMap(_.as[McpToolsListResult].toOption)
+            .exists(r => r.tools.size == 6 && r.tools.forall(_.annotations == McpTools.Annotations))
           assertTrue(initOk, listOk)
         },
         test("tools/call editor_workspace_root round-trips through a fake bridge") {
           val host = FakeHost()
           val got  = McpStdio.handle(
-            Json.Obj(
-              "jsonrpc" -> Json.Str("2.0"),
-              "id"      -> Json.Num(3),
-              "method"  -> Json.Str("tools/call"),
-              "params"  -> Json.Obj("name" -> Json.Str("editor_workspace_root"), "arguments" -> Json.Obj()),
-            ),
+            JsonRpcCall(
+              id = RpcId.Num(3),
+              method = "tools/call",
+              params = McpToolCallParams("editor_workspace_root").asJson,
+            ).asJson,
             host,
           )
-          val text = got.flatMap {
-            case obj: Json.Obj =>
-              obj.get("result") match
-                case Some(r: Json.Obj) =>
-                  r.get("content") match
-                    case Some(Json.Arr(items)) =>
-                      items.headOption.collect { case o: Json.Obj =>
-                        o.get("text").collect { case Json.Str(s) => s }
-                      }.flatten
-                    case _ => None
-                case _ => None
-            case _ => None
-          }
+          val text = got
+            .flatMap(_.as[JsonRpcResponse].toOption)
+            .flatMap(_.result)
+            .flatMap(_.as[McpToolCallResult].toOption)
+            .flatMap(_.content.headOption)
+            .map(_.text)
           assertTrue(text.exists(_.contains("/repo")))
         },
         test("unknown MCP methods are -32601") {
-          val got = McpStdio.handle(
-            Json.Obj("jsonrpc" -> Json.Str("2.0"), "id" -> Json.Num(9), "method" -> Json.Str("nope")),
-            FakeHost(),
-          )
-          val code = got.flatMap {
-            case obj: Json.Obj =>
-              obj.get("error") match
-                case Some(e: Json.Obj) =>
-                  e.get("code") match
-                    case Some(Json.Num(n)) => Some(n.intValue)
-                    case _                 => None
-                case _ => None
-            case _ => None
-          }
+          val got  = McpStdio.handle(JsonRpcCall(id = RpcId.Num(9), method = "nope").asJson, FakeHost())
+          val code = got.flatMap(_.as[JsonRpcResponse].toOption).flatMap(_.error).map(_.code)
           assertTrue(code.contains(-32601))
         },
         test("bridge down is tagged -32002 with Enable TUI Bridge copy") {
           val got = McpStdio.handle(
-            Json.Obj(
-              "jsonrpc" -> Json.Str("2.0"),
-              "id"      -> Json.Num(4),
-              "method"  -> Json.Str("tools/call"),
-              "params"  -> Json.Obj("name" -> Json.Str("editor_workspace_root")),
-            ),
+            JsonRpcCall(
+              id = RpcId.Num(4),
+              method = "tools/call",
+              params = McpToolCallParams("editor_workspace_root").asJson,
+            ).asJson,
             FakeHost(),
             (_, _) => Left(McpToml.EditorDownMessage),
           )
-          val msg = got.flatMap {
-            case obj: Json.Obj =>
-              obj.get("error") match
-                case Some(e: Json.Obj) =>
-                  e.get("message").collect { case Json.Str(s) => s }
-                case _ => None
-            case _ => None
-          }
+          val msg = got.flatMap(_.as[JsonRpcResponse].toOption).flatMap(_.error).map(_.message)
           assertTrue(msg.contains(McpToml.EditorDownMessage), msg.exists(_.contains("Enable TUI Bridge")))
         },
       ),
@@ -291,15 +249,15 @@ object McpSpec extends ZIOSpecDefault:
     (hex + "0" * 16).take(16)
 
   private final class FakeHost extends McpToolHost:
-    var shown: Int                              = 0
-    def workspaceRoot(): Json                   = Json.Obj("root" -> Json.Str("/repo"))
-    def selection(): Json                       = Json.Obj("truncated" -> Json.Bool(false))
-    def openFiles(cursor: Option[String]): Json =
-      Json.Obj("tabs" -> Json.Arr(), "truncated" -> Json.Bool(false))
-    def reveal(path: String, line: Option[Int]): Json                           = Json.Obj("ok" -> Json.Bool(true))
-    def openDiff(path: String, line: Option[Int]): Json                         = Json.Obj("ok" -> Json.Bool(true))
-    def showChanges(title: Option[String], files: List[(String, String)]): Json =
+    var shown: Int                                         = 0
+    def workspaceRoot(): WorkspaceRootResult               = WorkspaceRootResult("/repo")
+    def selection(): SelectionResult                       = SelectionResult(truncated = false)
+    def openFiles(cursor: Option[String]): OpenFilesResult =
+      OpenFilesResult(tabs = Nil, truncated = false)
+    def reveal(path: String, line: Option[Int]): OkResult                                   = OkResult()
+    def openDiff(path: String, line: Option[Int]): OkResult                                 = OkResult()
+    def showChanges(title: Option[String], files: List[ShowChangesFile]): ShowChangesResult =
       shown = files.size
-      Json.Obj("ok" -> Json.Bool(true), "shown" -> Json.Num(files.size))
+      ShowChangesResult(ok = true, shown = files.size)
   end FakeHost
 end McpSpec

@@ -4,19 +4,15 @@ import _root_.sbt.nio.Watch
 import ascent.preview.sbt.AscentPreviewPlugin.autoImport.*
 import ascent.preview.sbt.AscentPreviewPort
 
-/** `~uiJS/ascentPreview` starts LiveMain through `preview/bgRun`.
+/** `~uiJS/ascentPreview` starts LiveMain as `preview/bgRun` from the repo root.
   *
-  * Do not assemble `fullClasspath` into `java -cp`. sbt 2 exports that classpath as CAS jars;
-  * a module in this build is started with `run` / `bgRun`.
+  * Grok sessions are keyed by process cwd (`user.dir`). The stock plugin forks
+  * with the JS module's job directory; `preview/run` already uses
+  * `ThisBuild / baseDirectory`. Match that here so ACP lists this workspace.
   */
 object BeardPreview:
   val liveMain: String  = "groksbeard.preview.LiveMain"
   val PreviewId: String = "preview"
-
-  val jdk24PlusRunOptions: Seq[String] = Seq(
-    "--sun-misc-unsafe-memory-access=allow",
-    "--enable-native-access=ALL-UNNAMED",
-  )
 
   def isLiveJob(job: JobHandle): Boolean =
     val key   = job.spawningTask

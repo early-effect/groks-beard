@@ -11,6 +11,7 @@ object ModeLabelSpec extends ZIOSpecDefault:
           ModeLabel.modeLabel("plan") == "Plan",
           ModeLabel.modeLabel("always-approve") == "Always approve",
           ModeLabel.modeLabel("auto") == "Auto",
+          ModeLabel.modeLabel("default") == "Normal",
           ModeLabel.modeLabel("normal", List(ModeOption("normal", "Ask"))) == "Ask",
         )
       },

@@ -36,6 +36,8 @@ enum HostMsg derives JsonCodec:
       modeId: String,
       availableModes: List[ModeOption] = Nil,
       occupancy: Option[Occupancy] = None,
+      modelId: String = "",
+      availableModels: List[ModelOption] = Nil,
   )
   @jsonHint("sessionList") case SessionList(
       sessions: List[SessionRow],
@@ -85,7 +87,7 @@ enum HostMsg derives JsonCodec:
       url: Option[String] = None,
   )
   @jsonHint("turnEnd") case TurnEnd(turnId: String, stopReason: String)
-  @jsonHint("queued") case Queued(count: Int)
+  @jsonHint("queued") case Queued(items: List[QueuedPrompt] = Nil)
   @jsonHint("changesSummary") case Changes(
       fileCount: Int,
       additions: Int,
@@ -96,6 +98,7 @@ enum HostMsg derives JsonCodec:
   @jsonHint("clearDiff") case ClearDiff
   @jsonHint("error") case Error(message: String, code: Option[String] = None)
   @jsonHint("clearTranscript") case ClearTranscript
+  @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
 end HostMsg
 
 object HostMsg:
@@ -142,6 +145,7 @@ enum WebviewMsg derives JsonCodec:
   )
   @jsonHint("cycleMode") case CycleMode
   @jsonHint("setMode") case SetMode(modeId: String)
+  @jsonHint("setModel") case SetModel(modelId: String)
   @jsonHint("openSettings") case OpenSettings
   @jsonHint("setSetting") case SetSetting(key: String, value: String | Boolean)
   @jsonHint("permissionChoice") case PermissionChoice(requestId: String, optionId: String)

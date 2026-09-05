@@ -3,6 +3,7 @@ package groksbeard.core
 object ModeLabel:
   private val names = Map(
     "normal"         -> "Normal",
+    "default"        -> "Normal",
     "plan"           -> "Plan",
     "always-approve" -> "Always approve",
     "ask"            -> "Ask",

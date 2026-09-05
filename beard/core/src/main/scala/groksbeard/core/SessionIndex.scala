@@ -61,6 +61,46 @@ object SessionIndex:
   def activityMs(stat: SessionActivity): Long =
     stat.updatesMtimeMs.orElse(stat.eventsMtimeMs).orElse(stat.summaryMtimeMs).getOrElse(0L)
 
+  def byLastUsed(rows: List[SessionRow]): List[SessionRow] =
+    rows.sortBy(r => -r.activityMs)
+
+  /** Keep `ids` order; drop missing ids; append rows that are not in `ids` by last used. */
+  def holdOrder(rows: List[SessionRow], ids: List[String]): List[SessionRow] =
+    val byId  = rows.map(r => r.id -> r).toMap
+    val held  = ids.flatMap(byId.get)
+    val extra = byLastUsed(rows.filterNot(r => ids.contains(r.id)))
+    held ++ extra
+
+  def present(rows: List[SessionRow], order: Option[List[String]]): List[SessionRow] =
+    order match
+      case None      => byLastUsed(rows)
+      case Some(ids) => holdOrder(rows, ids)
+
+  /** TUI `/resume` (`dedup_empty_sessions`): after newest-first sort, keep one empty session (`num_messages == 0`) per
+    * list. Older unused drafts drop so the page is not a pile of Untitled rows.
+    */
+  def isEmpty(row: SessionRow): Boolean =
+    row.messages.contains(0)
+
+  def dedupEmpty(rows: List[SessionRow]): List[SessionRow] =
+    val (kept, _) =
+      rows.foldLeft((Vector.empty[SessionRow], false)) { case ((acc, seenEmpty), row) =>
+        if !isEmpty(row) then (acc :+ row, seenEmpty)
+        else if seenEmpty then (acc, true)
+        else (acc :+ row, true)
+      }
+    kept.toList
+
+  def touchCurrent(rows: List[SessionRow], currentId: String, nowMs: Long, skip: Boolean): List[SessionRow] =
+    byLastUsed(
+      if currentId.isEmpty || skip then rows
+      else
+        rows.map { row =>
+          if row.id == currentId then row.copy(activityMs = math.max(row.activityMs, nowMs))
+          else row
+        }
+    )
+
   def index(stats: List[SessionActivity]): List[SessionActivity] =
     stats.sortBy(s => -activityMs(s))
 
@@ -76,6 +116,23 @@ object SessionIndex:
 
   def filter(rows: List[SessionRow], query: String): List[SessionRow] =
     rows.filter(matches(_, query))
+
+  private val OpaqueId =
+    raw"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}".r
+
+  def isOpaqueId(title: String, id: String = ""): Boolean =
+    val t = title.trim
+    t.isEmpty || t == id || OpaqueId.matches(t)
+
+  def displayTitle(row: SessionRow): String =
+    val named = row.title.trim
+    if named.nonEmpty && !isOpaqueId(named, row.id) then named
+    else
+      row.lastTurn
+        .orElse(row.summary)
+        .map(_.trim)
+        .filter(t => t.nonEmpty && !isOpaqueId(t, row.id))
+        .getOrElse("Untitled session")
 
   def groupDirs(fs: SessionFs, home: String, cwd: String): List[String] =
     val root    = sessionsRoot(home)
@@ -96,16 +153,15 @@ object SessionIndex:
         val dir = join(group, id)
         if !fs.isDirectory(dir) then None
         else
-          val activity = fs
-            .mtimeMs(join(dir, "updates.jsonl"))
-            .orElse(fs.mtimeMs(join(dir, "events.jsonl")))
-            .orElse(fs.mtimeMs(join(dir, "summary.json")))
-            .getOrElse(0L)
           val summary = fs.readText(join(dir, "summary.json")).flatMap(SessionSummary.decode)
+          val convo   =
+            fs.mtimeMs(join(dir, "updates.jsonl")).orElse(fs.mtimeMs(join(dir, "events.jsonl")))
+          val fallback = fs.mtimeMs(join(dir, "summary.json")).getOrElse(0L)
+          val activity = SessionSummary.activityMs(summary, convo, fallback)
           Some(SessionSummary.row(id, activity, summary))
       }
     }
-    rows.sortBy(r => -r.activityMs).take(limit)
+    byLastUsed(dedupEmpty(rows)).take(limit)
   end listRows
 
   private def isUnreserved(c: Char): Boolean =

@@ -21,6 +21,21 @@ object ComposerQuerySpec extends ZIOSpecDefault:
       test("does not hide always-approve") {
         assertTrue(ComposerQuery.filterSlash(commands, "").map(_.name).contains("always-approve"))
       },
+      test("picks a model by id or display name") {
+        val models = List(
+          ModelOption("grok-4.6", "Grok 4.6"),
+          ModelOption("grok-code-fast-1", "Grok Code Fast"),
+        )
+        assertTrue(
+          ModelOption.label("grok-4.6", models) == "Grok 4.6",
+          ModelOption.label("", Nil) == "Model",
+          ModelOption.pick("grok-code-fast-1", models).map(_.modelId).contains("grok-code-fast-1"),
+          ModelOption.pick("Grok 4.6", models).map(_.modelId).contains("grok-4.6"),
+          ModelOption.pick("code fast", models).map(_.modelId).contains("grok-code-fast-1"),
+          ModelOption.pick("nope", models).isEmpty,
+          ModelOption.pick("", models).isEmpty,
+        )
+      },
       test("reads a slash query from the composer draft") {
         assertTrue(
           ComposerQuery.slashQuery("/comp") == Some("comp"),

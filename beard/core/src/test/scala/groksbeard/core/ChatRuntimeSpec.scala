@@ -1,5 +1,8 @@
 package groksbeard.core
 
+import java.util.concurrent.TimeUnit
+import zio.*
+import zio.json.*
 import zio.test.*
 
 object ChatRuntimeSpec extends ZIOSpecDefault:
@@ -10,19 +13,19 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         val rt     = ChatRuntime(posted += _)
         rt.ready()
         val tags = posted.toList.map {
-          case HostMsg.Ready                      => "ready"
-          case HostMsg.SessionMeta(_, _, _, _, _) => "sessionMeta"
-          case HostMsg.AvailableCommands(_)       => "availableCommands"
-          case _: HostMsg.Settings                => "settings"
-          case other                              => other.toString
+          case HostMsg.Ready                => "ready"
+          case _: HostMsg.SessionMeta       => "sessionMeta"
+          case HostMsg.AvailableCommands(_) => "availableCommands"
+          case _: HostMsg.Settings          => "settings"
+          case other                        => other.toString
         }
         assertTrue(
           tags.contains("ready"),
           tags.contains("sessionMeta"),
           tags.contains("availableCommands"),
           posted.exists {
-            case HostMsg.SessionMeta(_, _, "normal", modes, _) => modes.exists(_.id == "plan")
-            case _                                             => false
+            case m: HostMsg.SessionMeta => m.modeId == "normal" && m.availableModes.exists(_.id == "plan")
+            case _                      => false
           },
         )
       },
@@ -78,8 +81,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         val users = posted.toList.collect { case HostMsg.UserMessage(_, text, _, _) => text }
         assertTrue(
           posted.exists {
-            case HostMsg.Queued(1) => true
-            case _                 => false
+            case HostMsg.Queued(items) => items.map(_.text) == List("later")
+            case _                     => false
           },
           users == List("hello", "later"),
         )
@@ -92,13 +95,60 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.send("   ")
         assertTrue(posted.isEmpty)
       },
-      test("queue and cancel post queued counts") {
+      test("MCP AuthRequired unsticks a hung prompt and sends the parked follow-up") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, AcpTransport.fake(FakeAgent(hangPrompt = true)))
+        rt.ready()
+        posted.clear()
+        rt.send("hello")
+        rt.queue("later")
+        rt.noteAgentLine(
+          """ERROR worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer resource_metadata=\"https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2\", error=\"invalid_token\"" })"""
+        )
+        assertTrue(
+          posted.exists {
+            case HostMsg.Error(message, _) => message.toLowerCase.contains("atlassian")
+            case _                         => false
+          },
+          posted.exists {
+            case HostMsg.TurnEnd(_, "cancelled") => true
+            case _                               => false
+          },
+          posted.exists {
+            case HostMsg.UserMessage(_, "later", _, _) => true
+            case _                                     => false
+          },
+        )
+      },
+      test("queue parks the follow-up text without sending it") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.queue("later")
+        assertTrue(
+          posted.exists {
+            case HostMsg.Queued(items) => items.map(_.text) == List("later")
+            case _                     => false
+          },
+          !posted.exists {
+            case _: HostMsg.UserMessage => true
+            case _                      => false
+          },
+        )
+      },
+      test("cancel sends the next parked follow-up") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
         rt.queue("later")
         rt.cancel()
         assertTrue(
-          posted.toList == List(HostMsg.Queued(1), HostMsg.Queued(0))
+          posted.exists {
+            case HostMsg.UserMessage(_, "later", _, _) => true
+            case _                                     => false
+          }
         )
       },
       test("send ingests the fake edit into Changes") {
@@ -225,6 +275,41 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.send("")
         assertTrue(posted.isEmpty)
       },
+      test("ready posts advertised models on sessionMeta") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        assertTrue(posted.exists {
+          case m: HostMsg.SessionMeta =>
+            m.modelId == "grok-4.6" &&
+            m.availableModels.exists(_.modelId == "grok-4.6") &&
+            m.availableModels.exists(_.modelId == "grok-code-fast-1")
+          case _ => false
+        })
+      },
+      test("setModel writes session/set_model") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val inner = AcpTransport.fake()
+        val wrap  = new AcpTransport:
+          def onData(next: String => Unit): Unit = inner.onData(next)
+          def write(data: String): Unit          =
+            lines += data
+            inner.write(data)
+          def close(): Unit = inner.close()
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, wrap)
+        rt.ready()
+        posted.clear()
+        lines.clear()
+        rt.setModel("grok-code-fast-1")
+        assertTrue(
+          lines.exists(l => l.contains("session/set_model") && l.contains("grok-code-fast-1")),
+          posted.exists {
+            case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
+            case _                      => false
+          },
+        )
+      },
       test("cycleMode walks Normal to Plan") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rt     = ChatRuntime(posted += _)
@@ -235,8 +320,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           rt.state.modeId.contains("plan"),
           rt.state.planActive,
           posted.exists {
-            case HostMsg.SessionMeta(_, _, "plan", _, _) => true
-            case _                                       => false
+            case m: HostMsg.SessionMeta => m.modeId == "plan"
+            case _                      => false
           },
         )
       },
@@ -259,6 +344,27 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.cancel()
         assertTrue(lines.exists(_.contains("session/cancel")))
       },
+      test("openPicker ranks a used current session first") {
+        for
+          now <- Clock.currentTime(TimeUnit.MILLISECONDS)
+          posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+          rows   = List(
+            SessionRow("old", "Earlier work", activityMs = 9),
+            SessionRow("sess_test", "Current", activityMs = 1),
+          )
+          rt = ChatRuntime(posted += _, listSessions = () => rows)
+          listed <- ZIO.succeed {
+            rt.ready()
+            rt.send("hello")
+            posted.clear()
+            rt.openPicker()
+            posted.toList.collectFirst { case HostMsg.SessionList(sessions, _, true) => sessions }.getOrElse(Nil)
+          }
+        yield assertTrue(
+          listed.map(_.id) == List("sess_test", "old"),
+          listed.headOption.exists(_.activityMs >= now),
+        )
+      } @@ TestAspect.withLiveClock,
       test("ready posts a sessionList after session/new") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rows   = List(SessionRow("disk-1", "Earlier work", activityMs = 9))
@@ -270,9 +376,118 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             case _                                       => false
           },
           posted.exists {
-            case HostMsg.AvailableCommands(cmds) => cmds.exists(_.name == "new") && cmds.exists(_.name == "resume")
-            case _                               => false
+            case HostMsg.AvailableCommands(cmds) =>
+              cmds.exists(_.name == "new") && cmds.exists(_.name == "resume") && cmds.exists(_.name == "model")
+            case _ => false
           },
+        )
+      },
+      test("switching resume drops the previous session/load replay") {
+        var listener: String => Unit = _ => ()
+        var heldDisk                 = ""
+        var heldLive                 = ""
+        val agent                    = FakeAgent()
+        val transport                = new AcpTransport:
+          def onData(next: String => Unit): Unit = listener = next
+          def write(data: String): Unit          =
+            val (lines, _) = Ndjson.split("", data)
+            lines.foreach { line =>
+              Rpc.parse(line).foreach {
+                case Rpc.Request(id, "session/load", params) =>
+                  val sid    = params.as[SessionLoadParams].toOption.map(_.sessionId).getOrElse("")
+                  val ndjson =
+                    if sid == "sess_disk" then ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
+                    else ChatRuntimeSpec.loadReplay(id, sid, "hello from live", "live agent")
+                  if sid == "sess_disk" then heldDisk = ndjson else heldLive = ndjson
+                case msg => listener(agent.encodeReplies(msg))
+              }
+            }
+          end write
+          def close(): Unit = ()
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, transport)
+        rt.ready()
+        posted.clear()
+        rt.resumeSession("sess_disk")
+        rt.resumeSession("sess_live")
+        listener(heldDisk)
+        val afterStale = ChatRuntimeSpec.snapshotUsers(posted.toList)
+        listener(heldLive)
+        val users  = ChatRuntimeSpec.snapshotUsers(posted.toList)
+        val lastId = posted.toList.reverse.collectFirst { case m: HostMsg.SessionMeta => m.sessionId }
+        assertTrue(
+          afterStale.isEmpty,
+          users == List("hello from live"),
+          lastId.contains("sess_live"),
+        )
+      },
+      test("newSession drops a cancelled session/load replay") {
+        var listener: String => Unit = _ => ()
+        var held                     = ""
+        val agent                    = FakeAgent()
+        val transport                = new AcpTransport:
+          def onData(next: String => Unit): Unit = listener = next
+          def write(data: String): Unit          =
+            val (lines, _) = Ndjson.split("", data)
+            lines.foreach { line =>
+              Rpc.parse(line).foreach {
+                case msg @ Rpc.Request(_, "session/load", _) => held = agent.encodeReplies(msg)
+                case msg                                     => listener(agent.encodeReplies(msg))
+              }
+            }
+          def close(): Unit = ()
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, transport)
+        rt.ready()
+        posted.clear()
+        rt.resumeSession("sess_disk")
+        rt.newSession()
+        listener(held)
+        val users = ChatRuntimeSpec.snapshotUsers(posted.toList)
+        assertTrue(
+          posted.exists {
+            case HostMsg.ClearTranscript => true
+            case _                       => false
+          },
+          !users.contains("hello from disk"),
+        )
+      },
+      test("late session/new does not steal a resumed session") {
+        var listener: String => Unit = _ => ()
+        var heldNew                  = ""
+        val agent                    = FakeAgent()
+        val transport                = new AcpTransport:
+          def onData(next: String => Unit): Unit = listener = next
+          def write(data: String): Unit          =
+            val (lines, _) = Ndjson.split("", data)
+            lines.foreach { line =>
+              Rpc.parse(line).foreach {
+                case msg @ Rpc.Request(_, "session/new", _) => heldNew = agent.encodeReplies(msg)
+                case msg                                    => listener(agent.encodeReplies(msg))
+              }
+            }
+          def close(): Unit = ()
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, transport)
+        rt.ready()
+        rt.resumeSession("sess_disk")
+        posted.clear()
+        listener(heldNew)
+        val ids = posted.toList.collect { case m: HostMsg.SessionMeta => m.sessionId }
+        assertTrue(!ids.contains("sess_test"))
+      },
+      test("resumeSession posts the disk title on sessionMeta") {
+        val rows   = List(SessionRow("sess_disk", "Walked history"))
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _, listSessions = () => rows)
+        rt.ready()
+        posted.clear()
+        rt.resumeSession("sess_disk")
+        assertTrue(
+          posted.exists {
+            case m: HostMsg.SessionMeta => m.sessionId == "sess_disk" && m.title == "Walked history"
+            case _                      => false
+          }
         )
       },
       test("resumeSession replays disk history into the transcript") {
@@ -282,15 +497,18 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         posted.clear()
         rt.resumeSession("sess_disk")
         val model = posted.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        val snap  = posted.toList.collect { case HostMsg.Transcript(turns) => turns }.flatten
         assertTrue(
           posted.exists {
-            case HostMsg.UserMessage(_, "hello from disk", _, _) => true
-            case _                                               => false
+            case HostMsg.Transcript(_) => true
+            case _                     => false
           },
-          posted.exists {
-            case HostMsg.AgentChunk(_, "welcome back", _) => true
-            case _                                        => false
+          !posted.exists {
+            case _: HostMsg.UserMessage => true
+            case _: HostMsg.AgentChunk  => true
+            case _                      => false
           },
+          snap.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
           model.turns.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
         )
       },
@@ -329,6 +547,40 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         rt.newSession()
         assertTrue(deleted.isEmpty)
       },
+      test("/model in the composer switches by id or display name") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.send("/model Grok Code Fast")
+        assertTrue(
+          posted.exists {
+            case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
+            case _                      => false
+          },
+          !posted.exists {
+            case HostMsg.UserMessage(_, "/model Grok Code Fast", _, _) => true
+            case _                                                     => false
+          },
+        )
+      },
+      test("unknown /model posts an error and does not prompt") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.send("/model nope")
+        assertTrue(
+          posted.exists {
+            case HostMsg.Error(message, _) => message.contains("nope")
+            case _                         => false
+          },
+          !posted.exists {
+            case _: HostMsg.UserMessage => true
+            case _                      => false
+          },
+        )
+      },
       test("/new in the composer starts a new session") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rt     = ChatRuntime(posted += _)
@@ -356,4 +608,24 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         })
       },
     )
+
+  def loadReplay(id: RpcId, sessionId: String, user: String, agent: String): String =
+    Ndjson.encodeChunk(
+      List(
+        Rpc.toLine(
+          Rpc.notifyOf("session/update", AcpSessionNotify(sessionId, AcpUpdate.User(AcpContent.Text(user))))
+        ),
+        Rpc.toLine(
+          Rpc.notifyOf("session/update", AcpSessionNotify(sessionId, AcpUpdate.Agent(AcpContent.Text(agent))))
+        ),
+        Rpc.toLine(Rpc.ok(id, SessionLoadResult(sessionId).asJson)),
+      )
+    )
+
+  def snapshotUsers(posted: List[HostMsg]): List[String] =
+    posted.flatMap {
+      case HostMsg.UserMessage(_, text, _, _) => List(text)
+      case HostMsg.Transcript(turns)          => turns.flatMap(_.user.map(_.text))
+      case _                                  => Nil
+    }
 end ChatRuntimeSpec

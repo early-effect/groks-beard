@@ -6,6 +6,7 @@ final class FakeAgent(
     val sessionId: String = "sess_test",
     pairSetModeWithTerminal: Boolean = false,
     lockLoad: Boolean = false,
+    hangPrompt: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -48,6 +49,15 @@ final class FakeAgent(
                   ),
                 )
               ),
+              Some(
+                SessionModelState(
+                  "grok-4.6",
+                  List(
+                    ModelOption("grok-4.6", "Grok 4.6"),
+                    ModelOption("grok-code-fast-1", "Grok Code Fast"),
+                  ),
+                )
+              ),
             ).asJson,
           ),
         )
@@ -60,6 +70,8 @@ final class FakeAgent(
             chunk(AcpUpdate.Agent(AcpContent.Text("welcome back")), sid),
             Rpc.ok(id, SessionLoadResult(sid).asJson),
           )
+      case "session/set_model" =>
+        List(Rpc.ok(id, EmptyObject().asJson))
       case "session/set_mode" =>
         val result = Rpc.ok(id, EmptyObject().asJson)
         if !pairSetModeWithTerminal then List(result)
@@ -73,6 +85,8 @@ final class FakeAgent(
             ),
           )
         end if
+      case "session/prompt" if hangPrompt =>
+        Nil
       case "session/prompt" =>
         List(
           thought("Considering the selection.\n"),

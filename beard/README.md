@@ -4,7 +4,7 @@ Greenfield Scala.js / Ascent rewrite of Grok's Beard. The TypeScript tree under 
 
 ## Preview (agent design loop)
 
-One sbt command stages the UI, starts live Grok, and restages on change. `ascentPreviewServe` forks `LiveMain` (Ascent `Preview.routes` plus ACP) and keeps that JVM up; `~` only rebuilds.
+One sbt command stages the UI, starts live Grok, and restages on change. `ascentPreviewServe` starts `preview/bgRun` (`LiveMain`: Ascent `Preview.routes` plus ACP) and keeps that JVM up; `~` only rebuilds. `preview/run` is the same main class.
 
 ```bash
 sbt --no-server ~uiJS/ascentPreview

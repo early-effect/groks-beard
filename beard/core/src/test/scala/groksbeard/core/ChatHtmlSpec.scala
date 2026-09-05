@@ -14,6 +14,7 @@ object ChatHtmlSpec extends ZIOSpecDefault:
           html.contains("connect-src 'none'"),
           html.contains("id=\"root\""),
           html.contains("data-logo=\"/logo.png\""),
+          html.contains("<html lang=\"en\" data-logo=\"/logo.png\">"),
         )
       }
     )

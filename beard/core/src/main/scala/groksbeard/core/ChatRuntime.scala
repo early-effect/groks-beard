@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
@@ -27,11 +28,13 @@ final class ChatRuntime(
   private var sessionId: Option[String] = None
   private var modeId                    = "normal"
   private var modes: List[ModeOption]   = ChatRuntime.DefaultModes
+  private var modelId                   = ""
+  private var models: List[ModelOption] = Nil
   private val title                     = "Grok's Beard"
   private var running                   = false
-  private var queued                    = 0
   private var chips                     = List.empty[PromptChip]
-  private var pendingQueue              = Vector.empty[(String, List[PromptChip])]
+  private var pendingQueue              = Vector.empty[QueuedPrompt]
+  private var queueSeq                  = 0
   private var settingsState             = ChatRuntime.seedSettings(settings(), includeActiveFile)
   private var occupancy                 = Option.empty[Occupancy]
   private var pendingPerm               = Map.empty[String, Json]
@@ -39,13 +42,31 @@ final class ChatRuntime(
   private var pendingMethod             = Map.empty[RpcId, String]
   private var loading                   = false
   private var loadCleared               = false
+  private var loadModel                 = ChatModel.empty
   private var pendingResume             = Option.empty[String]
+  private var pendingLoad               = Map.empty[RpcId, String]
+  private var cancelledLoads            = Set.empty[String]
+  private val inboundEpoch              = new java.util.concurrent.atomic.AtomicInteger(0)
 
-  transport.onData(chunk => this.synchronized { ingest(framed.feed(chunk)) })
+  transport.onData { chunk =>
+    val epoch = inboundEpoch.get()
+    val msgs  = this.synchronized { framed.feed(chunk) }
+    msgs.foreach { msg =>
+      if inboundEpoch.get() == epoch then this.synchronized { ingest(List(msg)) }
+    }
+  }
 
   def state: SessionState = framed.state
 
   def close(): Unit = transport.close()
+
+  def noteAgentLine(line: String): Unit = this.synchronized {
+    AgentLog.classify(line) match
+      case Some(msg) if running =>
+        post(HostMsg.Error(msg))
+        cancel()
+      case _ => ()
+  }
 
   def ready(): Unit = this.synchronized {
     post(HostMsg.Ready)
@@ -58,10 +79,16 @@ final class ChatRuntime(
   def send(text: String): Unit = this.synchronized {
     val trimmed = text.trim
     SessionCommands.intercept(trimmed) match
-      case Some(name) if SessionCommands.isNew(name) =>
+      case Some(cmd) if SessionCommands.isNew(cmd.name) =>
         newSession()
-      case Some(name) if SessionCommands.isResume(name) || SessionCommands.isHome(name) =>
+      case Some(cmd) if SessionCommands.isResume(cmd.name) || SessionCommands.isHome(cmd.name) =>
         openPicker()
+      case Some(cmd) if SessionCommands.isModel(cmd.name) =>
+        if cmd.args.isEmpty then ()
+        else
+          ModelOption.pick(cmd.args, models) match
+            case Some(m) => setModel(m.modelId)
+            case None    => post(HostMsg.Error(s"Unknown model: ${cmd.args}"))
       case _ =>
         val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
         if trimmed.isEmpty && chosen.isEmpty then ()
@@ -80,18 +107,15 @@ final class ChatRuntime(
   }
 
   def cancel(): Unit = this.synchronized {
-    queued = 0
-    pendingQueue = Vector.empty
     pendingPerm.keys.toList.foreach { id =>
       respond(id, Json.Obj("outcome" -> Json.Obj("outcome" -> Json.Str("cancelled"))))
     }
     val sid = sessionId.getOrElse(fallbackSessionId)
     notify("session/cancel", SessionCancelParams(sid).asJson)
-    post(HostMsg.Queued(0))
     if running then
       running = false
       post(HostMsg.TurnEnd(currentTurn, "cancelled"))
-    else running = false
+    drainQueue()
   }
 
   def addChip(chip: PromptChip): Unit = this.synchronized {
@@ -173,6 +197,15 @@ final class ChatRuntime(
     setMode(ModeLabel.nextMode(modeId, modes))
   }
 
+  def setModel(id: String): Unit = this.synchronized {
+    if id.isEmpty then ()
+    else
+      val sid = sessionId.getOrElse(fallbackSessionId)
+      rpc("session/set_model", SessionSetModelParams(sid, id).asJson)
+      modelId = id
+      postMeta()
+  }
+
   def openDiff(requestId: String): Unit = this.synchronized {
     pendingPerm.get(requestId) match
       case Some(params) =>
@@ -224,8 +257,11 @@ final class ChatRuntime(
   }
 
   def newSession(): Unit = this.synchronized {
+    inboundEpoch.incrementAndGet()
+    pendingResume.foreach(id => cancelledLoads += id)
     leaveCurrent()
     resetLocal()
+    sessionId = None
     post(HostMsg.ClearTranscript)
     rpc("session/new", SessionNewParams(cwd).asJson)
   }
@@ -234,10 +270,19 @@ final class ChatRuntime(
     if id.isEmpty then openPicker()
     else if sessionId.contains(id) then postList(open = false)
     else
+      inboundEpoch.incrementAndGet()
+      pendingResume.foreach(prev => cancelledLoads += prev)
+      leaveCurrent()
+      cancelledLoads -= id
+      resetTurnState()
+      sessionId = Some(id)
       loading = true
-      loadCleared = false
+      loadCleared = true
       pendingResume = Some(id)
-      rpc("session/load", SessionLoadParams(id, cwd).asJson)
+      post(HostMsg.ClearTranscript)
+      postMeta()
+      postList(open = false)
+      rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
   }
 
   def openPicker(): Unit = this.synchronized { postList(open = true) }
@@ -266,18 +311,20 @@ final class ChatRuntime(
 
   private def enqueue(text: String, chosen: List[PromptChip]): Unit =
     chips = Nil
-    pendingQueue = pendingQueue :+ (text, chosen)
-    queued = pendingQueue.size
-    post(HostMsg.Queued(queued))
+    queueSeq += 1
+    pendingQueue = pendingQueue :+ QueuedPrompt(s"q$queueSeq", text, chosen)
+    postQueue()
 
   private def drainQueue(): Unit =
-    if pendingQueue.isEmpty then queued = 0
+    if pendingQueue.isEmpty then postQueue()
     else
-      val (text, chosen) = pendingQueue.head
+      val item = pendingQueue.head
       pendingQueue = pendingQueue.tail
-      queued = pendingQueue.size
-      post(HostMsg.Queued(queued))
-      runTurn(text, chosen)
+      postQueue()
+      runTurn(item.text, item.chips)
+
+  private def postQueue(): Unit =
+    post(HostMsg.Queued(pendingQueue.toList))
 
   private def runTurn(text: String, chosen: List[PromptChip]): Unit =
     running = true
@@ -297,22 +344,33 @@ final class ChatRuntime(
       empty.forget(id)
     }
 
-  private def resetLocal(): Unit =
+  private def resetTurnState(): Unit =
     turnSeq = 0
     currentTurn = "turn_0"
     currentTitle = "Untitled"
     chips = Nil
-    queued = 0
     pendingQueue = Vector.empty
+    queueSeq = 0
     occupancy = None
     running = false
+    loadModel = ChatModel.empty
+  end resetTurnState
+
+  private def resetLocal(): Unit =
+    resetTurnState()
     loading = false
     loadCleared = false
     pendingResume = None
-  end resetLocal
+
+  private def currentMs(): Long =
+    Unsafe.unsafe { implicit u =>
+      Clock.ClockLive.unsafe.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
 
   private def postList(open: Boolean): Unit =
-    post(HostMsg.SessionList(listSessions(), sessionId.getOrElse(""), openPicker = open))
+    val sid  = sessionId.getOrElse("")
+    val rows = SessionIndex.touchCurrent(listSessions(), sid, currentMs(), empty.shouldDelete(sid))
+    post(HostMsg.SessionList(rows, sid, openPicker = open))
 
   private def respond(requestId: String, result: Json): Unit =
     inbound.get(requestId).foreach { id =>
@@ -332,41 +390,56 @@ final class ChatRuntime(
   private def notify(method: String, params: Json): Unit =
     transport.write(Ndjson.encode(Rpc.toLine(Rpc.notify(method, params))))
 
-  private def rpc(method: String, params: Json): Unit =
+  private def rpc(method: String, params: Json, loadSessionId: Option[String] = None): RpcId =
     rpcId += 1
     val id  = RpcId.Num(rpcId)
     val req = Rpc.Request(id, method, params)
     pendingMethod = pendingMethod.updated(id, method)
+    loadSessionId.foreach(sid => pendingLoad = pendingLoad.updated(id, sid))
     framed.recordOutgoing(req)
     transport.write(Ndjson.encode(Rpc.toLine(req)))
+    id
 
   private def ingest(msgs: List[Rpc]): Unit =
     msgs.foreach {
       case Rpc.Notify("session/update", p) =>
-        if loading then
-          SessionState.decodeUpdate(p) match
-            case Some(_: AcpUpdate.User) =>
-              if !loadCleared then
-                post(HostMsg.ClearTranscript)
-                loadCleared = true
-                turnSeq = 0
-              turnSeq += 1
-              currentTurn = s"turn_$turnSeq"
-            case _ =>
-              if !loadCleared then
-                post(HostMsg.ClearTranscript)
-                loadCleared = true
+        val updateSid = SessionState.decodeNotify(p).map(_.sessionId).filter(_.nonEmpty)
+        val stale     =
+          updateSid.exists(cancelledLoads.contains) ||
+            updateSid.exists(sid => sessionId.exists(_ != sid))
+        if stale then ()
+        else
+          if loading then
+            SessionState.decodeUpdate(p) match
+              case Some(_: AcpUpdate.User) =>
+                if !loadCleared then loadCleared = true
+                turnSeq += 1
+                currentTurn = s"turn_$turnSeq"
+              case _ =>
+                if !loadCleared then loadCleared = true
+            SessionUpdate.hostMsgs(p, currentTurn).foreach { msg =>
+              msg match
+                case HostMsg.AvailableCommands(cmds) =>
+                  post(HostMsg.AvailableCommands(SessionCommands.merge(cmds)))
+                case other =>
+                  other match
+                    case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
+                    case _                      => ()
+                  loadModel = ChatModel.applyMsg(loadModel, other)
+            }
+          else
+            SessionUpdate.hostMsgs(p, currentTurn).foreach { msg =>
+              val out = msg match
+                case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
+                case other                           => other
+              out match
+                case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
+                case _                      => ()
+              post(out)
+            }
+          end if
+          ingestUpdate(p)
         end if
-        SessionUpdate.hostMsgs(p, currentTurn).foreach { msg =>
-          val out = msg match
-            case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
-            case other                           => other
-          out match
-            case HostMsg.SessionMeta(_, _, _, _, Some(occ)) => occupancy = Some(occ)
-            case _                                          => ()
-          post(out)
-        }
-        ingestUpdate(p)
       case Rpc.Request(rid, rawMethod, params) =>
         val reqId  = requestKey(rid)
         val method = grokMethod(rawMethod)
@@ -383,7 +456,7 @@ final class ChatRuntime(
             val questions =
               params.as[AskUserQuestionParams].toOption.map(_.questions).getOrElse(Nil)
             post(HostMsg.question(QuestionCard(reqId, questions)))
-          case "elicitation/create" =>
+          case "elicitation/create" | "_x.ai/mcp/elicit" =>
             post(HostMsg.elicit(elicitCard(params, reqId)))
           case _ =>
             inbound -= reqId
@@ -399,39 +472,54 @@ final class ChatRuntime(
           case "initialize" =>
             rpc("session/new", SessionNewParams(cwd).asJson)
           case "session/new" =>
-            result.foreach(applySession)
-            if sessionId.isEmpty then sessionId = Some(fallbackSessionId)
-            sessionId.foreach(empty.markCreated)
-            postMeta()
-            post(HostMsg.settings(settingsState))
-            postList(open = false)
+            result.foreach { json =>
+              json.as[SessionNewResult].foreach { decoded =>
+                empty.markCreated(decoded.sessionId)
+                val steal =
+                  pendingResume.nonEmpty || sessionId.exists(cur => cur.nonEmpty && cur != decoded.sessionId)
+                if steal then
+                  if empty.shouldDelete(decoded.sessionId) then scheduleEmptyDelete(decoded.sessionId)
+                else
+                  applySession(json)
+                  if sessionId.isEmpty then sessionId = Some(fallbackSessionId)
+                  postMeta()
+                  post(HostMsg.settings(settingsState))
+                  postList(open = false)
+              }
+            }
           case "session/load" =>
-            loading = false
-            error match
-              case Some(err) =>
-                val kind = SessionLoad.classify(err.message)
-                val sid  = pendingResume.getOrElse("")
-                post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind)))
-                if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message))
-                pendingResume = None
-              case None =>
-                val previous = sessionId
-                if !loadCleared then post(HostMsg.ClearTranscript)
-                previous.foreach { id =>
-                  if !pendingResume.contains(id) then
-                    if empty.shouldDelete(id) then scheduleEmptyDelete(id)
-                    empty.forget(id)
-                }
-                result.foreach(applySession)
-                pendingResume.foreach { id =>
-                  if sessionId.isEmpty then sessionId = Some(id)
-                  empty.markHasHistory(sessionId.getOrElse(id))
-                }
-                pendingResume = None
-                postMeta()
-                post(HostMsg.settings(settingsState))
-                postList(open = false)
-            end match
+            val loadSid = pendingLoad.get(id)
+            pendingLoad -= id
+            val stale =
+              loadSid.exists(cancelledLoads.contains) ||
+                pendingResume.exists(want => loadSid.exists(_ != want)) ||
+                pendingResume.isEmpty
+            if stale then ()
+            else
+              loading = false
+              val wanted = pendingResume
+              pendingResume = None
+              error match
+                case Some(err) =>
+                  val kind = SessionLoad.classify(err.message)
+                  val sid  = wanted.getOrElse("")
+                  post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind)))
+                  if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message))
+                case None =>
+                  if !loadCleared then post(HostMsg.ClearTranscript)
+                  val snap = ChatModel.snapshotTurns(loadModel.turns)
+                  loadModel = ChatModel.empty
+                  post(HostMsg.Transcript(snap))
+                  result.foreach(applySession)
+                  wanted.foreach { loadId =>
+                    if sessionId.isEmpty then sessionId = Some(loadId)
+                    empty.markHasHistory(sessionId.getOrElse(loadId))
+                  }
+                  postMeta()
+                  post(HostMsg.settings(settingsState))
+                  postList(open = false)
+              end match
+            end if
           case "session/prompt" =>
             val reason =
               result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse("end_turn")
@@ -450,6 +538,10 @@ final class ChatRuntime(
         modeId = state.currentModeId
         framed.state.commitMode(state.currentModeId)
         if state.availableModes.nonEmpty then modes = state.availableModes
+      }
+      decoded.models.foreach { state =>
+        modelId = state.currentModelId
+        if state.availableModels.nonEmpty then models = state.availableModels
       }
     }
 
@@ -496,8 +588,16 @@ final class ChatRuntime(
     val pairs = diffs.map(d => DiffPair(d.path, d.oldText, d.newText, d.wholeFile))
     if pairs.nonEmpty then ports.openNativeDiffs(heading, pairs)
 
+  private def displayTitleOf(id: String): String =
+    listSessions()
+      .find(_.id == id)
+      .map(SessionIndex.displayTitle)
+      .filter(_.nonEmpty)
+      .getOrElse(title)
+
   private def postMeta(): Unit =
-    post(HostMsg.SessionMeta(sessionId.getOrElse(""), title, modeId, modes, occupancy))
+    val sid = sessionId.getOrElse("")
+    post(HostMsg.SessionMeta(sid, displayTitleOf(sid), modeId, modes, occupancy, modelId, models))
 
   private def jsonStr(json: Json, key: String): Option[String] =
     json match

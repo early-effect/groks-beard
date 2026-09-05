@@ -103,27 +103,28 @@ final class ChatView(
       case Right(cmd) =>
         val args = Spawn.grokAgentStdioArgs()
         log(s"spawning $cmd ${args.mkString(" ")}")
-        val transport = NodeTransport.spawn(cmd, args, cwd, log)
-        val caps      = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
-        val home      = GrokHome(env)
-        runtime = Some(
-          ChatRuntime(
-            post,
-            transport,
-            ports,
-            cwd,
-            caps,
-            activeFile = () => activeFileChip(),
-            includeActiveFile = () => readSettings().includeActiveFileByDefault,
-            settings = () => readSettings(),
-            listSessions = () => SessionIndex.listRows(NodeSessionFs, home, cwd),
-            scheduleEmptyDelete = id =>
-              val path = SessionIndex.sessionPath(home, cwd, id)
-              val _    = js.timers.setTimeout(SessionIndex.EmptyGraceMs.toDouble) {
-                NodeSessionFs.deleteTree(path)
-              },
-          )
+        var note: String => Unit = _ => ()
+        val transport            = NodeTransport.spawn(cmd, args, cwd, log, line => note(line))
+        val caps                 = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+        val home                 = GrokHome(env)
+        val rt                   = ChatRuntime(
+          post,
+          transport,
+          ports,
+          cwd,
+          caps,
+          activeFile = () => activeFileChip(),
+          includeActiveFile = () => readSettings().includeActiveFileByDefault,
+          settings = () => readSettings(),
+          listSessions = () => SessionIndex.listRows(NodeSessionFs, home, cwd),
+          scheduleEmptyDelete = id =>
+            val path = SessionIndex.sessionPath(home, cwd, id)
+            val _    = js.timers.setTimeout(SessionIndex.EmptyGraceMs.toDouble) {
+              NodeSessionFs.deleteTree(path)
+            },
         )
+        note = rt.noteAgentLine
+        runtime = Some(rt)
     end match
   end bindAgent
 

@@ -134,6 +134,24 @@
         "icon": "$(discard)"
       },
       {
+        "command": "groksBeard.keepTurn",
+        "title": "Grok's Beard: Keep Turn",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "groksBeard.undoTurn",
+        "title": "Grok's Beard: Undo Turn",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "groksBeard.keepAll",
+        "title": "Grok's Beard: Keep All"
+      },
+      {
+        "command": "groksBeard.undoAll",
+        "title": "Grok's Beard: Undo All"
+      },
+      {
         "command": "groksBeard.enableTuiBridge",
         "title": "Grok's Beard: Enable TUI Bridge"
       },
@@ -177,6 +195,16 @@
         {
           "command": "groksBeard.undoChange",
           "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeFile",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.keepTurn",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeTurn",
+          "group": "inline"
+        },
+        {
+          "command": "groksBeard.undoTurn",
+          "when": "(view == groksBeard.changes || view == groksBeard.changesSecondary) && viewItem == changeTurn",
           "group": "inline"
         }
       ],

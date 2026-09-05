@@ -23,7 +23,12 @@ object Extension:
     var treeRef: Option[ChangesTree] = None
     val mcpHost                      = new McpHost(review, () => treeRef.foreach(_.refresh()))
     val tree                         =
-      new ChangesTree(() => chatRef.toList.flatMap(_.current.toList.flatMap(_.pendingChanges)) ++ mcpHost.sidecar)
+      new ChangesTree(() =>
+        val fromChat = chatRef.toList.flatMap(_.current.toList.flatMap(_.pendingSets))
+        val side     = mcpHost.sidecar
+        if side.isEmpty then fromChat
+        else fromChat :+ ChangeSet("", "sidecar", "TUI", side, 0L)
+      )
     treeRef = Some(tree)
     val chat = new ChatView(context, review, tree, status, line => out.appendLine(line), mcpHost.rememberSelection)
     chatRef = Some(chat)
@@ -78,7 +83,8 @@ object Extension:
       vscode.commands.registerCommand(
         "groksBeard.keepChange",
         (arg: js.Any) =>
-          val path = Extension.asString(arg)
+          val raw  = Extension.asString(arg)
+          val path = ChangeTreeKey.filePath(raw).getOrElse(raw)
           if path.nonEmpty then chat.current.foreach(_.keep(path)),
       )
     )
@@ -86,9 +92,30 @@ object Extension:
       vscode.commands.registerCommand(
         "groksBeard.undoChange",
         (arg: js.Any) =>
-          val path = Extension.asString(arg)
+          val raw  = Extension.asString(arg)
+          val path = ChangeTreeKey.filePath(raw).getOrElse(raw)
           if path.nonEmpty then chat.current.foreach(_.undo(path)),
       )
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "groksBeard.keepTurn",
+        (arg: js.Any) =>
+          ChangeTreeKey.turnId(Extension.asString(arg)).foreach(id => chat.current.foreach(_.keepTurn(id))),
+      )
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "groksBeard.undoTurn",
+        (arg: js.Any) =>
+          ChangeTreeKey.turnId(Extension.asString(arg)).foreach(id => chat.current.foreach(_.undoTurn(id))),
+      )
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.keepAll", () => chat.current.foreach(_.keepAll()))
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.undoAll", () => chat.current.foreach(_.undoAll()))
     )
     context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.cancel", () => chat.current.foreach(_.cancel()))

@@ -239,27 +239,35 @@ final class ChatRuntime(
     if store.get(path).isEmpty then post(HostMsg.ClearDiff)
   }
 
+  def keepTurn(turnId: String): Unit = this.synchronized {
+    store.keepTurn(turnId)
+    postChanges()
+    post(HostMsg.ClearDiff)
+  }
+
+  def keepAll(): Unit = this.synchronized {
+    store.keepAll()
+    postChanges()
+    post(HostMsg.ClearDiff)
+  }
+
   def undo(path: String): Unit = this.synchronized {
-    store.get(path) match
-      case None       => ()
-      case Some(file) =>
-        val disk = ports.readDisk(file.path)
-        ChangeSet.resolveUndo(file, disk, ports.confirmDirty(file.path)) match
-          case UndoResolution.Apply(mutations) =>
-            ports.applyUndo(mutations)
-            store.drop(path)
-            postChanges()
-            post(HostMsg.ClearDiff)
-          case UndoResolution.Disabled(reason) =>
-            post(HostMsg.Error(s"Undo unavailable: $reason"))
-          case UndoResolution.Cancelled =>
-            ()
-        end match
+    store.get(path).foreach(undoFile)
+  }
+
+  def undoTurn(turnId: String): Unit = this.synchronized {
+    undoFiles(store.filesOf(turnId))
+  }
+
+  def undoAll(): Unit = this.synchronized {
+    undoFiles(store.pending)
   }
 
   def closeDiff(): Unit = this.synchronized { post(HostMsg.ClearDiff) }
 
   def pendingChanges: List[FileChange] = this.synchronized { store.pending }
+
+  def pendingSets: List[ChangeSet] = this.synchronized { store.list }
 
   def slashPick(name: String): Unit = this.synchronized {
     if SessionCommands.isNew(name) then newSession()
@@ -612,6 +620,26 @@ final class ChatRuntime(
 
   private def toBody(call: AcpUpdate.ToolCallUpdate): AcpToolCall =
     AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
+
+  private def undoFile(file: FileChange): Boolean =
+    val disk = ports.readDisk(file.path)
+    ChangeSet.resolveUndo(file, disk, ports.confirmDirty(file.path)) match
+      case UndoResolution.Apply(mutations) =>
+        ports.applyUndo(mutations)
+        store.drop(file.path)
+        true
+      case UndoResolution.Disabled(reason) =>
+        post(HostMsg.Error(s"Undo unavailable: $reason"))
+        false
+      case UndoResolution.Cancelled =>
+        false
+    end match
+  end undoFile
+
+  private def undoFiles(files: List[FileChange]): Unit =
+    val _ = files.takeWhile(undoFile)
+    postChanges()
+    post(HostMsg.ClearDiff)
 
   private def postChanges(): Unit =
     post(HostMsg.changes(store.summary))

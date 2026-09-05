@@ -363,6 +363,21 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("changes Keep all drops the pending turn") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Changes)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("changes-toggle").click
+              _ <- waitPresent(root, "change-turn-t3")
+              _ <- root.button("change-keep-all-t3").click
+              _ <- waitGone(root, "changes")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("changes scene lists the pending file and Keep drops it") {
         val bridge = PreviewBridge()
         for

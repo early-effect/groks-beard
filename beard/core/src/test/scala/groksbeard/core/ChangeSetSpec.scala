@@ -90,6 +90,32 @@ object ChangeSetSpec extends ZIOSpecDefault:
         store.keep("/a.ts")
         assertTrue(store.summary.fileCount == 0, store.pending.isEmpty)
       },
+      test("keepTurn drops only that turn") {
+        val store = ChangeStore()
+        store.ingest("s", "t1", "one", List(modify("/a.ts")))
+        store.ingest("s", "t2", "two", List(modify("/b.ts")))
+        store.keepTurn("t1")
+        assertTrue(store.pending.map(_.path) == List("/b.ts"), store.summary.files.head.turnTitle == "two")
+      },
+      test("keepAll drops every pending file") {
+        val store = ChangeStore()
+        store.ingest("s", "t1", "one", List(modify("/a.ts")))
+        store.ingest("s", "t2", "two", List(modify("/b.ts")))
+        store.keepAll()
+        assertTrue(store.pending.isEmpty, store.summary.fileCount == 0)
+      },
+      test("groupByTurn preserves first-seen order") {
+        val files = List(
+          ChangeSet.toView(modify("/a.ts"), "t1", "one"),
+          ChangeSet.toView(modify("/b.ts"), "t2", "two"),
+          ChangeSet.toView(modify("/c.ts"), "t1", "one"),
+        )
+        val groups = ChangeSet.groupByTurn(files)
+        assertTrue(
+          groups.map(_._1) == List("t1", "t2"),
+          groups.head._3.map(_.path) == List("/a.ts", "/c.ts"),
+        )
+      },
     )
 
   private def modify(path: String): FileChange =

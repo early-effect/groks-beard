@@ -155,7 +155,7 @@ object ChangeSet:
       case UndoPlan.Delete(_, _) => None
       case _                     => change.oldSnapshot
 
-  def toView(change: FileChange): ChangeFileView =
+  def toView(change: FileChange, turnId: String = "", turnTitle: String = ""): ChangeFileView =
     ChangeFileView(
       path = change.path,
       kind = ChangeKind.wire(change.kind),
@@ -163,11 +163,25 @@ object ChangeSet:
       deletions = change.deletions,
       wholeFile = change.wholeFile,
       undoDisabled = change.undoDisabled,
+      turnId = turnId,
+      turnTitle = turnTitle,
     )
 
   def summaryOf(files: List[FileChange]): ChangesSummary =
     val (add, del) = lineStats(files)
-    ChangesSummary(files.size, add, del, files.map(toView))
+    ChangesSummary(files.size, add, del, files.map(toView(_)))
+
+  def summaryOfSets(sets: List[ChangeSet]): ChangesSummary =
+    val views      = sets.flatMap(s => s.files.map(toView(_, s.turnId, s.title)))
+    val (add, del) = lineStats(sets.flatMap(_.files))
+    ChangesSummary(views.size, add, del, views)
+
+  def groupByTurn(files: List[ChangeFileView]): List[(String, String, List[ChangeFileView])] =
+    files.map(_.turnId).distinct.map { id =>
+      val group = files.filter(_.turnId == id)
+      val title = group.map(_.turnTitle.trim).find(_.nonEmpty).getOrElse("Changes")
+      (id, title, group)
+    }
 
   private def splitLines(text: String): Array[String] =
     text.split("\r?\n", -1)
@@ -205,7 +219,7 @@ final class ChangeStore:
 
   def pending: List[FileChange] = sets.flatMap(_.files)
 
-  def summary: ChangesSummary = ChangeSet.summaryOf(pending)
+  def summary: ChangesSummary = ChangeSet.summaryOfSets(sets)
 
   def get(path: String): Option[FileChange] =
     pending.find(_.path == path)
@@ -226,6 +240,12 @@ final class ChangeStore:
 
   def keepAll(): Unit =
     sets = Nil
+
+  def keepTurn(turnId: String): Unit =
+    sets = sets.filterNot(_.turnId == turnId)
+
+  def filesOf(turnId: String): List[FileChange] =
+    sets.find(_.turnId == turnId).map(_.files).getOrElse(Nil)
 
   def drop(path: String): Unit = keep(path)
 

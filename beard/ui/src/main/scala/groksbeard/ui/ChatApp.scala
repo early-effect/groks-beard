@@ -671,6 +671,14 @@ object ChatApp:
         overflowY.auto,
       )
 
+  object ChangesTurn
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(6),
+        width.pct(100),
+      )
+
   object FileRow
       extends CssClass(
         display.flex,
@@ -1783,34 +1791,68 @@ object ChatApp:
           E.div(
             ChangesList,
             TestId("changes-files"),
-            forEach(chat.map(_.changes.toList.flatMap(_.files)))(_.path) { file =>
-              val region = if file.wholeFile then "" else " region"
-              val reason = file.undoDisabled.fold("")(r => s" · $r")
+            forEach(chat.map(_.changes.toList.flatMap(s => ChangeSet.groupByTurn(s.files))))(g =>
+              s"${g._1}-${g._3.map(_.path).mkString(",")}"
+            ) { group =>
+              val (turnId, title, files) = group
+              val turnKey                = if turnId.nonEmpty then turnId else "changes"
+              val (add, del)             = files.foldLeft((0, 0)) { case ((a, d), f) =>
+                (a + f.additions, d + f.deletions)
+              }
               E.div(
-                FileRow,
-                TestId(s"change-${UnifiedDiff.fileName(file.path)}"),
-                E.span(s"${UnifiedDiff.fileName(file.path)} ${file.kind}$region$reason"),
-                statsEl(file.additions, file.deletions),
-                E.button(
-                  Chip,
-                  TestId(s"change-open-${UnifiedDiff.fileName(file.path)}"),
-                  Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(file.path)))),
-                  "Open",
-                ),
-                E.button(
-                  Chip,
-                  TestId(s"change-keep-${UnifiedDiff.fileName(file.path)}"),
-                  Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.KeepChange(file.path)))),
-                  "Keep",
-                ),
-                if file.undoDisabled.isDefined then E.span(file.undoDisabled.getOrElse(""))
-                else
+                ChangesTurn,
+                TestId(s"change-turn-$turnKey"),
+                E.div(
+                  FileRow,
+                  E.strong(title),
+                  statsEl(add, del),
                   E.button(
                     Chip,
-                    TestId(s"change-undo-${UnifiedDiff.fileName(file.path)}"),
-                    Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.UndoChange(file.path)))),
-                    "Undo",
+                    TestId(s"change-keep-all-$turnKey"),
+                    Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.KeepTurn(turnId)))),
+                    "Keep all",
                   ),
+                  E.button(
+                    Chip,
+                    TestId(s"change-undo-all-$turnKey"),
+                    Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.UndoTurn(turnId)))),
+                    "Undo all",
+                  ),
+                ),
+                Arg.ArgsArg(
+                  files.map { file =>
+                    val region = if file.wholeFile then "" else " region"
+                    val reason = file.undoDisabled.fold("")(r => s" · $r")
+                    Arg.ChildArg(
+                      E.div(
+                        FileRow,
+                        TestId(s"change-${UnifiedDiff.fileName(file.path)}"),
+                        E.span(s"${UnifiedDiff.fileName(file.path)} ${file.kind}$region$reason"),
+                        statsEl(file.additions, file.deletions),
+                        E.button(
+                          Chip,
+                          TestId(s"change-open-${UnifiedDiff.fileName(file.path)}"),
+                          Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(file.path)))),
+                          "Open",
+                        ),
+                        E.button(
+                          Chip,
+                          TestId(s"change-keep-${UnifiedDiff.fileName(file.path)}"),
+                          Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.KeepChange(file.path)))),
+                          "Keep",
+                        ),
+                        if file.undoDisabled.isDefined then E.span(file.undoDisabled.getOrElse(""))
+                        else
+                          E.button(
+                            Chip,
+                            TestId(s"change-undo-${UnifiedDiff.fileName(file.path)}"),
+                            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.UndoChange(file.path)))),
+                            "Undo",
+                          ),
+                      )
+                    )
+                  }
+                ),
               )
             },
           )

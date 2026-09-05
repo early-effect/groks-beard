@@ -32,12 +32,17 @@ final class ProcessTransport(
 end ProcessTransport
 
 object ProcessTransport:
-  def spawn(command: String, args: List[String], cwd: String): ZIO[Scope, Throwable, ProcessTransport] =
+  def spawn(
+      command: String,
+      args: List[String],
+      cwd: String,
+      onErr: String => Unit = _ => (),
+  ): ZIO[Scope, Throwable, ProcessTransport] =
     for
       process <- ZIO.acquireRelease(ZIO.attempt {
         val pb = new ProcessBuilder((command :: args).asJava)
         pb.directory(new java.io.File(cwd))
-        pb.redirectError(ProcessBuilder.Redirect.INHERIT)
+        pb.redirectError(ProcessBuilder.Redirect.PIPE)
         pb.start()
       })(p => ZIO.succeed(stop(p, None)))
       listener <- Ref.make[String => Unit](_ => ())
@@ -48,6 +53,17 @@ object ProcessTransport:
         .fromInputStream(process.getInputStream, 4096)
         .via(ZPipeline.utf8Decode)
         .foreach(chunk => listener.get.map(f => if chunk.nonEmpty then f(chunk)))
+        .forkScoped
+      _ <- ZStream
+        .fromInputStream(process.getErrorStream, 4096)
+        .via(ZPipeline.utf8Decode)
+        .via(ZPipeline.splitLines)
+        .foreach { line =>
+          ZIO.succeed {
+            java.lang.System.err.println(line)
+            if line.nonEmpty then onErr(line)
+          }
+        }
         .forkScoped
     yield ProcessTransport(process, listener, stdin)
 

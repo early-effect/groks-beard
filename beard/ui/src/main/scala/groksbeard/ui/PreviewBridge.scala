@@ -6,12 +6,18 @@ final class PreviewBridge extends HostBridge:
   private var listener: HostMsg => Unit = _ => ()
   private var settings: SettingsState   = SettingsState.defaults
   private var modeId: String            = "normal"
+  private var modelId: String           = "grok-4.6"
 
   private val modes = List(
     ModeOption("normal", "Normal"),
     ModeOption("plan", "Plan"),
     ModeOption("auto", "Auto"),
     ModeOption("always-approve", "Always approve"),
+  )
+
+  private val models = List(
+    ModelOption("grok-4.6", "Grok 4.6"),
+    ModelOption("grok-code-fast-1", "Grok Code Fast"),
   )
 
   private val commands = SessionCommands.merge(
@@ -46,10 +52,10 @@ final class PreviewBridge extends HostBridge:
     msg match
       case WebviewMsg.Ready =>
         emit(HostMsg.Ready)
-        emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
+        emitMeta("", "Grok's Beard")
         emit(HostMsg.AvailableCommands(commands))
         emit(HostMsg.settings(settings))
-        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
+        emit(HostMsg.SessionList(sessions, "", openPicker = false))
       case WebviewMsg.MentionQuery(query) =>
         val q    = query.toLowerCase
         val hits =
@@ -58,12 +64,15 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.MentionResults(query, hits))
       case WebviewMsg.SetMode(id) =>
         modeId = id
-        emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
+        emitMeta()
+      case WebviewMsg.SetModel(id) =>
+        modelId = id
+        emitMeta()
       case WebviewMsg.CycleMode =>
         val ids  = modes.map(_.id)
         val next = ids.lift(ids.indexOf(modeId) + 1).getOrElse(ids.head)
         modeId = next
-        emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
+        emitMeta()
       case WebviewMsg.OpenSettings =>
         emit(HostMsg.settings(settings))
       case WebviewMsg.SetSetting(key, value) =>
@@ -111,8 +120,8 @@ final class PreviewBridge extends HostBridge:
         )
         emitChanges()
         emit(HostMsg.TurnEnd("preview-turn", "end_turn"))
-      case WebviewMsg.Queue(_) =>
-        emit(HostMsg.Queued(1))
+      case WebviewMsg.Queue(text) =>
+        emit(HostMsg.Queued(List(QueuedPrompt("preview-q", text))))
       case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionChoice(_, _, _) |
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
@@ -124,15 +133,24 @@ final class PreviewBridge extends HostBridge:
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
       case WebviewMsg.NewSession =>
         emit(HostMsg.ClearTranscript)
-        emit(HostMsg.SessionMeta("preview", "Grok's Beard", modeId, modes))
-        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
+        emitMeta("", "Grok's Beard")
+        emit(HostMsg.SessionList(sessions, "", openPicker = false))
       case WebviewMsg.ResumeSession(id) =>
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id)
         emit(HostMsg.ClearTranscript)
-        emit(HostMsg.SessionMeta(id, title, modeId, modes))
-        emit(HostMsg.UserMessage("resume-turn", "hello from disk"))
-        emit(HostMsg.AgentChunk("resume-turn", s"Resumed **$title**."))
-        emit(HostMsg.TurnEnd("resume-turn", "end_turn"))
+        emitMeta(id, title)
+        emit(
+          HostMsg.Transcript(
+            List(
+              TurnView(
+                "resume-turn",
+                user = Some(TurnUser("hello from disk")),
+                agent = s"Resumed **$title**.",
+                stopReason = Some("end_turn"),
+              )
+            )
+          )
+        )
         emit(HostMsg.SessionList(sessions, id, openPicker = false))
       case WebviewMsg.OpenSessionPicker =>
         emit(HostMsg.SessionList(sessions, "preview", openPicker = true))
@@ -161,6 +179,9 @@ final class PreviewBridge extends HostBridge:
   private def emit(msg: HostMsg): Unit =
     listener(msg)
 
+  private def emitMeta(sessionId: String = "preview", title: String = "Grok's Beard"): Unit =
+    emit(HostMsg.SessionMeta(sessionId, title, modeId, modes, modelId = modelId, availableModels = models))
+
   private def emitChanges(): Unit =
     val (add, del) = pending.foldLeft((0, 0)) { case ((a, d), f) => (a + f.additions, d + f.deletions) }
     emit(HostMsg.changes(ChangesSummary(pending.size, add, del, pending)))
@@ -168,17 +189,8 @@ end PreviewBridge
 
 object PreviewBridge:
   def hasSceneQuery: Boolean =
-    ascent.dom.window.location.search.contains("scene=")
+    BeardPath.sceneName(ascent.Location.parse(ascent.dom.window.location.search)).isDefined
 
   def sceneFromLocation: String =
-    val search = ascent.dom.window.location.search
-    val key    = "scene="
-    val idx    = search.indexOf(key)
-    if idx < 0 then "empty"
-    else
-      val rest = search.substring(idx + key.length)
-      val amp  = rest.indexOf('&')
-      val raw  = if amp < 0 then rest else rest.substring(0, amp)
-      if raw.isEmpty then "empty" else raw
-  end sceneFromLocation
+    BeardPath.sceneName(ascent.Location.parse(ascent.dom.window.location.search)).getOrElse("empty")
 end PreviewBridge

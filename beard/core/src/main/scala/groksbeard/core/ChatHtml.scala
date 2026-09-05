@@ -12,7 +12,7 @@ object ChatHtml:
     ).mkString("; ")
     val logo = logoUri.filter(_.nonEmpty).map(uri => s""" data-logo="${escape(uri)}"""").getOrElse("")
     s"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en"$logo>
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="$csp" />

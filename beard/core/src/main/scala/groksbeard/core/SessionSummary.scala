@@ -30,11 +30,26 @@ object SessionSummary:
 
   def title(summary: SessionSummary): String =
     val manual = summary.session_summary.filter(_ => summary.title_is_manual.contains(true))
-    manual
-      .orElse(summary.generated_title)
-      .orElse(summary.session_summary)
-      .filter(_.nonEmpty)
-      .getOrElse(summary.info.id)
+    val named  =
+      List(manual, summary.generated_title, summary.session_summary, summary.last_turn_summary).flatten
+        .map(_.trim)
+        .find(t => t.nonEmpty && !SessionIndex.isOpaqueId(t, summary.info.id))
+    named.getOrElse("Untitled session")
+
+  def epochMs(iso: String): Option[Long] =
+    try Some(java.time.Instant.parse(iso.trim).toEpochMilli)
+    catch case _: Exception => None
+
+  /** Last time the user used the session. Ignores metadata-only rewrites of updated_at. */
+  def lastUsedMs(summary: SessionSummary): Option[Long] =
+    summary.last_active_at.flatMap(epochMs)
+
+  def activityMs(summary: Option[SessionSummary], conversationMtimeMs: Option[Long], summaryMtimeMs: Long): Long =
+    val lastActive = summary.flatMap(lastUsedMs)
+    (lastActive.toList ++ conversationMtimeMs.toList).maxOption
+      .orElse(summary.flatMap(_.updated_at).flatMap(epochMs))
+      .orElse(summary.flatMap(_.created_at).flatMap(epochMs))
+      .getOrElse(summaryMtimeMs)
 
   def row(id: String, activityMs: Long, summary: Option[SessionSummary]): SessionRow =
     summary match
@@ -47,6 +62,6 @@ object SessionSummary:
           summary = s.session_summary.orElse(s.last_recap).filter(_.nonEmpty),
           lastTurn = s.last_turn_summary.filter(_.nonEmpty),
           modelId = s.current_model_id.filter(_.nonEmpty),
-          messages = s.num_chat_messages.orElse(s.num_messages),
+          messages = s.num_messages,
         )
 end SessionSummary

@@ -8,6 +8,7 @@ object HostDispatch:
       case WebviewMsg.Queue(text)                      => runtime.queue(text)
       case WebviewMsg.Cancel                           => runtime.cancel()
       case WebviewMsg.SetMode(id)                      => runtime.setMode(id)
+      case WebviewMsg.SetModel(id)                     => runtime.setModel(id)
       case WebviewMsg.CycleMode                        => runtime.cycleMode()
       case WebviewMsg.SlashPick(name)                  => runtime.slashPick(name)
       case WebviewMsg.NewSession                       => runtime.newSession()

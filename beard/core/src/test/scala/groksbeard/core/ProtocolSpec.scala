@@ -15,6 +15,21 @@ object ProtocolSpec extends ZIOSpecDefault:
         val json = msg.toJson
         assertTrue(json.fromJson[HostMsg] == Right(msg))
       },
+      test("sessionMeta models round-trip") {
+        val msg: HostMsg = HostMsg.SessionMeta(
+          "s1",
+          "Grok's Beard",
+          "normal",
+          modelId = "grok-4.6",
+          availableModels = List(ModelOption("grok-4.6", "Grok 4.6")),
+        )
+        val set: WebviewMsg = WebviewMsg.SetModel("grok-4.6")
+        assertTrue(msg.toJson.fromJson[HostMsg] == Right(msg), set.toJson.fromJson[WebviewMsg] == Right(set))
+      },
+      test("queued follow-ups round-trip") {
+        val msg: HostMsg = HostMsg.Queued(List(QueuedPrompt("q1", "later")))
+        assertTrue(msg.toJson.fromJson[HostMsg] == Right(msg))
+      },
       test("sessionList and resumeSession round-trip") {
         val list: HostMsg =
           HostMsg.SessionList(
@@ -78,6 +93,12 @@ object ProtocolSpec extends ZIOSpecDefault:
           plan.toJson.fromJson[HostMsg] == Right(plan),
           verdict.toJson.fromJson[WebviewMsg] == Right(verdict),
         )
+      },
+      test("transcript snapshot round-trips") {
+        val msg: HostMsg = HostMsg.Transcript(
+          List(TurnView("t1", user = Some(TurnUser("hello from disk")), agent = "welcome back"))
+        )
+        assertTrue(msg.toJson.fromJson[HostMsg] == Right(msg))
       },
       test("agent chunks and turnEnd round-trip") {
         val chunk: HostMsg = HostMsg.AgentChunk("t1", "**hi**")

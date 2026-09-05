@@ -9,6 +9,25 @@ final case class MentionFile(path: String, absPath: String) derives JsonCodec
 
 final case class ModeOption(id: String, name: String) derives JsonCodec
 
+final case class ModelOption(modelId: String, name: String, description: Option[String] = None) derives JsonCodec
+
+object ModelOption:
+  def label(id: String, models: List[ModelOption]): String =
+    models.find(_.modelId == id).map(_.name).filter(_.nonEmpty).getOrElse {
+      if id.nonEmpty then id else "Model"
+    }
+
+  def pick(query: String, models: List[ModelOption]): Option[ModelOption] =
+    val q = query.trim.toLowerCase
+    if q.isEmpty || models.isEmpty then None
+    else
+      models
+        .find(_.modelId.toLowerCase == q)
+        .orElse(models.find(_.name.toLowerCase == q))
+        .orElse(models.find(_.name.toLowerCase.contains(q)))
+        .orElse(models.find(_.modelId.toLowerCase.contains(q)))
+end ModelOption
+
 object ComposerQuery:
 
   def slashQuery(draft: String): Option[String] =

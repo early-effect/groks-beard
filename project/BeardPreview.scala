@@ -1,54 +1,66 @@
 import _root_.sbt.*
 import _root_.sbt.Keys.*
+import _root_.sbt.nio.Watch
 import ascent.preview.sbt.AscentPreviewPlugin.autoImport.*
 import ascent.preview.sbt.AscentPreviewPort
 
-/** Background serve for `~uiJS/ascentPreview`: LiveMain (Preview.routes ++ grok ACP), not stock PreviewMain. */
+/** `~uiJS/ascentPreview` starts LiveMain through `preview/bgRun`.
+  *
+  * Do not assemble `fullClasspath` into `java -cp`. sbt 2 exports that classpath as CAS jars;
+  * a module in this build is started with `run` / `bgRun`.
+  */
 object BeardPreview:
-  private val jdk24PlusRunOptions: Seq[String] = Seq(
+  val liveMain: String  = "groksbeard.preview.LiveMain"
+  val PreviewId: String = "preview"
+
+  val jdk24PlusRunOptions: Seq[String] = Seq(
     "--sun-misc-unsafe-memory-access=allow",
     "--enable-native-access=ALL-UNNAMED",
   )
 
-  val liveMain: String = "groksbeard.preview.LiveMain"
+  def isLiveJob(job: JobHandle): Boolean =
+    val key   = job.spawningTask
+    val label = key.key.label
+    val inPreview = key.scope.project match
+      case Select(ProjectRef(_, id)) => id == PreviewId
+      case Select(LocalProject(id))  => id == PreviewId
+      case _                         => false
+    (inPreview && (label == "bgRun" || label == "bgRunMain")) ||
+    label == ascentPreviewServe.key.label
 
-  def serveLive: Def.Initialize[Task[Unit]] = Def.task {
+  def stopLive(service: BackgroundJobService): Unit =
+    service.jobs.filter(isLiveJob).foreach { h =>
+      service.stop(h)
+      service.waitForTry(h)
+      ()
+    }
+
+  def watchStop: (Watch.Action, String, Int, State) => State =
+    (_, _, _, state) =>
+      stopLive(Project.extract(state).get(bgJobService))
+      state
+
+  def serveLive: Def.Initialize[Task[Unit]] = Def.taskDyn {
     val service   = bgJobService.value
     val log       = streams.value.log
-    val converter = fileConverter.value
-    val st        = state.value
-    val rs        = Keys.resolvedScoped.value
     val root      = ascentPreviewRoot.value
     val requested = ascentPreviewPort.value
-    val cp        = ascentPreviewClasspath.value
     val autoOpen  = ascentPreviewAutoOpen.value
     val base      = baseDirectory.value
-    val repoRoot  = (ThisBuild / baseDirectory).value
-    val already   = service.jobs.exists { job =>
-      job.spawningTask.key.label == ascentPreviewServe.key.label &&
-      job.spawningTask.scope.project == rs.scope.project
-    }
-    if already then log.info(s"ascentPreviewServe: already running ${root.getAbsolutePath}")
+    if service.jobs.exists(isLiveJob) then
+      Def.task {
+        log.info(s"ascentPreviewServe: already running ${root.getAbsolutePath}")
+        ()
+      }
+    else if !root.exists then
+      sys.error(s"ascentPreviewServe: root does not exist: $root (run ascentPreviewRebuild first)")
     else
-      if !root.exists then
-        sys.error(s"ascentPreviewServe: root does not exist: $root (run ascentPreviewRebuild first)")
       val port = AscentPreviewPort.resolve(requested)
       IO.createDirectory(base / "target")
       IO.write(base / "target" / "ascent-preview.port", port.toString)
-      val jars =
-        cp.map(af => converter.toPath(af.data).toFile.getAbsolutePath).mkString(java.io.File.pathSeparator)
-      val args = Seq("-cp", jars, liveMain, port.toString, root.getAbsolutePath) ++
-        (if autoOpen then Seq("--open") else Nil)
-      log.info(s"ascentPreviewServe: $liveMain on http://localhost:$port/ ${root.getAbsolutePath}")
-      service.runInBackground(rs, st) { (logger, _) =>
-        val opts = ForkOptions()
-          .withOutputStrategy(Some(LoggedOutput(logger)))
-          .withRunJVMOptions(jdk24PlusRunOptions.toVector)
-          .withWorkingDirectory(repoRoot)
-        val code = Fork.java(opts, args)
-        if code != 0 then sys.error(s"LiveMain exited $code")
-      }
-      ()
-    end if
+      val extra =
+        s" $port ${root.getAbsolutePath}" + (if autoOpen then " --open" else "")
+      log.info(s"ascentPreviewServe: preview/bgRun ($liveMain)$extra")
+      (LocalProject(PreviewId) / Compile / bgRun).toTask(extra).map(_ => ())
   }
 end BeardPreview

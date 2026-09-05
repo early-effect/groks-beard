@@ -39,7 +39,13 @@ final case class InitializeResult(protocolVersion: Int, agentCapabilities: Agent
 
 final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil) derives JsonCodec
 final case class SessionModeState(currentModeId: String, availableModes: List[ModeOption] = Nil) derives JsonCodec
-final case class SessionNewResult(sessionId: String, modes: Option[SessionModeState] = None) derives JsonCodec
+final case class SessionModelState(currentModelId: String, availableModels: List[ModelOption] = Nil) derives JsonCodec
+final case class SessionNewResult(
+    sessionId: String,
+    modes: Option[SessionModeState] = None,
+    models: Option[SessionModelState] = None,
+) derives JsonCodec
+final case class SessionSetModelParams(sessionId: String, modelId: String) derives JsonCodec
 final case class SessionLoadParams(sessionId: String, cwd: String = ".", mcpServers: List[Json] = Nil) derives JsonCodec
 final case class SessionLoadResult(sessionId: String) derives JsonCodec
 final case class SessionSetModeParams(sessionId: String, modeId: String) derives JsonCodec

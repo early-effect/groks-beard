@@ -1,6 +1,7 @@
 import ascent.preview.sbt.AscentPreviewPlugin
 import ascent.preview.sbt.AscentPreviewPlugin.autoImport.*
 import chekhov.sbt.ChekhovPlugin.autoImport.*
+import sbt.nio.Keys.watchOnTermination
 import org.scalajs.linker.interface.ModuleKind
 import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport.*
 import rocks.earlyeffect.splice.SplicePlugin.autoImport.*
@@ -125,8 +126,21 @@ lazy val preview = (project in file("beard/preview"))
     skipPublish,
     scalacOptions ++= commonScalacOptions,
     MyVersions.previewServer,
+    zioTestSettings,
     Compile / mainClass       := Def.uncached(Some("groksbeard.preview.LiveMain")),
     Compile / run / mainClass := Def.uncached(Some("groksbeard.preview.LiveMain")),
+    Compile / run / fork      := true,
+    Compile / run / javaOptions ++= BeardPreview.jdk24PlusRunOptions,
+    Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
+    Compile / run / forkOptions   := Def.uncached {
+      (Compile / forkOptions).value
+        .withWorkingDirectory((ThisBuild / baseDirectory).value)
+        .withRunJVMOptions(
+          (Compile / forkOptions).value.runJVMOptions ++ BeardPreview.jdk24PlusRunOptions.toVector
+        )
+        .withConnectInput(false)
+    },
+    Compile / bgRun / bgCopyClasspath := false,
   )
 
 lazy val ui = (projectMatrix in file("beard/ui"))
@@ -159,8 +173,8 @@ lazy val ui = (projectMatrix in file("beard/ui"))
           ),
           ascentPreviewAutoServe := true,
           ascentPreviewServe     := Def.uncached(BeardPreview.serveLive.value),
-          ascentPreviewClasspath := Def.uncached((LocalProject("preview") / Compile / fullClasspath).value),
-          ascentPreviewRebuild            := Def.uncached {
+          ascentPreview / watchOnTermination := BeardPreview.watchStop,
+          ascentPreviewRebuild               := Def.uncached {
             val dest = ascentPreviewStage.value
             val logo = (ThisBuild / baseDirectory).value / "beard" / "media" / "logo.png"
             IO.copyFile(logo, dest / "logo.png")

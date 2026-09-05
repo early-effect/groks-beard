@@ -27,7 +27,12 @@ object NioSessionFs extends SessionFs:
     if !Files.isRegularFile(p) then None
     else Some(Files.readString(p))
 
-  def deleteTree(path: String): Unit =
+  override def writeText(path: String, text: String): Unit =
+    val p = Path.of(path)
+    Option(p.getParent).foreach(parent => Files.createDirectories(parent))
+    Files.writeString(p, text)
+
+  override def deleteTree(path: String): Unit =
     val p = Path.of(path)
     if Files.exists(p) then
       val walk = Files.walk(p)

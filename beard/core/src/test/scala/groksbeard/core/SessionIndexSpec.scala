@@ -220,6 +220,11 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionCommands.intercept("/resume").contains(ClientCommand("resume")),
           SessionCommands.intercept("/model grok-4.6").contains(ClientCommand("model", "grok-4.6")),
           SessionCommands.intercept("/m").contains(ClientCommand("m")),
+          SessionCommands.intercept("/rename Plan").contains(ClientCommand("rename", "Plan")),
+          SessionCommands.intercept("/title").contains(ClientCommand("title")),
+          SessionCommands.intercept("/delete").contains(ClientCommand("delete")),
+          merged.exists(_.name == "rename"),
+          merged.exists(_.name == "delete"),
           SessionCommands.intercept("hello").isEmpty,
         )
       },

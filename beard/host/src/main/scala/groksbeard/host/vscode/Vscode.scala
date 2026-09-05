@@ -46,6 +46,12 @@ class WebviewViewProviderOptions(
     val webviewOptions: WebviewPanelOptions
 ) extends js.Object
 
+class InputBoxOptions(
+    val prompt: String,
+    val value: String = "",
+    val placeHolder: String = "",
+) extends js.Object
+
 @js.native
 trait Webview extends js.Object:
   var html: String                                                         = js.native
@@ -85,6 +91,7 @@ trait WindowNs extends js.Object:
   def showInformationMessage(message: String, items: String*): js.Promise[js.UndefOr[String]] =
     js.native
   def showWarningMessage(message: String, items: String*): js.Promise[js.UndefOr[String]]    = js.native
+  def showInputBox(options: InputBoxOptions): js.Promise[js.UndefOr[String]]                 = js.native
   def createOutputChannel(name: String): OutputChannel                                       = js.native
   def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem                      = js.native
   def registerTreeDataProvider[T](viewId: String, provider: TreeDataProvider[T]): Disposable = js.native

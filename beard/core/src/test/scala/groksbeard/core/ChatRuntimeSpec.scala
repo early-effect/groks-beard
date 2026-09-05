@@ -607,6 +607,101 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           case _                   => false
         })
       },
+      test("renameSession posts the new title on sessionMeta and the list") {
+        var rows   = List(SessionRow("sess_test", "Old"))
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(
+          posted += _,
+          listSessions = () => rows,
+          renameOnDisk = (id, op) =>
+            op match
+              case RenameOp.Manual(t) =>
+                rows = rows.map(r => if r.id == id then r.copy(title = t) else r)
+                rows.find(_.id == id)
+              case RenameOp.Auto => rows.find(_.id == id),
+        )
+        rt.ready()
+        posted.clear()
+        rt.renameSession("sess_test", RenameOp.Manual("Plan"))
+        assertTrue(
+          posted.exists {
+            case m: HostMsg.SessionMeta => m.title == "Plan"
+            case _                      => false
+          },
+          posted.exists {
+            case HostMsg.SessionList(sessions, _, _) =>
+              sessions.exists(r => r.id == "sess_test" && r.title == "Plan")
+            case _ => false
+          },
+        )
+      },
+      test("send /rename applies a manual title and is not a prompt") {
+        var rows   = List(SessionRow("sess_test", "Old"))
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(
+          posted += _,
+          listSessions = () => rows,
+          renameOnDisk = (id, op) =>
+            op match
+              case RenameOp.Manual(t) =>
+                rows = rows.map(r => if r.id == id then r.copy(title = t) else r)
+                rows.find(_.id == id)
+              case RenameOp.Auto => rows.find(_.id == id),
+        )
+        rt.ready()
+        posted.clear()
+        rt.send("/rename Plan")
+        assertTrue(
+          posted.exists {
+            case m: HostMsg.SessionMeta => m.title == "Plan"
+            case _                      => false
+          },
+          !posted.exists {
+            case HostMsg.UserMessage(_, "/rename Plan", _, _) => true
+            case _                                            => false
+          },
+        )
+      },
+      test("send /delete does not wipe without confirm") {
+        var deleted = false
+        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt      = ChatRuntime(
+          posted += _,
+          deleteOnDisk = _ =>
+            deleted = true; true,
+        )
+        rt.ready()
+        posted.clear()
+        rt.send("/delete")
+        assertTrue(
+          !deleted,
+          !posted.exists {
+            case HostMsg.ClearTranscript => true
+            case _                       => false
+          },
+        )
+      },
+      test("deleteSession of another id refreshes the open picker") {
+        var rows   = List(SessionRow("keep", "Keep", activityMs = 2), SessionRow("gone", "Gone", activityMs = 1))
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(
+          posted += _,
+          listSessions = () => rows,
+          deleteOnDisk = id =>
+            rows = rows.filterNot(_.id == id)
+            true,
+        )
+        rt.ready()
+        rt.openPicker()
+        posted.clear()
+        rt.deleteSession("gone")
+        assertTrue(
+          posted.exists {
+            case HostMsg.SessionList(sessions, _, true) => sessions.map(_.id) == List("keep")
+            case _                                      => false
+          }
+        )
+      },
     )
 
   def loadReplay(id: RpcId, sessionId: String, user: String, agent: String): String =

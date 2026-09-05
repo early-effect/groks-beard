@@ -21,7 +21,13 @@ object NodeSessionFs extends SessionFs:
     try if nodeFs.existsSync(path) then Some(nodeFs.readFileSync(path, "utf8")) else None
     catch case _: Throwable => None
 
-  def deleteTree(path: String): Unit =
+  override def writeText(path: String, text: String): Unit =
+    try
+      nodeFs.mkdirSync(nodePath.dirname(path), js.Dynamic.literal(recursive = true))
+      nodeFs.writeFileSync(path, text, "utf8")
+    catch case _: Throwable => ()
+
+  override def deleteTree(path: String): Unit =
     try nodeFs.rmSync(path, js.Dynamic.literal(recursive = true, force = true))
     catch case _: Throwable => ()
 end NodeSessionFs

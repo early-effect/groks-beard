@@ -28,7 +28,7 @@ final class PreviewBridge extends HostBridge:
     )
   )
 
-  private val sessions = List(
+  private var sessions = List(
     SessionRow("preview", "New session", activityMs = 20),
     SessionRow(
       "disk-1",
@@ -47,10 +47,14 @@ final class PreviewBridge extends HostBridge:
 
   private var pending: List[ChangeFileView] =
     List(ChangeFileView(PreviewDiffs.MainPath, "modify", 2, 1, wholeFile = true))
+  private var currentId  = ""
+  private var pickerOpen = false
 
   def post(msg: WebviewMsg): Unit =
     msg match
       case WebviewMsg.Ready =>
+        currentId = ""
+        pickerOpen = false
         emit(HostMsg.Ready)
         emitMeta("", "Grok's Beard")
         emit(HostMsg.AvailableCommands(commands))
@@ -132,10 +136,14 @@ final class PreviewBridge extends HostBridge:
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
       case WebviewMsg.NewSession =>
+        currentId = ""
+        pickerOpen = false
         emit(HostMsg.ClearTranscript)
         emitMeta("", "Grok's Beard")
         emit(HostMsg.SessionList(sessions, "", openPicker = false))
       case WebviewMsg.ResumeSession(id) =>
+        currentId = id
+        pickerOpen = false
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id)
         emit(HostMsg.ClearTranscript)
         emitMeta(id, title)
@@ -153,9 +161,31 @@ final class PreviewBridge extends HostBridge:
         )
         emit(HostMsg.SessionList(sessions, id, openPicker = false))
       case WebviewMsg.OpenSessionPicker =>
-        emit(HostMsg.SessionList(sessions, "preview", openPicker = true))
+        pickerOpen = true
+        emit(HostMsg.SessionList(sessions, currentId, openPicker = true))
       case WebviewMsg.CloseSessionPicker =>
-        emit(HostMsg.SessionList(sessions, "preview", openPicker = false))
+        pickerOpen = false
+        emit(HostMsg.SessionList(sessions, currentId, openPicker = false))
+      case WebviewMsg.RenameSession(id, title, auto) =>
+        val target = if id.nonEmpty then id else currentId
+        sessions = sessions.map { row =>
+          if row.id != target then row
+          else if auto then row
+          else row.copy(title = title)
+        }
+        val shown = sessions.find(_.id == target).map(_.title).getOrElse(title)
+        if target == currentId then emitMeta(target, shown)
+        emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
+      case WebviewMsg.DeleteSession(id) =>
+        val target = if id.nonEmpty then id else currentId
+        sessions = sessions.filterNot(_.id == target)
+        if target == currentId then
+          currentId = ""
+          pickerOpen = false
+          emit(HostMsg.ClearTranscript)
+          emitMeta("", "Grok's Beard")
+          emit(HostMsg.SessionList(sessions, "", openPicker = false))
+        else emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
       case WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
         ()
       case WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>

@@ -77,7 +77,10 @@ object LiveSession:
                   NioSessionFs.deleteTree(path)
                 )
                 t.setDaemon(true)
-                t.start(),
+                t.start()
+              ,
+              renameOnDisk = (id, op) => SessionEdit.rename(NioSessionFs, home, cwd, id, op),
+              deleteOnDisk = id => SessionEdit.delete(NioSessionFs, home, cwd, id),
             )
             note.set(rt.noteAgentLine)
             val shutdown = ZIO.succeed {

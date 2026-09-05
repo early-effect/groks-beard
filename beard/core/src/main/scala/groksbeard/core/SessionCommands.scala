@@ -8,8 +8,11 @@ object SessionCommands:
   val Resume: SlashCommand = SlashCommand("resume", "Resume a previous session")
   val Home: SlashCommand   = SlashCommand("home", "Return to the session list")
   val Model: SlashCommand  = SlashCommand("model", "Switch model")
+  val Rename: SlashCommand = SlashCommand("rename", "Rename this session")
+  val Title: SlashCommand  = SlashCommand("title", "Rename this session")
+  val Delete: SlashCommand = SlashCommand("delete", "Delete this session")
 
-  val All: List[SlashCommand] = List(New, Clear, Resume, Home, Model)
+  val All: List[SlashCommand] = List(New, Clear, Resume, Home, Model, Rename, Title, Delete)
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
     val names = advertised.map(_.name.toLowerCase).toSet
@@ -30,6 +33,13 @@ object SessionCommands:
     val n = name.stripPrefix("/").toLowerCase
     n == "model" || n == "m"
 
+  def isRename(name: String): Boolean =
+    val n = name.stripPrefix("/").toLowerCase
+    n == "rename" || n == "title"
+
+  def isDelete(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "delete"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -40,7 +50,8 @@ object SessionCommands:
         if i < 0 then (rest, "")
         else (rest.take(i), rest.drop(i).trim)
       val name = raw.toLowerCase
-      if isNew(name) || isResume(name) || isHome(name) || isModel(name) then Some(ClientCommand(name, args))
+      if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isRename(name) || isDelete(name) then
+        Some(ClientCommand(name, args))
       else None
     end if
   end intercept

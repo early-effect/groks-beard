@@ -45,6 +45,16 @@ object ProtocolSpec extends ZIOSpecDefault:
           neu.toJson.fromJson[WebviewMsg] == Right(neu),
         )
       },
+      test("renameSession and deleteSession round-trip") {
+        val rename: WebviewMsg = WebviewMsg.RenameSession("s1", "Plan")
+        val auto: WebviewMsg   = WebviewMsg.RenameSession("s1", "", auto = true)
+        val del: WebviewMsg    = WebviewMsg.DeleteSession("s1")
+        assertTrue(
+          rename.toJson.fromJson[WebviewMsg] == Right(rename),
+          auto.toJson.fromJson[WebviewMsg] == Right(auto),
+          del.toJson.fromJson[WebviewMsg] == Right(del),
+        )
+      },
       test("WebviewMsg send round-trips") {
         val msg = WebviewMsg.Send("hello")
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))

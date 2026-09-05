@@ -121,7 +121,10 @@ final class ChatView(
             val path = SessionIndex.sessionPath(home, cwd, id)
             val _    = js.timers.setTimeout(SessionIndex.EmptyGraceMs.toDouble) {
               NodeSessionFs.deleteTree(path)
-            },
+            }
+          ,
+          renameOnDisk = (id, op) => SessionEdit.rename(NodeSessionFs, home, cwd, id, op),
+          deleteOnDisk = id => SessionEdit.delete(NodeSessionFs, home, cwd, id),
         )
         note = rt.noteAgentLine
         runtime = Some(rt)

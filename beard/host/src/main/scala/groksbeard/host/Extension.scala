@@ -100,6 +100,47 @@ object Extension:
       vscode.commands.registerCommand("groksBeard.resumeSession", () => chat.current.foreach(_.openPicker()))
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "groksBeard.renameSession",
+        () =>
+          chat.current.foreach { rt =>
+            val current = rt.focusedTitle
+            val _       = vscode.window
+              .showInputBox(new InputBoxOptions("Session title", current, "New title, or --auto"))
+              .`then` { (value: js.UndefOr[String]) =>
+                value.toOption.map(_.trim).filter(_.nonEmpty).foreach { title =>
+                  SessionEdit.parseRename(title) match
+                    case Right(op)                   => rt.renameSession(rt.focusedId.getOrElse(""), op)
+                    case Left(err) if err != "empty" =>
+                      val _ = vscode.window.showErrorMessage(err)
+                    case _ => ()
+                }
+                js.undefined
+              }
+          },
+      )
+    )
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "groksBeard.deleteSession",
+        () =>
+          chat.current.foreach { rt =>
+            val id = rt.focusedId.getOrElse("")
+            if id.isEmpty then
+              val _ = vscode.window.showWarningMessage("No session to delete.")
+            else
+              val title = Option(rt.focusedTitle).filter(_.nonEmpty).getOrElse("this session")
+              val _     = vscode.window
+                .showWarningMessage(s"Delete $title? This cannot be undone.", "Delete", "Cancel")
+                .`then` { (pick: js.UndefOr[String]) =>
+                  if pick.toOption.contains("Delete") then rt.deleteSession(id)
+                  js.undefined
+                }
+            end if
+          },
+      )
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.cycleMode", () => chat.current.foreach(_.cycleMode()))
     )
     context.subscriptions.push(

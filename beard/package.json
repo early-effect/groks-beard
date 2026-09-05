@@ -92,6 +92,14 @@
         "title": "Grok's Beard: Resume Session"
       },
       {
+        "command": "groksBeard.renameSession",
+        "title": "Grok's Beard: Rename Session"
+      },
+      {
+        "command": "groksBeard.deleteSession",
+        "title": "Grok's Beard: Delete Session"
+      },
+      {
         "command": "groksBeard.cycleMode",
         "title": "Grok's Beard: Cycle Mode"
       },

@@ -46,7 +46,17 @@ final class PreviewBridge extends HostBridge:
   )
 
   private var pending: List[ChangeFileView] =
-    List(ChangeFileView(PreviewDiffs.MainPath, "modify", 2, 1, wholeFile = true))
+    List(
+      ChangeFileView(
+        PreviewDiffs.MainPath,
+        "modify",
+        2,
+        1,
+        wholeFile = true,
+        turnId = "t3",
+        turnTitle = "Patch Main.scala",
+      )
+    )
   private var currentId  = ""
   private var pickerOpen = false
 
@@ -198,6 +208,18 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.ClearDiff)
       case WebviewMsg.UndoChange(path) =>
         pending = pending.filterNot(_.path == path)
+        emitChanges()
+        emit(HostMsg.ClearDiff)
+      case WebviewMsg.KeepTurn(turnId) =>
+        pending = pending.filterNot(_.turnId == turnId)
+        emitChanges()
+        emit(HostMsg.ClearDiff)
+      case WebviewMsg.UndoTurn(turnId) =>
+        pending = pending.filterNot(_.turnId == turnId)
+        emitChanges()
+        emit(HostMsg.ClearDiff)
+      case WebviewMsg.KeepAll | WebviewMsg.UndoAll =>
+        pending = Nil
         emitChanges()
         emit(HostMsg.ClearDiff)
       case WebviewMsg.CloseDiff =>

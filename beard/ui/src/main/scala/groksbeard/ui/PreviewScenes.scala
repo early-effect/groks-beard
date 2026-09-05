@@ -107,7 +107,17 @@ object PreviewScenes:
               1,
               2,
               1,
-              List(ChangeFileView("/tmp/Main.scala", "modify", 2, 1, wholeFile = true)),
+              List(
+                ChangeFileView(
+                  "/tmp/Main.scala",
+                  "modify",
+                  2,
+                  1,
+                  wholeFile = true,
+                  turnId = "t3",
+                  turnTitle = "Patch Main.scala",
+                )
+              ),
             )
           ),
         )

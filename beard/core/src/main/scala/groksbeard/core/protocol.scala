@@ -159,6 +159,10 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("openChanges") case OpenChanges
   @jsonHint("keepChange") case KeepChange(path: String)
   @jsonHint("undoChange") case UndoChange(path: String)
+  @jsonHint("keepTurn") case KeepTurn(turnId: String)
+  @jsonHint("undoTurn") case UndoTurn(turnId: String)
+  @jsonHint("keepAll") case KeepAll
+  @jsonHint("undoAll") case UndoAll
   @jsonHint("closeDiff") case CloseDiff
   @jsonHint("newSession") case NewSession
   @jsonHint("resumeSession") case ResumeSession(sessionId: String)

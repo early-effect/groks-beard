@@ -180,6 +180,27 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           },
         )
       },
+      test("keepAll drops every pending file") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        rt.send("edit Main")
+        assertTrue(rt.pendingChanges.nonEmpty, rt.pendingSets.nonEmpty)
+        rt.keepAll()
+        assertTrue(rt.pendingChanges.isEmpty, rt.pendingSets.isEmpty)
+      },
+      test("changes summary tags files with the turn") {
+        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
+        val rt     = ChatRuntime(posted += _)
+        rt.ready()
+        posted.clear()
+        rt.send("edit Main")
+        val tagged = posted.toList.collect { case c: HostMsg.Changes => c }.last
+        assertTrue(
+          tagged.files.head.turnId.nonEmpty,
+          tagged.files.head.turnTitle.nonEmpty,
+        )
+      },
       test("openDiff posts a sidebar preview of the pending file") {
         val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
         val rt     = ChatRuntime(posted += _)

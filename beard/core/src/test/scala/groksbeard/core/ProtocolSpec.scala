@@ -124,13 +124,17 @@ object ProtocolSpec extends ZIOSpecDefault:
             List(ChangeFileView("/tmp/Main.scala", "modify", 3, 1, wholeFile = true)),
           )
         )
-        val keep: WebviewMsg = WebviewMsg.KeepChange("/tmp/Main.scala")
-        val undo: WebviewMsg = WebviewMsg.UndoChange("/tmp/Main.scala")
-        val diff: HostMsg    = HostMsg.DiffPreview("/tmp/Main.scala", "old", "new", wholeFile = true)
+        val keep: WebviewMsg     = WebviewMsg.KeepChange("/tmp/Main.scala")
+        val undo: WebviewMsg     = WebviewMsg.UndoChange("/tmp/Main.scala")
+        val keepTurn: WebviewMsg = WebviewMsg.KeepTurn("t3")
+        val undoAll: WebviewMsg  = WebviewMsg.UndoAll
+        val diff: HostMsg        = HostMsg.DiffPreview("/tmp/Main.scala", "old", "new", wholeFile = true)
         assertTrue(
           summary.toJson.fromJson[HostMsg] == Right(summary),
           keep.toJson.fromJson[WebviewMsg] == Right(keep),
           undo.toJson.fromJson[WebviewMsg] == Right(undo),
+          keepTurn.toJson.fromJson[WebviewMsg] == Right(keepTurn),
+          undoAll.toJson.fromJson[WebviewMsg] == Right(undoAll),
           diff.toJson.fromJson[HostMsg] == Right(diff),
         )
       },

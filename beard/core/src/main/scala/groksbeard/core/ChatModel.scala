@@ -70,6 +70,8 @@ final case class ChangeFileView(
     deletions: Int,
     wholeFile: Boolean = true,
     undoDisabled: Option[String] = None,
+    turnId: String = "",
+    turnTitle: String = "",
 ) derives JsonCodec
 
 final case class ChangesSummary(

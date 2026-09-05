@@ -118,6 +118,7 @@ object ChatApp:
         flexDirection.column,
         flexGrow(1.0),
         minHeight.px(0),
+        minWidth.px(0),
         overflowY.auto,
       )
 
@@ -489,12 +490,22 @@ object ChatApp:
         flexDirection.column,
         flexGrow(1.0),
         overflowY.auto,
+        overflowX.hidden,
+        overflowAnchor.none,
         padding.px(12),
         gap.px(12),
         minHeight.px(0),
+        minWidth.px(0),
       )
 
-  object Turn extends CssClass(display.flex, flexDirection.column, gap.px(8))
+  object Turn
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(8),
+        minWidth.px(0),
+        maxWidth.pct(100),
+      )
 
   object UserMsg
       extends CssClass(
@@ -507,7 +518,30 @@ object ChatApp:
         whiteSpace.preWrap,
       )
 
-  object AgentMsg extends CssClass(fontSize.px(13), color(fg))
+  object AgentMsg
+      extends CssClass(
+        fontSize.px(13),
+        color(fg),
+        whiteSpace.preWrap,
+        overflowWrap.anywhere,
+        minWidth.px(0),
+        maxWidth.pct(100),
+        Selector(" p", margin.zero),
+        Selector(" pre", margin.zero, whiteSpace.preWrap, overflowWrap.anywhere),
+        Selector(" h1", margin.zero),
+        Selector(" h2", margin.zero),
+        Selector(" h3", margin.zero),
+        Selector(" ul", margin.zero),
+        Selector(" blockquote", margin.zero),
+      )
+
+  object ThoughtBody
+      extends CssClass(
+        whiteSpace.preWrap,
+        overflowWrap.anywhere,
+        margin.zero,
+        maxWidth.pct(100),
+      )
 
   object ThoughtBox
       extends CssClass(
@@ -516,6 +550,18 @@ object ChatApp:
         border(Border.solid(1.px, widgetBorder)),
         borderRadius.px(6),
         padding.px(6),
+        minWidth.px(0),
+        maxWidth.pct(100),
+        overflowX.hidden,
+        boxSizing.borderBox,
+        Selector(" summary", cursor.pointer, overflowWrap.anywhere),
+        Selector(
+          " pre",
+          whiteSpace.preWrap,
+          overflowWrap.anywhere,
+          margin.zero,
+          maxWidth.pct(100),
+        ),
       )
 
   object ToolBox
@@ -524,6 +570,11 @@ object ChatApp:
         border(Border.solid(1.px, widgetBorder)),
         borderRadius.px(6),
         padding.px(6),
+        minWidth.px(0),
+        maxWidth.pct(100),
+        overflowX.hidden,
+        boxSizing.borderBox,
+        Selector(" pre", whiteSpace.preWrap, overflowWrap.anywhere, margin.zero, maxWidth.pct(100)),
       )
 
   object Cards
@@ -784,25 +835,31 @@ object ChatApp:
         .mapZIO(_ => wallMs.flatMap(nowMs.set))
         .runDrain
         .forkScoped
-      _ <- ZStream
-        .asyncScoped[Any, Nothing, HostMsg](
-          emit =>
-            ZIO.succeed {
-              bridge.onHost { msg =>
-                val want = waiting.get()
-                if ChatModel.dropHost(want, msg) then ()
-                else
-                  if ChatModel.catchesUp(want, msg) then waiting.set(None)
-                  emit(ZIO.succeed(Chunk.single(msg)))
-              }
-              bridge.post(WebviewMsg.Ready)
-              ComposerQuery.mentionQuery(initialDraft).foreach { q =>
-                bridge.post(WebviewMsg.MentionQuery(q))
-              }
-            } *> bound.succeed(()),
-          outputBuffer = 4096,
-        )
-        .mapZIO(msg => wallMs.flatMap(now => chat.update(ChatModel.applyMsg(_, msg, now))))
+      _ <- FrameBurst(
+        ZStream
+          .asyncScoped[Any, Nothing, HostMsg](
+            emit =>
+              ZIO.succeed {
+                bridge.onHost { msg =>
+                  val want = waiting.get()
+                  if ChatModel.dropHost(want, msg) then ()
+                  else
+                    if ChatModel.catchesUp(want, msg) then waiting.set(None)
+                    emit(ZIO.succeed(Chunk.single(msg)))
+                }
+                bridge.post(WebviewMsg.Ready)
+                ComposerQuery.mentionQuery(initialDraft).foreach { q =>
+                  bridge.post(WebviewMsg.MentionQuery(q))
+                }
+              } *> bound.succeed(()),
+            outputBuffer = 256,
+          )
+      )
+        .mapZIO { batch =>
+          wallMs.flatMap { now =>
+            chat.update(c => batch.foldLeft(c)((m, msg) => ChatModel.applyMsg(m, msg, now)))
+          }
+        }
         .runDrain
         .forkScoped
       _ <- bound.await
@@ -1574,6 +1631,8 @@ object ChatApp:
     )
 
   private def renderTurn(bridge: HostBridge, id: String, turn: Squawk[TurnView]): ascent.ast.UI[Any] =
+    val parts = turn.map(ChatMarkdown.parts)
+    val tail  = parts.map(_._2)
     E.section(
       Turn,
       TestId(s"turn-$id"),
@@ -1585,12 +1644,20 @@ object ChatApp:
           ThoughtBox,
           TestId(s"thought-$id"),
           E.summary(turn.map(t => Thought.summaryLabel(t.thought, t.stopReason.nonEmpty))),
-          E.pre(turn.map(_.thought)),
+          E.pre(ThoughtBody, turn.map(_.thought)),
         )
       ),
       turn.map(t => renderTools(bridge, t.tools)),
       when(turn.map(_.agent.nonEmpty))(
-        E.div(AgentMsg, TestId(s"agent-$id"), turn.map(t => ChatMarkdown.render(t.agent)))
+        E.div(
+          AgentMsg,
+          TestId(s"agent-$id"),
+          forEach(parts.map(_._1))(_._1) { pair =>
+            ChatMarkdown.block(pair._2)
+          },
+          when(tail.map(_.startsWith("```")))(E.pre(E.code(tail))),
+          when(tail.map(t => t.nonEmpty && !t.startsWith("```")))(E.p(tail)),
+        )
       ),
       when(turn.map(t => t.stopReason.exists(_ != "end_turn")))(
         E.div(StopReason, turn.map(_.stopReason.getOrElse("")))

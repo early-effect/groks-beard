@@ -2,6 +2,7 @@ package groksbeard.host
 
 import groksbeard.core.*
 import groksbeard.host.vscode.*
+import zio.*
 import zio.json.*
 
 import scala.scalajs.js
@@ -21,7 +22,7 @@ final class ChatView(
   def current: Option[ChatRuntime] = runtime
 
   def dispose(): Unit =
-    runtime.foreach(_.close())
+    runtime.foreach(rt => HostRuntime.runUIO(rt.close))
     runtime = None
 
   def resolveWebviewView(
@@ -42,31 +43,26 @@ final class ChatView(
       logoUri = Some(logoUri.asString),
       ctrlEnterToSend = readSettings().useCtrlEnterToSend,
     )
-    def post(msg: HostMsg): Unit =
-      val _ = webview.postMessage(js.JSON.parse(msg.toJson))
-      msg match
-        case HostMsg.Changes(fileCount, additions, deletions, _) =>
-          status.text =
-            if fileCount == 0 then "$(beard) Grok"
-            else s"$$(diff) $fileCount  +$additions/-$deletions"
-          if fileCount > 0 then status.show() else status.hide()
-        case HostMsg.UserMessage(_, _, _, _) =>
-          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", true)
-        case HostMsg.TurnEnd(_, _) =>
-          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
-        case HostMsg.ClearTranscript =>
-          val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
-        case _ => ()
-      end match
-      ()
-    end post
-    val ports = ReviewPorts(
-      readDisk = review.readDisk,
-      openNativeDiffs = review.open,
-      applyUndo = review.applyUndo,
-      onStoreChange = () => tree.refresh(),
-    )
-    bindAgent(post, ports)
+    def post(msg: HostMsg): UIO[Unit] =
+      ZIO.succeed {
+        val _ = webview.postMessage(js.JSON.parse(msg.toJson))
+        msg match
+          case HostMsg.Changes(fileCount, additions, deletions, _) =>
+            status.text =
+              if fileCount == 0 then "$(beard) Grok"
+              else s"$$(diff) $fileCount  +$additions/-$deletions"
+            if fileCount > 0 then status.show() else status.hide()
+          case HostMsg.UserMessage(_, _, _, _) =>
+            val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", true)
+          case HostMsg.TurnEnd(_, _) =>
+            val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
+          case HostMsg.ClearTranscript =>
+            val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
+          case _ => ()
+        end match
+        ()
+      }
+    bindAgent(post)
     webview.onDidReceiveMessage { raw =>
       js.JSON.stringify(raw).fromJson[WebviewMsg].foreach { msg =>
         runtime match
@@ -76,21 +72,20 @@ final class ChatView(
               case WebviewMsg.AddSelection           => addSelection()
               case WebviewMsg.SetSetting(key, value) =>
                 writeSetting(key, value)
-                HostDispatch(rt, msg, post)
-              case other => HostDispatch(rt, other, post)
+                HostRuntime.runUIO(HostDispatch(rt, msg, post))
+              case other => HostRuntime.runUIO(HostDispatch(rt, other, post))
           case None =>
             val err = missingCli.getOrElse("Grok CLI not found.")
             msg match
               case WebviewMsg.Ready =>
-                post(HostMsg.Ready)
-                post(HostMsg.Error(err))
-              case _ => post(HostMsg.Error(err))
+                HostRuntime.runUIO(post(HostMsg.Ready) *> post(HostMsg.Error(err)))
+              case _ => HostRuntime.runUIO(post(HostMsg.Error(err)))
       }
     }
     ()
   end resolveWebviewView
 
-  private def bindAgent(post: HostMsg => Unit, ports: ReviewPorts): Unit =
+  private def bindAgent(post: HostMsg => UIO[Unit]): Unit =
     val cwd     = vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath).getOrElse(".")
     val cliPath = vscode.workspace.getConfiguration("groksBeard").get[String]("cliPath").toOption.filter(_.nonEmpty)
     val env     = (k: String) => nodeProcess.env.get(k).flatMap(_.toOption)
@@ -103,36 +98,54 @@ final class ChatView(
       case Right(cmd) =>
         val args = Spawn.grokAgentStdioArgs()
         log(s"spawning $cmd ${args.mkString(" ")}")
-        var note: String => Unit = _ => ()
-        val transport            = NodeTransport.spawn(cmd, args, cwd, log, line => note(line))
-        val caps                 = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
-        val home                 = GrokHome(env)
-        val rt                   = ChatRuntime(
-          post,
-          transport,
-          ports,
-          cwd,
-          caps,
-          activeFile = () => activeFileChip(),
-          includeActiveFile = () => readSettings().includeActiveFileByDefault,
-          settings = () => readSettings(),
-          listSessions = () => SessionIndex.listRows(NodeSessionFs, home, cwd),
-          scheduleEmptyDelete = id =>
-            val path = SessionIndex.sessionPath(home, cwd, id)
-            val _    = js.timers.setTimeout(SessionIndex.EmptyGraceMs.toDouble) {
-              NodeSessionFs.deleteTree(path)
+        val note = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
+        val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+        val home = GrokHome(env)
+        val disk = new ChangeDisk(context)
+        HostRuntime.runScoped {
+          NodeTransport
+            .spawn(cmd, args, cwd, log, onErr = line => note.get()(line), run = HostRuntime.runUIO)
+            .flatMap { transport =>
+              ChatRuntime
+                .make(
+                  transport,
+                  cwd,
+                  caps,
+                  activeFile = () => activeFileChip(),
+                  includeActiveFile = () => readSettings().includeActiveFileByDefault,
+                  settings = () => readSettings(),
+                )
+                .provideSome[Scope](
+                  HostOut.layer(post) ++
+                    SessionRepo.of(NodeSessionFs, home, cwd) ++
+                    Mentions.none ++
+                    ChangesPersist.layer(disk.save, disk.load) ++
+                    ReviewOps.layer(
+                      read = _ => ZIO.none,
+                      openDiffs = (heading, diffs) => ZIO.succeed(review.open(heading, diffs)),
+                      undo = review.applyUndo,
+                      storeChanged = ZIO.succeed(tree.refresh()),
+                    )
+                )
+                .flatMap { rt =>
+                  ZIO.succeed {
+                    note.set(rt.noteAgentLine)
+                    runtime = Some(rt)
+                  } *> disk.load.orElseSucceed(Nil).flatMap(rt.restoreChanges)
+                }
             }
-          ,
-          renameOnDisk = (id, op) => SessionEdit.rename(NodeSessionFs, home, cwd, id, op),
-          deleteOnDisk = id => SessionEdit.delete(NodeSessionFs, home, cwd, id),
-        )
-        note = rt.noteAgentLine
-        runtime = Some(rt)
+            .catchAll { e =>
+              ZIO.succeed {
+                missingCli = Some(e.message)
+                log(e.message)
+              }
+            }
+        }
     end match
   end bindAgent
 
   def refreshSettings(): Unit =
-    runtime.foreach(_.replaceSettings(readSettings()))
+    runtime.foreach(rt => HostRuntime.runUIO(rt.replaceSettings(readSettings())))
 
   def addSelection(): Unit =
     activeSelectionChip() match
@@ -140,7 +153,7 @@ final class ChatView(
         val _ = vscode.window.showWarningMessage("No selection to add to chat.")
       case Some(chip) =>
         rememberSelection(chip)
-        runtime.foreach(_.addChip(chip))
+        runtime.foreach(rt => HostRuntime.runUIO(rt.addChip(chip)))
         focusChat()
 
   def addFile(): Unit =
@@ -148,7 +161,7 @@ final class ChatView(
       case None =>
         val _ = vscode.window.showWarningMessage("No active editor.")
       case Some(chip) =>
-        runtime.foreach(_.addChip(chip.copy(source = "file")))
+        runtime.foreach(rt => HostRuntime.runUIO(rt.addChip(chip.copy(source = "file"))))
         val _ = vscode.window.showInformationMessage(s"Added ${PromptChip.formatAtRef(chip)}")
 
   def copySelectionAsGrokRef(): Unit =
@@ -219,9 +232,9 @@ final class ChatView(
       )
     }
 
-  private def searchMentions(query: String, post: HostMsg => Unit): Unit =
+  private def searchMentions(query: String, post: HostMsg => UIO[Unit]): Unit =
     MentionSearch.pattern(query) match
-      case None          => post(HostMsg.MentionResults(query, Nil))
+      case None          => HostRuntime.runUIO(post(HostMsg.MentionResults(query, Nil)))
       case Some(pattern) =>
         val _ = vscode.workspace
           .findFiles(pattern, MentionSearch.ExcludeGlob, MentionSearch.FileLimit)
@@ -234,7 +247,7 @@ final class ChatView(
                 .getOrElse(abs)
               MentionFile(rel, abs)
             }
-            post(HostMsg.MentionResults(query, MentionSearch.rank(files, query)))
+            HostRuntime.runUIO(post(HostMsg.MentionResults(query, MentionSearch.rank(files, query))))
             js.undefined
           }
 end ChatView

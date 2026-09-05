@@ -92,10 +92,15 @@ object LiveClients:
     Ref.make(Map.empty[String, Slot]).map(LiveClients(_, open, log))
 
   def grok(log: String => Unit): ZIO[Scope, Nothing, LiveClients] =
-    make(LiveSession.managed(log), log).tap(c => ZIO.addFinalizer(c.closeAll))
+    make(openScoped(LiveSession.start(log)), log).tap(c => ZIO.addFinalizer(c.closeAll))
 
   def fake(): UIO[LiveClients] =
-    make(LiveSession.fake(), _ => ())
+    make(openScoped(LiveSession.fake()), _ => ())
+
+  private def openScoped(open: ZIO[Scope, Nothing, LiveSession]): UIO[LiveSession] =
+    Scope.make.flatMap { scope =>
+      scope.extend(open).map(_.andThenClose(scope.close(Exit.unit)))
+    }
 
   final class Client(val session: LiveSession, val watchers: Ref[Int])
 

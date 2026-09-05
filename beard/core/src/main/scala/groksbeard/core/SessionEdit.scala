@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
@@ -18,8 +19,13 @@ object SessionEdit:
       Left("/rename --auto must be the only argument")
     else Right(RenameOp.Manual(t))
 
-  def findDir(fs: SessionFs, home: String, cwd: String, id: String): Option[String] =
-    SessionIndex.groupDirs(fs, home, cwd).map(g => SessionIndex.join(g, id)).find(fs.isDirectory)
+  def findDir(fs: SessionFs, home: String, cwd: String, id: String): BeardError.Result[Option[String]] =
+    SessionIndex.groupDirs(fs, home, cwd).flatMap { groups =>
+      val candidates = groups.map(g => SessionIndex.join(g, id))
+      ZIO
+        .filter(candidates)(fs.isDirectory)
+        .map(_.headOption)
+    }
 
   def summaryPath(dir: String): String =
     SessionIndex.join(dir, "summary.json")
@@ -45,32 +51,45 @@ object SessionEdit:
       title_is_manual = Some(true),
     ).toJson
 
-  def rename(fs: SessionFs, home: String, cwd: String, id: String, op: RenameOp): Option[SessionRow] =
-    findDir(fs, home, cwd, id).flatMap { dir =>
-      val path = summaryPath(dir)
-      val next = fs.readText(path) match
-        case Some(raw) =>
-          op match
-            case RenameOp.Manual(title) => patchManual(raw, title)
-            case RenameOp.Auto          => patchAuto(raw)
-        case None =>
-          op match
-            case RenameOp.Manual(title) => Some(seedManual(id, cwd, title))
-            case RenameOp.Auto          => None
-      next.foreach(fs.writeText(path, _))
-      next.flatMap { _ =>
-        SessionIndex.listRows(fs, home, cwd, Int.MaxValue).find(_.id == id).orElse {
-          op match
-            case RenameOp.Manual(title) => Some(SessionRow(id, title))
-            case RenameOp.Auto          => None
+  def rename(
+      fs: SessionFs,
+      home: String,
+      cwd: String,
+      id: String,
+      op: RenameOp,
+  ): BeardError.Result[Option[SessionRow]] =
+    findDir(fs, home, cwd, id).flatMap {
+      case None      => ZIO.none
+      case Some(dir) =>
+        val path = summaryPath(dir)
+        fs.readText(path).flatMap { raw =>
+          val next = raw match
+            case Some(text) =>
+              op match
+                case RenameOp.Manual(title) => patchManual(text, title)
+                case RenameOp.Auto          => patchAuto(text)
+            case None =>
+              op match
+                case RenameOp.Manual(title) => Some(seedManual(id, cwd, title))
+                case RenameOp.Auto          => None
+          next match
+            case None       => ZIO.none
+            case Some(body) =>
+              fs.writeText(path, body) *>
+                SessionIndex.listRows(fs, home, cwd, Int.MaxValue).map { rows =>
+                  rows.find(_.id == id).orElse {
+                    op match
+                      case RenameOp.Manual(title) => Some(SessionRow(id, title))
+                      case RenameOp.Auto          => None
+                  }
+                }
+          end match
         }
-      }
     }
 
-  def delete(fs: SessionFs, home: String, cwd: String, id: String): Boolean =
-    findDir(fs, home, cwd, id) match
-      case None      => false
-      case Some(dir) =>
-        fs.deleteTree(dir)
-        true
+  def delete(fs: SessionFs, home: String, cwd: String, id: String): BeardError.Result[Boolean] =
+    findDir(fs, home, cwd, id).flatMap {
+      case None      => ZIO.succeed(false)
+      case Some(dir) => fs.deleteTree(dir).as(true)
+    }
 end SessionEdit

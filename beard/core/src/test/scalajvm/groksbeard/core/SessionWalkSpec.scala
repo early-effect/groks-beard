@@ -17,8 +17,9 @@ object SessionWalkSpec extends ZIOSpecDefault:
           """{"info":{"id":"sess-1","cwd":"/tmp/beard-walk"},"generated_title":"Walked"}""",
         )
         Files.writeString(dir.resolve("updates.jsonl"), "{}\n")
-        val rows = SessionWalk.fromDisk(home.toString, cwd)
-        assertTrue(rows.map(_.id) == List("sess-1"), rows.head.title == "Walked")
+        SessionWalk.fromDisk(home.toString, cwd).map { rows =>
+          assertTrue(rows.map(_.id) == List("sess-1"), rows.head.title == "Walked")
+        }
       }
     )
 end SessionWalkSpec

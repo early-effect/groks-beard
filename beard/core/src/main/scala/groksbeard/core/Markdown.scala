@@ -1,5 +1,7 @@
 package groksbeard.core
 
+import zio.Chunk
+
 /** Conservative markdown: escaped inlines, https/http/vscode links only. No HTML passthrough. */
 object Markdown:
 
@@ -24,6 +26,35 @@ object Markdown:
   def parse(text: String): List[Block] =
     if text.isEmpty then Nil
     else parseBlocks(text.replace("\r\n", "\n").split("\n", -1).toList)
+
+  /** Closed blocks plus the open fence or trailing unterminated paragraph.
+    *
+    * The closed prefix is append-only as `text` grows, so a live fold can keep committed nodes and only rewrite the
+    * tail.
+    */
+  def streamParts(text: String): (Chunk[Block], String) =
+    if text.isEmpty then (Chunk.empty, "")
+    else
+      val lines = text.replace("\r\n", "\n").split("\n", -1).toList
+      if fenceOpen(lines) then
+        val start        = lines.lastIndexWhere(_.startsWith("```"))
+        val (head, tail) = lines.splitAt(math.max(0, start))
+        (Chunk.fromIterable(parseBlocks(head)), tail.mkString("\n"))
+      else
+        val lastBlank = lines.lastIndexWhere(_.trim.isEmpty)
+        if lastBlank < 0 then (Chunk.empty, lines.mkString("\n"))
+        else
+          val (head, tail) = lines.splitAt(lastBlank + 1)
+          if tail.forall(_.trim.isEmpty) then (Chunk.fromIterable(parseBlocks(lines)), "")
+          else (Chunk.fromIterable(parseBlocks(head)), tail.mkString("\n"))
+      end if
+
+  /** Fold the next chunk onto an open tail. Closed blocks from the tail are the new prefix. */
+  def pull(tail: String, more: String): (Chunk[Block], String) =
+    streamParts(tail + more)
+
+  private def fenceOpen(lines: List[String]): Boolean =
+    lines.count(_.startsWith("```")) % 2 == 1
 
   private def parseBlocks(lines: List[String]): List[Block] =
     lines match

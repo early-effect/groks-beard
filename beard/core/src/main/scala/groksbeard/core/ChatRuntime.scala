@@ -17,6 +17,8 @@ final class ChatRuntime(
     settings: () => SettingsState = () => SettingsState.defaults,
     listSessions: () => List[SessionRow] = () => Nil,
     scheduleEmptyDelete: String => Unit = _ => (),
+    renameOnDisk: (String, RenameOp) => Option[SessionRow] = (_, _) => None,
+    deleteOnDisk: String => Boolean = _ => false,
 ):
   private val framed                    = Framed(SessionState())
   private val store                     = ChangeStore()
@@ -47,6 +49,7 @@ final class ChatRuntime(
   private var pendingLoad               = Map.empty[RpcId, String]
   private var cancelledLoads            = Set.empty[String]
   private val inboundEpoch              = new java.util.concurrent.atomic.AtomicInteger(0)
+  private var listOpen                  = false
 
   transport.onData { chunk =>
     val epoch = inboundEpoch.get()
@@ -89,6 +92,13 @@ final class ChatRuntime(
           ModelOption.pick(cmd.args, models) match
             case Some(m) => setModel(m.modelId)
             case None    => post(HostMsg.Error(s"Unknown model: ${cmd.args}"))
+      case Some(cmd) if SessionCommands.isRename(cmd.name) =>
+        SessionEdit.parseRename(cmd.args) match
+          case Left("empty") => ()
+          case Left(err)     => post(HostMsg.Error(err))
+          case Right(op)     => renameSession(sessionId.getOrElse(""), op)
+      case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
+        ()
       case _ =>
         val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
         if trimmed.isEmpty && chosen.isEmpty then ()
@@ -256,6 +266,37 @@ final class ChatRuntime(
     else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then openPicker()
   }
 
+  def focusedId: Option[String] = this.synchronized { sessionId }
+
+  def focusedTitle: String = this.synchronized {
+    sessionId.map(displayTitleOf).filter(t => t.nonEmpty && t != title).getOrElse("")
+  }
+
+  def renameSession(id: String, op: RenameOp): Unit = this.synchronized {
+    val target = if id.nonEmpty then id else sessionId.getOrElse("")
+    if target.isEmpty then post(HostMsg.Error("No session to rename"))
+    else
+      op match
+        case RenameOp.Manual(t) if t.trim.isEmpty =>
+          post(HostMsg.Error("Session title cannot be empty"))
+        case _ =>
+          renameOnDisk(target, op) match
+            case None =>
+              post(HostMsg.Error("Could not rename session"))
+            case Some(_) =>
+              postMeta()
+              postList(listOpen)
+    end if
+  }
+
+  def deleteSession(id: String): Unit = this.synchronized {
+    val target = if id.nonEmpty then id else sessionId.getOrElse("")
+    if target.isEmpty then post(HostMsg.Error("No session to delete"))
+    else if !deleteOnDisk(target) then post(HostMsg.Error("Could not delete session"))
+    else if sessionId.contains(target) then newSession()
+    else postList(listOpen)
+  }
+
   def newSession(): Unit = this.synchronized {
     inboundEpoch.incrementAndGet()
     pendingResume.foreach(id => cancelledLoads += id)
@@ -368,6 +409,7 @@ final class ChatRuntime(
     }
 
   private def postList(open: Boolean): Unit =
+    listOpen = open
     val sid  = sessionId.getOrElse("")
     val rows = SessionIndex.touchCurrent(listSessions(), sid, currentMs(), empty.shouldDelete(sid))
     post(HostMsg.SessionList(rows, sid, openPicker = open))

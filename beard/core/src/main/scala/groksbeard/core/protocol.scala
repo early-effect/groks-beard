@@ -164,4 +164,6 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("resumeSession") case ResumeSession(sessionId: String)
   @jsonHint("openSessionPicker") case OpenSessionPicker
   @jsonHint("closeSessionPicker") case CloseSessionPicker
+  @jsonHint("renameSession") case RenameSession(sessionId: String, title: String, auto: Boolean = false)
+  @jsonHint("deleteSession") case DeleteSession(sessionId: String)
 end WebviewMsg

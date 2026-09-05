@@ -24,6 +24,8 @@ trait SessionFs:
   def isDirectory(path: String): Boolean
   def mtimeMs(path: String): Option[Long]
   def readText(path: String): Option[String]
+  def writeText(path: String, text: String): Unit = ()
+  def deleteTree(path: String): Unit              = ()
 
 object SessionIndex:
   val PageSize: Int              = 100

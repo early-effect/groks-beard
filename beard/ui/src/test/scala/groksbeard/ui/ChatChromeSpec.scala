@@ -5,6 +5,7 @@ import ascent.chekhov.AscentChekhov.withMounted
 import ascent.chekhov.AscentRoot
 import ascent.chekhov.value
 import groksbeard.core.*
+import scala.scalajs.js
 import zio.*
 import zio.test.*
 
@@ -293,6 +294,52 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("transcript follows the tail until the user scrolls up") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                (1 to 12).foreach { i =>
+                  bridge.push(HostMsg.UserMessage(s"t$i", s"prompt $i"))
+                  bridge.push(HostMsg.AgentChunk(s"t$i", "reply\n" * 8))
+                  bridge.push(HostMsg.TurnEnd(s"t$i", "end_turn"))
+                }
+              }
+              _  <- waitPresent(root, "transcript")
+              el <- ZIO.succeed(
+                root.element.querySelector("""[data-testid="transcript"]""").asInstanceOf[ascent.dom.HTMLElement]
+              )
+              _ <- ZIO.succeed(el.setAttribute("style", "max-height:140px;overflow-y:auto"))
+              _ <- ZIO.succeed {
+                el.scrollTop = el.scrollHeight.toDouble
+                ChatChromeSpec.fireScroll(el)
+              }
+              _ <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+              _ <- ZIO.succeed {
+                el.scrollTop = 0
+                ChatChromeSpec.fireScroll(el)
+              }
+              _    <- waitSelector(root, """[data-testid="transcript"][data-follow="false"]""")
+              held <- ZIO.succeed(el.scrollTop)
+              _    <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("later", "after unstick"))
+                bridge.push(HostMsg.AgentChunk("later", "still going"))
+                bridge.push(HostMsg.TurnEnd("later", "end_turn"))
+              }
+              _         <- waitPresent(root, "user-later")
+              stillHeld <- ZIO.succeed(el.scrollTop)
+              _         <- ZIO.succeed {
+                el.scrollTop = el.scrollHeight.toDouble
+                ChatChromeSpec.fireScroll(el)
+              }
+              restuck <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+            yield assertTrue(held < 32, stillHeld < 32, restuck)
+          }
+        yield result
+        end for
+      },
       test("changes list stays collapsed until Show") {
         val bridge = PreviewBridge()
         for
@@ -514,6 +561,57 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("slash rename prefills the composer") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "slash-rename")
+              _     <- root.button("slash-rename").click
+              draft <- waitValue(root, "/rename ")
+            yield assertTrue(draft == "/rename ")
+          }
+        yield result
+        end for
+      },
+      test("picker Delete then Confirm removes the row") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Resume)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "sessions")
+              _ <- root.button("sessions").click
+              _ <- waitPresent(root, "session-picker")
+              _ <- root.button("session-delete-disk-2").click
+              _ <- waitPresent(root, "delete-confirm")
+              _ <- root.button("delete-yes").click
+              _ <- waitGone(root, "session-disk-2")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("rename from the composer updates the session chip") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Resume)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "sessions")
+              _     <- root.button("sessions").click
+              _     <- waitPresent(root, "session-picker")
+              _     <- root.button("session-disk-1").click
+              _     <- waitPresent(root, "user-resume-turn")
+              _     <- root.textarea("draft").fill("/rename Beard plan")
+              _     <- root.button("send").click
+              label <- waitText(root, "sessions", "Beard plan")
+            yield assertTrue(label.contains("Beard plan"))
+          }
+        yield result
+        end for
+      },
     )
 
   private def waitText(root: AscentRoot, testId: String, expected: String)(using Trace): IO[Throwable, String] =
@@ -534,7 +632,9 @@ object ChatChromeSpec extends ZIOSpecDefault:
     val nodes = root.element.querySelectorAll("""[data-testid="welcome-sessions"] button""")
     (0 until nodes.length).toList.flatMap { i =>
       Option(nodes.item(i)).collect { case e: ascent.dom.Element =>
-        Option(e.getAttribute("data-testid")).filter(s => s != null && s.nonEmpty)
+        Option(e.getAttribute("data-testid")).filter { s =>
+          s != null && s.startsWith("session-") && !s.startsWith("session-delete-")
+        }
       }.flatten
     }
 
@@ -561,6 +661,10 @@ object ChatChromeSpec extends ZIOSpecDefault:
         case Some(_) => ZIO.sleep(20.millis) *> loop
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to disappear"))(5.seconds)
+
+  private def fireScroll(el: ascent.dom.HTMLElement): Unit =
+    val ev = js.Dynamic.newInstance(js.Dynamic.global.Event)("scroll")
+    val _  = el.dispatchEvent(ev.asInstanceOf[ascent.dom.Event])
 end ChatChromeSpec
 
 /** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */

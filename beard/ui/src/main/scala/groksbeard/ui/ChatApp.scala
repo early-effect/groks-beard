@@ -257,12 +257,23 @@ object ChatApp:
         flexShrink(0),
       )
 
+  object SessionRowEl
+      extends CssClass(
+        display.flex,
+        flexDirection.row,
+        alignItems.center,
+        width.pct(100),
+        gap.px(8),
+        boxSizing.borderBox,
+      )
+
   object SessionItem
       extends CssClass(
         display.flex,
         flexDirection.column,
         alignItems.flexStart,
-        width.pct(100),
+        flexGrow(1.0),
+        minWidth.px(0),
         boxSizing.borderBox,
         border.none,
         backgroundColor(Color.transparent),
@@ -746,17 +757,18 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
-      chat        <- sq(PreviewScenes.seed(scene))
-      draft       <- sq(initialDraft)
-      dismissed   <- sq(false)
-      mentionIdx  <- sq(Option.empty[Int])
-      openMenu    <- sq(initialMenu)
-      pickerQuery <- sq("")
-      changesOpen <- sq(false)
-      leaving     <- sq(Option.empty[SessionLeave])
-      nowMs       <- wallMs.flatMap(sq(_))
-      lastHref    <- Ref.make("")
-      bound       <- Promise.make[Nothing, Unit]
+      chat          <- sq(PreviewScenes.seed(scene))
+      draft         <- sq(initialDraft)
+      dismissed     <- sq(false)
+      mentionIdx    <- sq(Option.empty[Int])
+      openMenu      <- sq(initialMenu)
+      pickerQuery   <- sq("")
+      changesOpen   <- sq(false)
+      leaving       <- sq(Option.empty[SessionLeave])
+      pendingDelete <- sq(Option.empty[String])
+      nowMs         <- wallMs.flatMap(sq(_))
+      lastHref      <- Ref.make("")
+      bound         <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[String])
       leaveGen = new AtomicInteger(0)
       _ <- ZStream
@@ -842,6 +854,20 @@ object ChatApp:
                       ZIO.succeed(bridge.post(WebviewMsg.SetModel(m.modelId)))
                   case None =>
                     draft.set("") *> chat.update(_.copy(error = Some(s"Unknown model: ${cmd.args}")))
+              case Some(cmd) if SessionCommands.isRename(cmd.name) =>
+                SessionEdit.parseRename(cmd.args) match
+                  case Left("empty") =>
+                    val shown = sessionLabel(c)
+                    val seed  =
+                      if shown == "Resume" || shown == "This session" || shown == "Untitled session" then ""
+                      else shown
+                    draft.set(if seed.isEmpty then "/rename " else s"/rename $seed")
+                  case Left(err) =>
+                    draft.set("") *> chat.update(_.copy(error = Some(err)))
+                  case Right(op) =>
+                    draft.set("") *> applyRename(c.sessionId, op)
+              case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
+                draft.set("") *> armDelete(c.sessionId)
               case _ if trimmed.isEmpty && c.chips.isEmpty =>
                 ZIO.unit
               case _ =>
@@ -874,28 +900,41 @@ object ChatApp:
             openMenu.get.flatMap {
               case Some(_) => openMenu.set(None)
               case None    =>
-                mentionShown.get.flatMap { mentions =>
-                  if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                  else if c.pickerOpen then closePicker
-                  else if c.permission.isDefined then parkPermission
-                  else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                  else ZIO.unit
+                pendingDelete.get.flatMap {
+                  case Some(_) => cancelDelete
+                  case None    =>
+                    mentionShown.get.flatMap { mentions =>
+                      if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                      else if c.pickerOpen then closePicker
+                      else if c.permission.isDefined then parkPermission
+                      else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                      else ZIO.unit
+                    }
                 }
             }
           else if e.shiftKey && key == "Tab" && !ctrlOrMeta then
             e.preventDefault()
             openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
           else
-            c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
-              case Some(opt) =>
+            pendingDelete.get.flatMap {
+              case Some(_) if key == "y" || key == "Y" =>
                 e.preventDefault()
-                ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
-              case None =>
-                c.question.flatMap(q => ComposerQuery.questionOption(key, q.questions)) match
-                  case Some((qid, oid)) =>
+                confirmDelete
+              case Some(_) if key == "n" || key == "N" =>
+                e.preventDefault()
+                cancelDelete
+              case _ =>
+                c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
+                  case Some(opt) =>
                     e.preventDefault()
-                    ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(c.question.get.requestId, qid, oid)))
-                  case None => ZIO.unit
+                    ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
+                  case None =>
+                    c.question.flatMap(q => ComposerQuery.questionOption(key, q.questions)) match
+                      case Some((qid, oid)) =>
+                        e.preventDefault()
+                        ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(c.question.get.requestId, qid, oid)))
+                      case None => ZIO.unit
+            }
         }
       end onCardKey
 
@@ -930,9 +969,61 @@ object ChatApp:
         if SessionCommands.isNew(name) then draft.set("") *> startNew
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then draft.set("") *> openPicker
         else if SessionCommands.isModel(name) then draft.set("") *> openMenu.set(Some(OpenMenu.Model))
+        else if SessionCommands.isRename(name) then draft.set("/rename ")
+        else if SessionCommands.isDelete(name) then draft.set("") *> chat.get.flatMap(c => armDelete(c.sessionId))
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
+
+      def applyRename(id: String, op: RenameOp): UIO[Unit] =
+        if id.isEmpty then chat.update(_.copy(error = Some("No session to rename")))
+        else
+          val nextTitle = op match
+            case RenameOp.Manual(t) => t
+            case RenameOp.Auto      => ""
+          chat.update { m =>
+            val titled =
+              op match
+                case RenameOp.Manual(t) => t
+                case RenameOp.Auto      => m.title
+            m.copy(
+              title = if id == m.sessionId then titled else m.title,
+              sessions = m.sessions.map { r =>
+                op match
+                  case RenameOp.Manual(t) if r.id == id => r.copy(title = t)
+                  case _                                => r
+              },
+              error = None,
+            )
+          } *> ZIO.succeed(bridge.post(WebviewMsg.RenameSession(id, nextTitle, auto = op == RenameOp.Auto)))
+
+      def armDelete(id: String): UIO[Unit] =
+        if id.isEmpty then chat.update(_.copy(error = Some("No session to delete")))
+        else pendingDelete.set(Some(id))
+
+      def cancelDelete: UIO[Unit] = pendingDelete.set(None)
+
+      def confirmDelete: UIO[Unit] =
+        pendingDelete.get.flatMap {
+          case None     => ZIO.unit
+          case Some(id) =>
+            pendingDelete.set(None) *>
+              chat.get.flatMap { c =>
+                if c.sessionId == id then
+                  leaving.set(None) *>
+                    chat.update(adoptView(_, "", waiting)) *>
+                    commit(hist, lastHref, BeardPath.Welcome, WebviewMsg.DeleteSession(id), bridge)
+                else
+                  chat.update(m => m.copy(sessions = m.sessions.filterNot(_.id == id))) *>
+                    ZIO.succeed(bridge.post(WebviewMsg.DeleteSession(id)))
+              }
+        }
+
+      def toggleDelete(id: String): UIO[Unit] =
+        pendingDelete.get.flatMap {
+          case Some(armed) if armed == id => confirmDelete
+          case _                          => pendingDelete.set(Some(id))
+        }
 
       def openPicker: UIO[Unit] =
         leaving.set(None) *>
@@ -976,7 +1067,16 @@ object ChatApp:
         E.div(
           Stage,
           when(Squawk.zipWith(chat, leaving)(showPicker))(
-            renderPicker(chat, pickerQuery, leaving, s => pickerQuery.set(s), closePicker, openSession)
+            renderPicker(
+              chat,
+              pickerQuery,
+              leaving,
+              pendingDelete,
+              s => pickerQuery.set(s),
+              closePicker,
+              openSession,
+              toggleDelete,
+            )
           ),
           when(Squawk.zipWith(chat, leaving)((c, l) => stageIdle(l) && !c.pickerOpen && ChatModel.isLoading(c)))(
             E.div(
@@ -1020,12 +1120,16 @@ object ChatApp:
                 TestId("welcome-sessions"),
                 E.p(Copy, "Recent sessions"),
                 forEach(
-                  Squawk.zipWith(chat, leaving) { (c, l) =>
-                    val fadeId = l.map(_.id)
-                    ChatModel.listed(c).take(SessionIndex.WelcomeLimit).map(r => r -> fadeId.contains(r.id))
+                  Squawk.zipWith(chat, Squawk.zipWith(leaving, pendingDelete)(Tuple2.apply)) { (c, pack) =>
+                    val (l, armed) = pack
+                    val fadeId     = l.map(_.id)
+                    ChatModel
+                      .listed(c)
+                      .take(SessionIndex.WelcomeLimit)
+                      .map(r => (r, fadeId.contains(r.id), armed.contains(r.id)))
                   }
-                )(p => s"${p._1.id}-${p._2}") { pair =>
-                  sessionButton(pair._1, openSession, pair._2)
+                )(p => s"${p._1.id}-${p._2}-${p._3}") { pair =>
+                  sessionButton(pair._1, openSession, pair._2, pair._3, toggleDelete)
                 },
               ),
             )
@@ -1038,6 +1142,7 @@ object ChatApp:
             E.div(
               Transcript,
               TestId("transcript"),
+              Lifecycle.onMountScoped[ascent.dom.Element, Any](TranscriptScroll.bind),
               forEachSignal(chat.map(_.turns))(_.id) { (id, _, turn) =>
                 renderTurn(bridge, id, turn)
               },
@@ -1048,6 +1153,37 @@ object ChatApp:
           ),
         ),
         renderCards(bridge, chat),
+        when(pendingDelete.map(_.nonEmpty))(
+          E.div(
+            Cards,
+            forEach(pendingDelete.map(_.toList))(identity) { id =>
+              E.div(
+                Card,
+                TestId("delete-confirm"),
+                E.h3("Delete this session?"),
+                E.p(
+                  Copy,
+                  chat.map { c =>
+                    val name = c.sessions.find(_.id == id).map(SessionIndex.displayTitle).getOrElse("This session")
+                    s"$name will be removed from disk. This cannot be undone."
+                  },
+                ),
+                E.button(
+                  Send,
+                  TestId("delete-yes"),
+                  Ev.onClick(_ => confirmDelete),
+                  "Delete",
+                ),
+                E.button(
+                  CardBtn,
+                  TestId("delete-no"),
+                  Ev.onClick(_ => cancelDelete),
+                  "Cancel",
+                ),
+              )
+            },
+          )
+        ),
         renderDiff(bridge, chat),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
         when(chat.map(_.error.nonEmpty))(
@@ -1739,19 +1875,35 @@ object ChatApp:
     val sum   = row.summary.map(_.trim).filter(t => t.nonEmpty && t != shown && !turn.contains(t))
     List(turn.orElse(sum), row.modelId).flatten.mkString(" · ")
 
-  private def sessionButton(row: SessionRow, openSession: String => UIO[Unit], fade: Boolean): ascent.ast.UI[Any] =
+  private def sessionButton(
+      row: SessionRow,
+      openSession: String => UIO[Unit],
+      fade: Boolean,
+      armed: Boolean,
+      onDelete: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
     val extra: Seq[Arg[Any]] =
       if fade then Seq(SessionLeaving, Attr.StaticAttr("data-leaving", AttrValue.Str("true")))
       else Seq.empty
-    E.button(
+    E.div(
       (
         Seq[Arg[Any]](
-          SessionItem,
-          TestId(s"session-${row.id}"),
-          A.title(row.id),
-          Ev.onClick(_ => openSession(row.id)),
-          E.span(SessionTitle, SessionIndex.displayTitle(row)),
-          E.span(SessionMetaLine, sessionSubline(row)),
+          SessionRowEl,
+          E.button(
+            SessionItem,
+            TestId(s"session-${row.id}"),
+            A.title(row.id),
+            Ev.onClick(_ => openSession(row.id)),
+            E.span(SessionTitle, SessionIndex.displayTitle(row)),
+            E.span(SessionMetaLine, sessionSubline(row)),
+          ),
+          E.button(
+            Chip,
+            TestId(s"session-delete-${row.id}"),
+            A.title(if armed then "Press y to delete" else "Delete this session"),
+            Ev.onClick(_ => onDelete(row.id)),
+            if armed then "Confirm" else "Delete",
+          ),
         ) ++ extra
       )*
     )
@@ -1761,15 +1913,20 @@ object ChatApp:
       chat: ascent.Source[ChatModel],
       query: ascent.Source[String],
       leaving: ascent.Source[Option[SessionLeave]],
+      pendingDelete: ascent.Source[Option[String]],
       onQuery: String => UIO[Unit],
       close: UIO[Unit],
       openSession: String => UIO[Unit],
+      onDelete: String => UIO[Unit],
   ): ascent.ast.UI[Any] =
-    val shown = Squawk.zipWith(chat, Squawk.zipWith(query, leaving)(Tuple2.apply)) { (c, pack) =>
-      val (q, leave) = pack
-      val fadeId     = leave.map(_.id)
-      SessionIndex.filter(ChatModel.listed(c), q).map(r => r -> fadeId.contains(r.id))
-    }
+    val shown =
+      Squawk.zipWith(chat, Squawk.zipWith(query, Squawk.zipWith(leaving, pendingDelete)(Tuple2.apply))(Tuple2.apply)) {
+        (c, pack) =>
+          val (q, rest)      = pack
+          val (leave, armed) = rest
+          val fadeId         = leave.map(_.id)
+          SessionIndex.filter(ChatModel.listed(c), q).map(r => (r, fadeId.contains(r.id), armed.contains(r.id)))
+      }
     E.div(
       Picker,
       TestId("session-picker"),
@@ -1796,8 +1953,8 @@ object ChatApp:
       ),
       E.div(
         PickerList,
-        forEach(shown)(p => s"${p._1.id}-${p._2}") { pair =>
-          sessionButton(pair._1, openSession, pair._2)
+        forEach(shown)(p => s"${p._1.id}-${p._2}-${p._3}") { pair =>
+          sessionButton(pair._1, openSession, pair._2, pair._3, onDelete)
         },
       ),
     )

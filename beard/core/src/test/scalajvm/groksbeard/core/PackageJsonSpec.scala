@@ -16,6 +16,8 @@ object PackageJsonSpec extends ZIOSpecDefault:
           json.contains("\"groksBeard.cancel\""),
           json.contains("\"groksBeard.newSession\""),
           json.contains("\"groksBeard.resumeSession\""),
+          json.contains("\"groksBeard.renameSession\""),
+          json.contains("\"groksBeard.deleteSession\""),
           json.contains("\"groksBeard.cycleMode\""),
           json.contains("ctrl+shift+;"),
           json.contains("includeActiveFileByDefault"),

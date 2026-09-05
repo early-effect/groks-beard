@@ -249,6 +249,9 @@ final class ChangeStore:
 
   def drop(path: String): Unit = keep(path)
 
+  def replace(next: List[ChangeSet]): Unit =
+    sets = next
+
   private def mergeFile(files: List[FileChange], incoming: FileChange): List[FileChange] =
     val idx = files.indexWhere(_.path == incoming.path)
     if idx < 0 then files :+ withBudget(incoming)

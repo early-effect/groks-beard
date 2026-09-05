@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.*
 import zio.test.*
 
 object SessionEditSpec extends ZIOSpecDefault:
@@ -36,13 +37,14 @@ object SessionEditSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val row = SessionEdit.rename(fs, "/home", "/repo", "s1", RenameOp.Manual("Plan"))
-        val raw = fs.readText("/home/sessions/%2Frepo/s1/summary.json").get
-        assertTrue(
+        for
+          row <- SessionEdit.rename(fs, "/home", "/repo", "s1", RenameOp.Manual("Plan"))
+          raw <- fs.readText("/home/sessions/%2Frepo/s1/summary.json")
+        yield assertTrue(
           row.exists(_.title == "Plan"),
-          raw.contains("\"session_summary\":\"Plan\""),
-          raw.contains("\"title_is_manual\":true"),
-          raw.contains("\"extra\":true"),
+          raw.exists(_.contains("\"session_summary\":\"Plan\"")),
+          raw.exists(_.contains("\"title_is_manual\":true")),
+          raw.exists(_.contains("\"extra\":true")),
         )
       },
       test("rename --auto unpins a manual title") {
@@ -56,8 +58,9 @@ object SessionEditSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val row = SessionEdit.rename(fs, "/home", "/repo", "s1", RenameOp.Auto)
-        assertTrue(row.exists(_.title == "Real title"))
+        SessionEdit.rename(fs, "/home", "/repo", "s1", RenameOp.Auto).map { row =>
+          assertTrue(row.exists(_.title == "Real title"))
+        }
       },
       test("delete removes the session directory") {
         val fs = MemoryFs(
@@ -72,9 +75,11 @@ object SessionEditSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val gone = SessionEdit.delete(fs, "/home", "/repo", "s1")
-        val rows = SessionIndex.listRows(fs, "/home", "/repo")
-        assertTrue(gone, rows.map(_.id) == List("s2"), !fs.isDirectory("/home/sessions/%2Frepo/s1"))
+        for
+          gone  <- SessionEdit.delete(fs, "/home", "/repo", "s1")
+          rows  <- SessionIndex.listRows(fs, "/home", "/repo")
+          isDir <- fs.isDirectory("/home/sessions/%2Frepo/s1")
+        yield assertTrue(gone, rows.map(_.id) == List("s2"), !isDir)
       },
     )
 
@@ -83,25 +88,32 @@ object SessionEditSpec extends ZIOSpecDefault:
   final case class File(mtime: Long, text: String) extends Entry
 
   final class MemoryFs(initial: Map[String, Entry]) extends SessionFs:
-    private var files                        = initial
-    def listNames(dir: String): List[String] =
+    private var files                                           = initial
+    def listNames(dir: String): BeardError.Result[List[String]] =
       val prefix = if dir.endsWith("/") then dir else dir + "/"
-      files.keys.iterator
-        .filter(p => p.startsWith(prefix) && !p.substring(prefix.length).contains("/"))
-        .map(_.substring(prefix.length))
-        .toList
-    def isDirectory(path: String): Boolean  = files.get(path).contains(Dir)
-    def mtimeMs(path: String): Option[Long] =
-      files.get(path).collect { case File(m, _) => m }
-    def readText(path: String): Option[String] =
-      files.get(path).collect { case File(_, t) => t }
-    override def writeText(path: String, text: String): Unit =
-      val now = files.get(path) match
-        case Some(File(m, _)) => m + 1
-        case _                => 1L
-      files += path -> File(now, text)
-    override def deleteTree(path: String): Unit =
-      val prefix = if path.endsWith("/") then path else path + "/"
-      files = files.filterNot((p, _) => p == path || p.startsWith(prefix))
+      ZIO.succeed(
+        files.keys.iterator
+          .filter(p => p.startsWith(prefix) && !p.substring(prefix.length).contains("/"))
+          .map(_.substring(prefix.length))
+          .toList
+      )
+    def isDirectory(path: String): BeardError.Result[Boolean] =
+      ZIO.succeed(files.get(path).contains(Dir))
+    def mtimeMs(path: String): BeardError.Result[Option[Long]] =
+      ZIO.succeed(files.get(path).collect { case File(m, _) => m })
+    def readText(path: String): BeardError.Result[Option[String]] =
+      ZIO.succeed(files.get(path).collect { case File(_, t) => t })
+    override def writeText(path: String, text: String): BeardError.Result[Unit] =
+      ZIO.succeed {
+        val now = files.get(path) match
+          case Some(File(m, _)) => m + 1
+          case _                => 1L
+        files += path -> File(now, text)
+      }
+    override def deleteTree(path: String): BeardError.Result[Unit] =
+      ZIO.succeed {
+        val prefix = if path.endsWith("/") then path else path + "/"
+        files = files.filterNot((p, _) => p == path || p.startsWith(prefix))
+      }
   end MemoryFs
 end SessionEditSpec

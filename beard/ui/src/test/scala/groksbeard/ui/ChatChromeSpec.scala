@@ -552,6 +552,31 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("thought details keep the full thinking body") {
+        val bridge = PushBridge()
+        val line   = ("thinking " * 40).trim
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "hello"))
+                bridge.push(HostMsg.ThoughtChunk("t1", line))
+                bridge.push(HostMsg.AgentChunk("t1", "ok"))
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+              }
+              _       <- waitPresent(root, "thought-t1")
+              thought <- ZIO.succeed(
+                root.element.querySelector("""[data-testid="thought-t1"]""").asInstanceOf[ascent.dom.HTMLElement]
+              )
+              pre <- ZIO.succeed(thought.querySelector("pre").asInstanceOf[ascent.dom.HTMLElement])
+              cls = Option(pre.getAttribute("class")).getOrElse("")
+              text <- ZIO.succeed(thought.innerText)
+            yield assertTrue(cls.contains("ThoughtBody"), text.contains("thinking"))
+          }
+        yield result
+        end for
+      },
       test("a live ACP burst still paints the agent reply") {
         val bridge   = PushBridge()
         val commands = HostMsg.AvailableCommands(

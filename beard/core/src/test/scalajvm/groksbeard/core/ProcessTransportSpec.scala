@@ -12,11 +12,15 @@ object ProcessTransportSpec extends ZIOSpecDefault:
         val args = if win then List("-n", "20", "127.0.0.1") else List("20")
         for
           snap <- ZIO.scoped {
-            ProcessTransport.spawn(cmd, args, ".").map(t => (t.pid, t.isAlive))
+            ProcessTransport
+              .spawn(cmd, args, ".")
+              .mapError(e => new RuntimeException(e.message))
+              .map(t => (t.pid, t.isAlive))
           }
           (pid, wasAlive) = snap
           gone            = ProcessHandle.of(pid).filter(_.isAlive).isEmpty
         yield assertTrue(wasAlive, gone)
+        end for
       }
     )
 end ProcessTransportSpec

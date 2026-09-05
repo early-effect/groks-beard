@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import java.nio.charset.StandardCharsets
+import zio.*
 
 final case class SessionActivity(
     id: String,
@@ -20,12 +21,12 @@ final case class SessionRow(
 ) derives zio.json.JsonCodec
 
 trait SessionFs:
-  def listNames(dir: String): List[String]
-  def isDirectory(path: String): Boolean
-  def mtimeMs(path: String): Option[Long]
-  def readText(path: String): Option[String]
-  def writeText(path: String, text: String): Unit = ()
-  def deleteTree(path: String): Unit              = ()
+  def listNames(dir: String): BeardError.Result[List[String]]
+  def isDirectory(path: String): BeardError.Result[Boolean]
+  def mtimeMs(path: String): BeardError.Result[Option[Long]]
+  def readText(path: String): BeardError.Result[Option[String]]
+  def writeText(_path: String, _text: String): BeardError.Result[Unit] = ZIO.unit
+  def deleteTree(_path: String): BeardError.Result[Unit]               = ZIO.unit
 
 object SessionIndex:
   val PageSize: Int              = 100
@@ -136,35 +137,53 @@ object SessionIndex:
         .filter(t => t.nonEmpty && !isOpaqueId(t, row.id))
         .getOrElse("Untitled session")
 
-  def groupDirs(fs: SessionFs, home: String, cwd: String): List[String] =
-    val root    = sessionsRoot(home)
-    val encoded = encodeCwd(cwd)
-    val direct  = join(root, encoded)
-    val fromCwd =
-      fs.listNames(root).flatMap { name =>
+  def groupDirs(fs: SessionFs, home: String, cwd: String): BeardError.Result[List[String]] =
+    val root   = sessionsRoot(home)
+    val direct = join(root, encodeCwd(cwd))
+    for
+      names   <- fs.listNames(root)
+      fromCwd <- ZIO.filter(names) { name =>
         val dir = join(root, name)
-        if fs.isDirectory(dir) && fs.readText(join(dir, ".cwd")).exists(_.trim == cwd) then Some(dir)
-        else None
+        fs.isDirectory(dir).flatMap { isDir =>
+          if !isDir then ZIO.succeed(false)
+          else fs.readText(join(dir, ".cwd")).map(_.exists(_.trim == cwd))
+        }
       }
-    (direct +: fromCwd).distinct.filter(fs.isDirectory)
+      dirs = (direct +: fromCwd.map(n => join(root, n))).distinct
+      exist <- ZIO.filter(dirs)(fs.isDirectory)
+    yield exist
+    end for
   end groupDirs
 
-  def listRows(fs: SessionFs, home: String, cwd: String, limit: Int = PageSize): List[SessionRow] =
-    val rows = groupDirs(fs, home, cwd).flatMap { group =>
-      fs.listNames(group).flatMap { id =>
-        val dir = join(group, id)
-        if !fs.isDirectory(dir) then None
-        else
-          val summary = fs.readText(join(dir, "summary.json")).flatMap(SessionSummary.decode)
-          val convo   =
-            fs.mtimeMs(join(dir, "updates.jsonl")).orElse(fs.mtimeMs(join(dir, "events.jsonl")))
-          val fallback = fs.mtimeMs(join(dir, "summary.json")).getOrElse(0L)
-          val activity = SessionSummary.activityMs(summary, convo, fallback)
-          Some(SessionSummary.row(id, activity, summary))
-      }
+  def listRows(fs: SessionFs, home: String, cwd: String, limit: Int = PageSize): BeardError.Result[List[SessionRow]] =
+    groupDirs(fs, home, cwd).flatMap { groups =>
+      ZIO
+        .foreach(groups) { group =>
+          fs.listNames(group).flatMap { ids =>
+            ZIO.foreach(ids) { id =>
+              val dir = join(group, id)
+              fs.isDirectory(dir).flatMap { isDir =>
+                if !isDir then ZIO.none
+                else
+                  for
+                    raw   <- fs.readText(join(dir, "summary.json"))
+                    convo <- fs.mtimeMs(join(dir, "updates.jsonl")).flatMap {
+                      case Some(ms) => ZIO.succeed(Some(ms))
+                      case None     => fs.mtimeMs(join(dir, "events.jsonl"))
+                    }
+                    fallback <- fs.mtimeMs(join(dir, "summary.json"))
+                  yield
+                    val summary  = raw.flatMap(SessionSummary.decode)
+                    val activity = SessionSummary.activityMs(summary, convo, fallback.getOrElse(0L))
+                    Some(SessionSummary.row(id, activity, summary))
+              }
+            }
+          }
+        }
+        .map { nested =>
+          byLastUsed(dedupEmpty(nested.flatten.flatten)).take(limit)
+        }
     }
-    byLastUsed(dedupEmpty(rows)).take(limit)
-  end listRows
 
   private def isUnreserved(c: Char): Boolean =
     (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||

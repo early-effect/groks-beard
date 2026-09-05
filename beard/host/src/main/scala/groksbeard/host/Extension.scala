@@ -13,6 +13,7 @@ object Extension:
 
   @JSExportTopLevel("activate")
   def activate(context: ExtensionContext): Unit =
+    HostRuntime.start()
     val docs   = new BeardDocs
     val review = new Review(docs)
     val status = vscode.window.createStatusBarItem(2, 80)
@@ -68,15 +69,18 @@ object Extension:
       )
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.openChangesReview", () => chat.current.foreach(_.openChanges()))
+      vscode.commands.registerCommand(
+        "groksBeard.openChangesReview",
+        () => chat.current.foreach(rt => HostRuntime.runUIO(rt.openChanges)),
+      )
     )
     context.subscriptions.push(
       vscode.commands.registerCommand(
         "groksBeard.openDiff",
         (arg: js.Any) =>
           val id = Extension.asString(arg)
-          if id.nonEmpty then chat.current.foreach(_.openDiff(id))
-          else chat.current.foreach(_.openChanges()),
+          if id.nonEmpty then chat.current.foreach(rt => HostRuntime.runUIO(rt.openDiff(id)))
+          else chat.current.foreach(rt => HostRuntime.runUIO(rt.openChanges)),
       )
     )
     context.subscriptions.push(
@@ -85,7 +89,7 @@ object Extension:
         (arg: js.Any) =>
           val raw  = Extension.asString(arg)
           val path = ChangeTreeKey.filePath(raw).getOrElse(raw)
-          if path.nonEmpty then chat.current.foreach(_.keep(path)),
+          if path.nonEmpty then chat.current.foreach(rt => HostRuntime.runUIO(rt.keep(path))),
       )
     )
     context.subscriptions.push(
@@ -94,37 +98,50 @@ object Extension:
         (arg: js.Any) =>
           val raw  = Extension.asString(arg)
           val path = ChangeTreeKey.filePath(raw).getOrElse(raw)
-          if path.nonEmpty then chat.current.foreach(_.undo(path)),
+          if path.nonEmpty then chat.current.foreach(rt => HostRuntime.runUIO(rt.undo(path))),
       )
     )
     context.subscriptions.push(
       vscode.commands.registerCommand(
         "groksBeard.keepTurn",
         (arg: js.Any) =>
-          ChangeTreeKey.turnId(Extension.asString(arg)).foreach(id => chat.current.foreach(_.keepTurn(id))),
+          ChangeTreeKey
+            .turnId(Extension.asString(arg))
+            .foreach(id => chat.current.foreach(rt => HostRuntime.runUIO(rt.keepTurn(id)))),
       )
     )
     context.subscriptions.push(
       vscode.commands.registerCommand(
         "groksBeard.undoTurn",
         (arg: js.Any) =>
-          ChangeTreeKey.turnId(Extension.asString(arg)).foreach(id => chat.current.foreach(_.undoTurn(id))),
+          ChangeTreeKey
+            .turnId(Extension.asString(arg))
+            .foreach(id => chat.current.foreach(rt => HostRuntime.runUIO(rt.undoTurn(id)))),
       )
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.keepAll", () => chat.current.foreach(_.keepAll()))
+      vscode.commands
+        .registerCommand("groksBeard.keepAll", () => chat.current.foreach(rt => HostRuntime.runUIO(rt.keepAll)))
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.undoAll", () => chat.current.foreach(_.undoAll()))
+      vscode.commands
+        .registerCommand("groksBeard.undoAll", () => chat.current.foreach(rt => HostRuntime.runUIO(rt.undoAll)))
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.cancel", () => chat.current.foreach(_.cancel()))
+      vscode.commands
+        .registerCommand("groksBeard.cancel", () => chat.current.foreach(rt => HostRuntime.runUIO(rt.cancel)))
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.newSession", () => chat.current.foreach(_.newSession()))
+      vscode.commands.registerCommand(
+        "groksBeard.newSession",
+        () => chat.current.foreach(rt => HostRuntime.runUIO(rt.newSession)),
+      )
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.resumeSession", () => chat.current.foreach(_.openPicker()))
+      vscode.commands.registerCommand(
+        "groksBeard.resumeSession",
+        () => chat.current.foreach(rt => HostRuntime.runUIO(rt.openPicker)),
+      )
     )
     context.subscriptions.push(
       vscode.commands.registerCommand(
@@ -137,7 +154,7 @@ object Extension:
               .`then` { (value: js.UndefOr[String]) =>
                 value.toOption.map(_.trim).filter(_.nonEmpty).foreach { title =>
                   SessionEdit.parseRename(title) match
-                    case Right(op)                   => rt.renameSession(rt.focusedId.getOrElse(""), op)
+                    case Right(op) => HostRuntime.runUIO(rt.renameSession(rt.focusedId.getOrElse(""), op))
                     case Left(err) if err != "empty" =>
                       val _ = vscode.window.showErrorMessage(err)
                     case _ => ()
@@ -160,7 +177,7 @@ object Extension:
               val _     = vscode.window
                 .showWarningMessage(s"Delete $title? This cannot be undone.", "Delete", "Cancel")
                 .`then` { (pick: js.UndefOr[String]) =>
-                  if pick.toOption.contains("Delete") then rt.deleteSession(id)
+                  if pick.toOption.contains("Delete") then HostRuntime.runUIO(rt.deleteSession(id))
                   js.undefined
                 }
             end if
@@ -168,7 +185,10 @@ object Extension:
       )
     )
     context.subscriptions.push(
-      vscode.commands.registerCommand("groksBeard.cycleMode", () => chat.current.foreach(_.cycleMode()))
+      vscode.commands.registerCommand(
+        "groksBeard.cycleMode",
+        () => chat.current.foreach(rt => HostRuntime.runUIO(rt.cycleMode)),
+      )
     )
     context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.addSelection", () => chat.addSelection())
@@ -195,6 +215,7 @@ object Extension:
   def deactivate(): Unit =
     activeChat.foreach(_.dispose())
     activeChat = None
+    HostRuntime.shutdown()
 
   private def enableBridge(context: ExtensionContext, mcpHost: McpHost, bridge: TuiBridge): Unit =
     val workspace = mcpHost.workspaceFolder

@@ -9,630 +9,708 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
   def spec =
     suite("ChatRuntime")(
       test("ready posts sessionMeta and available commands") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        val tags = posted.toList.map {
-          case HostMsg.Ready                => "ready"
-          case _: HostMsg.SessionMeta       => "sessionMeta"
-          case HostMsg.AvailableCommands(_) => "availableCommands"
-          case _: HostMsg.Settings          => "settings"
-          case other                        => other.toString
+        chat() { (rt, posted) =>
+          rt.ready *> posted.get.map { msgs =>
+            val tags = msgs.map {
+              case HostMsg.Ready                => "ready"
+              case _: HostMsg.SessionMeta       => "sessionMeta"
+              case HostMsg.AvailableCommands(_) => "availableCommands"
+              case _: HostMsg.Settings          => "settings"
+              case other                        => other.toString
+            }
+            assertTrue(
+              tags.contains("ready"),
+              tags.contains("sessionMeta"),
+              tags.contains("availableCommands"),
+              msgs.exists {
+                case m: HostMsg.SessionMeta => m.modeId == "normal" && m.availableModes.exists(_.id == "plan")
+                case _                      => false
+              },
+            )
+          }
         }
-        assertTrue(
-          tags.contains("ready"),
-          tags.contains("sessionMeta"),
-          tags.contains("availableCommands"),
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.modeId == "normal" && m.availableModes.exists(_.id == "plan")
-            case _                      => false
-          },
-        )
       },
       test("send posts user, thought, agent, tool, then turnEnd") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("hello")
-        val tags = posted.toList.collect {
-          case HostMsg.UserMessage(_, text, _, _) => s"user:$text"
-          case HostMsg.ThoughtChunk(_, text)      => s"thought:$text"
-          case HostMsg.AgentChunk(_, text, _)     => s"agent:$text"
-          case HostMsg.ToolGroup(_, tools)        => s"tool:${tools.map(_.title).mkString}"
-          case HostMsg.TurnEnd(_, reason)         => s"end:$reason"
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            msgs <- posted.get
+            tags = msgs.collect {
+              case HostMsg.UserMessage(_, text, _, _) => s"user:$text"
+              case HostMsg.ThoughtChunk(_, text)      => s"thought:$text"
+              case HostMsg.AgentChunk(_, text, _)     => s"agent:$text"
+              case HostMsg.ToolGroup(_, tools)        => s"tool:${tools.map(_.title).mkString}"
+              case HostMsg.TurnEnd(_, reason)         => s"end:$reason"
+            }
+          yield assertTrue(
+            tags.head == "user:hello",
+            tags.exists(_.startsWith("thought:")),
+            tags.contains("agent:hello"),
+            tags.exists(_.startsWith("tool:Edit")),
+            tags.last == "end:end_turn",
+          )
         }
-        assertTrue(
-          tags.head == "user:hello",
-          tags.exists(_.startsWith("thought:")),
-          tags.contains("agent:hello"),
-          tags.exists(_.startsWith("tool:Edit")),
-          tags.last == "end:end_turn",
-        )
       },
       test("send folds through ChatModel into one completed turn") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("hello")
-        val model = posted.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
-        val turn  = model.turns.head
-        assertTrue(
-          turn.user.exists(_.text == "hello"),
-          turn.thought.contains("Considering"),
-          turn.agent == "hello",
-          turn.tools.exists(_.title.contains("Edit")),
-          turn.stopReason.contains("end_turn"),
-          !ChatModel.turnIsRunning(model),
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+            turn  = model.turns.head
+          yield assertTrue(
+            turn.user.exists(_.text == "hello"),
+            turn.thought.contains("Considering"),
+            turn.agent == "hello",
+            turn.tools.exists(_.title.contains("Edit")),
+            turn.stopReason.contains("end_turn"),
+            !ChatModel.turnIsRunning(model),
+          )
+        }
       },
       test("send while a turn is running queues the follow-up until the turn ends") {
-        val posted               = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        lazy val rt: ChatRuntime = ChatRuntime { msg =>
-          posted += msg
-          msg match
-            case HostMsg.UserMessage(_, "hello", _, _) => rt.send("later")
-            case _                                     => ()
+        ZIO.scoped {
+          for
+            posted <- Ref.make(List.empty[HostMsg])
+            slot   <- Ref.make(Option.empty[ChatRuntime])
+            rt     <- ChatRuntime
+              .make()
+              .provideSome[Scope](
+                ChatEnv.test(post =
+                  msg =>
+                    posted.update(_ :+ msg) *> (msg match
+                      case HostMsg.UserMessage(_, "hello", _, _) =>
+                        slot.get.flatMap {
+                          case Some(r) => r.send("later")
+                          case None    => ZIO.unit
+                        }
+                      case _ => ZIO.unit)
+                )
+              )
+            _    <- slot.set(Some(rt))
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            msgs <- posted.get
+            users = msgs.collect { case HostMsg.UserMessage(_, text, _, _) => text }
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Queued(items) => items.map(_.text) == List("later")
+              case _                     => false
+            },
+            users == List("hello", "later"),
+          )
         }
-        rt.ready()
-        posted.clear()
-        rt.send("hello")
-        val users = posted.toList.collect { case HostMsg.UserMessage(_, text, _, _) => text }
-        assertTrue(
-          posted.exists {
-            case HostMsg.Queued(items) => items.map(_.text) == List("later")
-            case _                     => false
-          },
-          users == List("hello", "later"),
-        )
       },
       test("empty send is a no-op") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("   ")
-        assertTrue(posted.isEmpty)
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("   ")
+            msgs <- posted.get
+          yield assertTrue(msgs.isEmpty)
+        }
       },
       test("MCP AuthRequired unsticks a hung prompt and sends the parked follow-up") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, AcpTransport.fake(FakeAgent(hangPrompt = true)))
-        rt.ready()
-        posted.clear()
-        rt.send("hello")
-        rt.queue("later")
-        rt.noteAgentLine(
-          """ERROR worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer resource_metadata=\"https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2\", error=\"invalid_token\"" })"""
-        )
-        assertTrue(
-          posted.exists {
-            case HostMsg.Error(message, _) => message.toLowerCase.contains("atlassian")
-            case _                         => false
-          },
-          posted.exists {
-            case HostMsg.TurnEnd(_, "cancelled") => true
-            case _                               => false
-          },
-          posted.exists {
-            case HostMsg.UserMessage(_, "later", _, _) => true
-            case _                                     => false
-          },
-        )
+        chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.send("hello")
+            _ <- rt.queue("later")
+            _ <- rt.noteAgentLine(
+              """ERROR worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer resource_metadata=\"https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2\", error=\"invalid_token\"" })"""
+            )
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.toLowerCase.contains("atlassian")
+              case _                         => false
+            },
+            msgs.exists {
+              case HostMsg.TurnEnd(_, "cancelled") => true
+              case _                               => false
+            },
+            msgs.exists {
+              case HostMsg.UserMessage(_, "later", _, _) => true
+              case _                                     => false
+            },
+          )
+        }
       },
       test("queue parks the follow-up text without sending it") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.queue("later")
-        assertTrue(
-          posted.exists {
-            case HostMsg.Queued(items) => items.map(_.text) == List("later")
-            case _                     => false
-          },
-          !posted.exists {
-            case _: HostMsg.UserMessage => true
-            case _                      => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.queue("later")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Queued(items) => items.map(_.text) == List("later")
+              case _                     => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
       },
       test("cancel sends the next parked follow-up") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.queue("later")
-        rt.cancel()
-        assertTrue(
-          posted.exists {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.queue("later")
+            _    <- rt.cancel
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
             case HostMsg.UserMessage(_, "later", _, _) => true
             case _                                     => false
-          }
-        )
+          })
+        }
       },
       test("send ingests the fake edit into Changes") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val disk   = Map("/tmp/Main.scala" -> "aaa\nobject Main\nccc\n")
-        val rt     = ChatRuntime(posted += _, ports = ReviewPorts(readDisk = disk.get))
-        rt.ready()
-        posted.clear()
-        rt.send("edit Main")
-        val summary = posted.toList.collect { case c: HostMsg.Changes => c }.last
-        assertTrue(
-          summary.fileCount == 1,
-          summary.files.head.path == "/tmp/Main.scala",
-          summary.files.head.wholeFile,
-          rt.pendingChanges.head.kind == ChangeKind.Modify,
-        )
+        val disk = Map("/tmp/Main.scala" -> "aaa\nobject Main\nccc\n")
+        chat(readDisk = disk.get) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("edit Main")
+            msgs <- posted.get
+            summary = msgs.collect { case c: HostMsg.Changes => c }.last
+          yield assertTrue(
+            summary.fileCount == 1,
+            summary.files.head.path == "/tmp/Main.scala",
+            summary.files.head.wholeFile,
+            rt.pendingChanges.head.kind == ChangeKind.Modify,
+          )
+        }
       },
       test("keep drops a pending file") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        rt.send("edit Main")
-        rt.keep("/tmp/Main.scala")
-        assertTrue(
-          rt.pendingChanges.isEmpty,
-          posted.exists {
-            case c: HostMsg.Changes => c.fileCount == 0
-            case _                  => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("edit Main")
+            _    <- rt.keep("/tmp/Main.scala")
+            msgs <- posted.get
+          yield assertTrue(
+            rt.pendingChanges.isEmpty,
+            msgs.exists {
+              case c: HostMsg.Changes => c.fileCount == 0
+              case _                  => false
+            },
+          )
+        }
       },
       test("keepAll drops every pending file") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        rt.send("edit Main")
-        assertTrue(rt.pendingChanges.nonEmpty, rt.pendingSets.nonEmpty)
-        rt.keepAll()
-        assertTrue(rt.pendingChanges.isEmpty, rt.pendingSets.isEmpty)
+        chat() { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("edit Main")
+            _ <- ZIO.succeed(assertTrue(rt.pendingChanges.nonEmpty, rt.pendingSets.nonEmpty))
+            _ <- rt.keepAll
+          yield assertTrue(rt.pendingChanges.isEmpty, rt.pendingSets.isEmpty)
+        }
+      },
+      test("ingest persists the pending sets") {
+        for
+          saved  <- Ref.make(List.empty[List[ChangeSet]])
+          result <- chat(persistChanges = sets => saved.update(_ :+ sets)) { (rt, _) =>
+            for
+              _     <- rt.ready
+              _     <- saved.set(Nil)
+              _     <- rt.send("edit Main")
+              snaps <- saved.get
+            yield assertTrue(
+              snaps.nonEmpty,
+              snaps.last.exists(_.files.exists(_.path == "/tmp/Main.scala")),
+            )
+          }
+        yield result
+      },
+      test("keepAll persists an empty snapshot") {
+        for
+          saved  <- Ref.make(List.empty[List[ChangeSet]])
+          result <- chat(persistChanges = sets => saved.update(_ :+ sets)) { (rt, _) =>
+            for
+              _     <- rt.ready
+              _     <- rt.send("edit Main")
+              _     <- saved.set(Nil)
+              _     <- rt.keepAll
+              snaps <- saved.get
+            yield assertTrue(snaps.last.isEmpty)
+          }
+        yield result
+      },
+      test("restoreChanges before ready posts on ready and does not persist") {
+        val file =
+          FileChange("/a.ts", ChangeKind.Modify, 1, 1, true, "c", oldSnapshot = Some("o"), newSnapshot = Some("n"))
+        val set = ChangeSet("s", "t1", "edit", List(file), 1L)
+        for
+          saved  <- Ref.make(List.empty[List[ChangeSet]])
+          result <- chat(persistChanges = sets => saved.update(_ :+ sets)) { (rt, posted) =>
+            for
+              _      <- rt.restoreChanges(List(set))
+              snaps  <- saved.get
+              before <- posted.get
+              _      <- rt.ready
+              after  <- posted.get
+              snaps2 <- saved.get
+            yield assertTrue(
+              snaps.isEmpty,
+              !before.exists {
+                case _: HostMsg.Changes => true
+                case _                  => false
+              },
+              snaps2.isEmpty,
+              after.exists {
+                case c: HostMsg.Changes => c.fileCount == 1
+                case _                  => false
+              },
+            )
+          }
+        yield result
+        end for
+      },
+      test("restoreChanges after ready posts immediately") {
+        val file =
+          FileChange("/a.ts", ChangeKind.Modify, 1, 1, true, "c", oldSnapshot = Some("o"), newSnapshot = Some("n"))
+        val set = ChangeSet("s", "t1", "edit", List(file), 1L)
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.restoreChanges(List(set))
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case c: HostMsg.Changes => c.fileCount == 1 && c.files.head.path == "/a.ts"
+            case _                  => false
+          })
+        }
       },
       test("changes summary tags files with the turn") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("edit Main")
-        val tagged = posted.toList.collect { case c: HostMsg.Changes => c }.last
-        assertTrue(
-          tagged.files.head.turnId.nonEmpty,
-          tagged.files.head.turnTitle.nonEmpty,
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("edit Main")
+            msgs <- posted.get
+            tagged = msgs.collect { case c: HostMsg.Changes => c }.last
+          yield assertTrue(
+            tagged.files.head.turnId.nonEmpty,
+            tagged.files.head.turnTitle.nonEmpty,
+          )
+        }
       },
       test("openDiff posts a sidebar preview of the pending file") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        rt.send("edit Main")
-        posted.clear()
-        rt.openDiff("call_1")
-        assertTrue(posted.exists {
-          case HostMsg.DiffPreview(path, _, _, _) => path == "/tmp/Main.scala"
-          case _                                  => false
-        })
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("edit Main")
+            _    <- posted.set(Nil)
+            _    <- rt.openDiff("call_1")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.DiffPreview(path, _, _, _) => path == "/tmp/Main.scala"
+            case _                                  => false
+          })
+        }
       },
       test("setMode commits plan before later work") {
-        val rt = ChatRuntime(_ => ())
-        rt.ready()
-        rt.setMode("plan")
-        assertTrue(rt.state.modeId.contains("plan"), rt.state.planActive)
+        chat() { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.setMode("plan")
+          yield assertTrue(rt.state.modeId.contains("plan"), rt.state.planActive)
+        }
       },
       test("permissionChoice answers the inbound request") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val lines  = scala.collection.mutable.ListBuffer.empty[String]
-        val inner  = AcpTransport.fake()
-        val wrap   = new AcpTransport:
-          def onData(next: String => Unit): Unit = inner.onData(next)
-          def write(data: String): Unit          =
-            lines += data
-            inner.write(data)
-          def close(): Unit = inner.close()
-        val rt = ChatRuntime(posted += _, wrap)
-        rt.ready()
-        posted.clear()
-        rt.send("hello")
-        assertTrue(posted.exists {
-          case p: HostMsg.Permission => p.requestId == "perm-1"
-          case _                     => false
-        })
-        lines.clear()
-        rt.permissionChoice("perm-1", "allow-once")
-        assertTrue(lines.exists(l => l.contains("\"selected\"") && l.contains("allow-once")))
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _       <- rt.ready
+            _       <- posted.set(Nil)
+            _       <- rt.send("hello")
+            hasPerm <- posted.get.map(_.exists {
+              case p: HostMsg.Permission => p.requestId == "perm-1"
+              case _                     => false
+            })
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.permissionChoice("perm-1", "allow-once")
+          yield assertTrue(
+            hasPerm,
+            lines.exists(l => l.contains("\"selected\"") && l.contains("allow-once")),
+          )
+        }
       },
       test("addChip is included in the next prompt") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val lines  = scala.collection.mutable.ListBuffer.empty[String]
-        val inner  = AcpTransport.fake()
-        val wrap   = new AcpTransport:
-          def onData(next: String => Unit): Unit = inner.onData(next)
-          def write(data: String): Unit          =
-            lines += data
-            inner.write(data)
-          def close(): Unit = inner.close()
-        val rt = ChatRuntime(posted += _, wrap)
-        rt.ready()
-        posted.clear()
-        lines.clear()
-        rt.addChip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50)))
-        rt.send("explain")
-        assertTrue(
-          posted.exists {
-            case HostMsg.UserMessage(_, "explain", chips, _) =>
-              chips.exists(c => PromptChip.formatAtRef(c) == "@src/Foo.scala:10-50")
-            case _ => false
-          },
-          lines.exists(l => l.contains("@src/Foo.scala:10-50") && l.contains("explain")),
-        )
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.addChip(PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50)))
+            _    <- rt.send("explain")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.UserMessage(_, "explain", chips, _) =>
+                chips.exists(c => PromptChip.formatAtRef(c) == "@src/Foo.scala:10-50")
+              case _ => false
+            },
+            lines.exists(l => l.contains("@src/Foo.scala:10-50") && l.contains("explain")),
+          )
+        }
       },
       test("mentionQuery uses the search port") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val files  = List(MentionFile("src/Main.scala", "/repo/src/Main.scala"))
-        val rt     = ChatRuntime(posted += _, searchFiles = q => if q == "Main" then files else Nil)
-        rt.mentionQuery("Main")
-        assertTrue(posted.toList == List(HostMsg.MentionResults("Main", files)))
+        val files = List(MentionFile("src/Main.scala", "/repo/src/Main.scala"))
+        chat(searchFiles = q => if q == "Main" then files else Nil) { (rt, posted) =>
+          rt.mentionQuery("Main") *> posted.get.map { msgs =>
+            assertTrue(msgs == List(HostMsg.MentionResults("Main", files)))
+          }
+        }
       },
       test("empty send still runs when a chip is pending") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.addChip(PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo")))
-        rt.send("   ")
-        assertTrue(posted.exists {
-          case HostMsg.UserMessage(_, "", chips, _) => chips.exists(_.path == "src/Foo.scala")
-          case _                                    => false
-        })
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.addChip(PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo")))
+            _    <- rt.send("   ")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.UserMessage(_, "", chips, _) => chips.exists(_.path == "src/Foo.scala")
+            case _                                    => false
+          })
+        }
       },
       test("removeChip drops a pending chip so empty send is a no-op") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val chip   = PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50))
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        rt.addChip(chip)
-        posted.clear()
-        rt.removeChip(chip.absPath, chip.startLine, chip.endLine)
-        rt.send("")
-        assertTrue(posted.isEmpty)
+        val chip = PromptChip.fromSelection("/repo/src/Foo.scala", Some("/repo"), Some(10), Some(50))
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.addChip(chip)
+            _    <- posted.set(Nil)
+            _    <- rt.removeChip(chip.absPath, chip.startLine, chip.endLine)
+            _    <- rt.send("")
+            msgs <- posted.get
+          yield assertTrue(msgs.isEmpty)
+        }
       },
       test("ready posts advertised models on sessionMeta") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        assertTrue(posted.exists {
-          case m: HostMsg.SessionMeta =>
-            m.modelId == "grok-4.6" &&
-            m.availableModels.exists(_.modelId == "grok-4.6") &&
-            m.availableModels.exists(_.modelId == "grok-code-fast-1")
-          case _ => false
-        })
+        chat() { (rt, posted) =>
+          rt.ready *> posted.get.map { msgs =>
+            assertTrue(msgs.exists {
+              case m: HostMsg.SessionMeta =>
+                m.modelId == "grok-4.6" &&
+                m.availableModels.exists(_.modelId == "grok-4.6") &&
+                m.availableModels.exists(_.modelId == "grok-code-fast-1")
+              case _ => false
+            })
+          }
+        }
       },
       test("setModel writes session/set_model") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
-        val inner = AcpTransport.fake()
-        val wrap  = new AcpTransport:
-          def onData(next: String => Unit): Unit = inner.onData(next)
-          def write(data: String): Unit          =
-            lines += data
-            inner.write(data)
-          def close(): Unit = inner.close()
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, wrap)
-        rt.ready()
-        posted.clear()
-        lines.clear()
-        rt.setModel("grok-code-fast-1")
-        assertTrue(
-          lines.exists(l => l.contains("session/set_model") && l.contains("grok-code-fast-1")),
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
-            case _                      => false
-          },
-        )
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.setModel("grok-code-fast-1")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("session/set_model") && l.contains("grok-code-fast-1")),
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
+              case _                      => false
+            },
+          )
+        }
       },
       test("cycleMode walks Normal to Plan") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.cycleMode()
-        assertTrue(
-          rt.state.modeId.contains("plan"),
-          rt.state.planActive,
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.modeId == "plan"
-            case _                      => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.cycleMode
+            msgs <- posted.get
+          yield assertTrue(
+            rt.state.modeId.contains("plan"),
+            rt.state.planActive,
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.modeId == "plan"
+              case _                      => false
+            },
+          )
+        }
       },
       test("cancel notifies session/cancel and does not answer a parked permission") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val lines  = scala.collection.mutable.ListBuffer.empty[String]
-        val inner  = AcpTransport.fake()
-        val wrap   = new AcpTransport:
-          def onData(next: String => Unit): Unit = inner.onData(next)
-          def write(data: String): Unit          =
-            lines += data
-            inner.write(data)
-          def close(): Unit = inner.close()
-        val rt = ChatRuntime(posted += _, wrap)
-        rt.ready()
-        rt.send("hello")
-        lines.clear()
-        HostDispatch(rt, WebviewMsg.PermissionPark("perm-1"), _ => ())
-        assertTrue(!lines.exists(_.contains("selected")))
-        rt.cancel()
-        assertTrue(lines.exists(_.contains("session/cancel")))
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("hello")
+            _ <- ZIO.succeed(lines.clear())
+            _ <- HostDispatch(rt, WebviewMsg.PermissionPark("perm-1"), _ => ZIO.unit)
+            _ <- ZIO.succeed(assertTrue(!lines.exists(_.contains("selected"))))
+            _ <- rt.cancel
+          yield assertTrue(lines.exists(_.contains("session/cancel")))
+        }
       },
       test("openPicker ranks a used current session first") {
         for
           now <- Clock.currentTime(TimeUnit.MILLISECONDS)
-          posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-          rows   = List(
+          rows = List(
             SessionRow("old", "Earlier work", activityMs = 9),
             SessionRow("sess_test", "Current", activityMs = 1),
           )
-          rt = ChatRuntime(posted += _, listSessions = () => rows)
-          listed <- ZIO.succeed {
-            rt.ready()
-            rt.send("hello")
-            posted.clear()
-            rt.openPicker()
-            posted.toList.collectFirst { case HostMsg.SessionList(sessions, _, true) => sessions }.getOrElse(Nil)
+          result <- chat(listSessions = () => rows) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- rt.send("hello")
+              _    <- posted.set(Nil)
+              _    <- rt.openPicker
+              msgs <- posted.get
+              listed = msgs.collectFirst { case HostMsg.SessionList(sessions, _, true) => sessions }.getOrElse(Nil)
+            yield assertTrue(
+              listed.map(_.id) == List("sess_test", "old"),
+              listed.headOption.exists(_.activityMs >= now),
+            )
           }
-        yield assertTrue(
-          listed.map(_.id) == List("sess_test", "old"),
-          listed.headOption.exists(_.activityMs >= now),
-        )
+        yield result
       } @@ TestAspect.withLiveClock,
       test("ready posts a sessionList after session/new") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rows   = List(SessionRow("disk-1", "Earlier work", activityMs = 9))
-        val rt     = ChatRuntime(posted += _, listSessions = () => rows)
-        rt.ready()
-        assertTrue(
-          posted.exists {
-            case HostMsg.SessionList(sessions, _, false) => sessions == rows
-            case _                                       => false
-          },
-          posted.exists {
-            case HostMsg.AvailableCommands(cmds) =>
-              cmds.exists(_.name == "new") && cmds.exists(_.name == "resume") && cmds.exists(_.name == "model")
-            case _ => false
-          },
-        )
+        val rows = List(SessionRow("disk-1", "Earlier work", activityMs = 9))
+        chat(listSessions = () => rows) { (rt, posted) =>
+          rt.ready *> posted.get.map { msgs =>
+            assertTrue(
+              msgs.exists {
+                case HostMsg.SessionList(sessions, _, false) => sessions == rows
+                case _                                       => false
+              },
+              msgs.exists {
+                case HostMsg.AvailableCommands(cmds) =>
+                  cmds.exists(_.name == "new") && cmds.exists(_.name == "resume") && cmds.exists(_.name == "model")
+                case _ => false
+              },
+            )
+          }
+        }
       },
       test("switching resume drops the previous session/load replay") {
-        var listener: String => Unit = _ => ()
-        var heldDisk                 = ""
-        var heldLive                 = ""
-        val agent                    = FakeAgent()
-        val transport                = new AcpTransport:
-          def onData(next: String => Unit): Unit = listener = next
-          def write(data: String): Unit          =
-            val (lines, _) = Ndjson.split("", data)
-            lines.foreach { line =>
-              Rpc.parse(line).foreach {
-                case Rpc.Request(id, "session/load", params) =>
-                  val sid    = params.as[SessionLoadParams].toOption.map(_.sessionId).getOrElse("")
-                  val ndjson =
-                    if sid == "sess_disk" then ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
-                    else ChatRuntimeSpec.loadReplay(id, sid, "hello from live", "live agent")
-                  if sid == "sess_disk" then heldDisk = ndjson else heldLive = ndjson
-                case msg => listener(agent.encodeReplies(msg))
-              }
-            }
-          end write
-          def close(): Unit = ()
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, transport)
-        rt.ready()
-        posted.clear()
-        rt.resumeSession("sess_disk")
-        rt.resumeSession("sess_live")
-        listener(heldDisk)
-        val afterStale = ChatRuntimeSpec.snapshotUsers(posted.toList)
-        listener(heldLive)
-        val users  = ChatRuntimeSpec.snapshotUsers(posted.toList)
-        val lastId = posted.toList.reverse.collectFirst { case m: HostMsg.SessionMeta => m.sessionId }
-        assertTrue(
-          afterStale.isEmpty,
-          users == List("hello from live"),
-          lastId.contains("sess_live"),
-        )
+        delayedLoad().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _     <- rt.ready
+              _     <- posted.set(Nil)
+              _     <- rt.resumeSession("sess_disk")
+              _     <- rt.resumeSession("sess_live")
+              _     <- rt.ingestData(held.disk)
+              after <- posted.get.map(ChatRuntimeSpec.snapshotUsers)
+              _     <- rt.ingestData(held.live)
+              msgs  <- posted.get
+              users  = ChatRuntimeSpec.snapshotUsers(msgs)
+              lastId = msgs.reverse.collectFirst { case m: HostMsg.SessionMeta => m.sessionId }
+            yield assertTrue(
+              after.isEmpty,
+              users == List("hello from live"),
+              lastId.contains("sess_live"),
+            )
+          }
+        }
       },
       test("newSession drops a cancelled session/load replay") {
-        var listener: String => Unit = _ => ()
-        var held                     = ""
-        val agent                    = FakeAgent()
-        val transport                = new AcpTransport:
-          def onData(next: String => Unit): Unit = listener = next
-          def write(data: String): Unit          =
-            val (lines, _) = Ndjson.split("", data)
-            lines.foreach { line =>
-              Rpc.parse(line).foreach {
-                case msg @ Rpc.Request(_, "session/load", _) => held = agent.encodeReplies(msg)
-                case msg                                     => listener(agent.encodeReplies(msg))
-              }
-            }
-          def close(): Unit = ()
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, transport)
-        rt.ready()
-        posted.clear()
-        rt.resumeSession("sess_disk")
-        rt.newSession()
-        listener(held)
-        val users = ChatRuntimeSpec.snapshotUsers(posted.toList)
-        assertTrue(
-          posted.exists {
-            case HostMsg.ClearTranscript => true
-            case _                       => false
-          },
-          !users.contains("hello from disk"),
-        )
+        delayedLoad().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.resumeSession("sess_disk")
+              _    <- rt.newSession
+              _    <- rt.ingestData(held.disk)
+              msgs <- posted.get
+              users = ChatRuntimeSpec.snapshotUsers(msgs)
+            yield assertTrue(
+              msgs.exists {
+                case HostMsg.ClearTranscript => true
+                case _                       => false
+              },
+              !users.contains("hello from disk"),
+            )
+          }
+        }
       },
       test("late session/new does not steal a resumed session") {
-        var listener: String => Unit = _ => ()
-        var heldNew                  = ""
-        val agent                    = FakeAgent()
-        val transport                = new AcpTransport:
-          def onData(next: String => Unit): Unit = listener = next
-          def write(data: String): Unit          =
-            val (lines, _) = Ndjson.split("", data)
-            lines.foreach { line =>
-              Rpc.parse(line).foreach {
-                case msg @ Rpc.Request(_, "session/new", _) => heldNew = agent.encodeReplies(msg)
-                case msg                                    => listener(agent.encodeReplies(msg))
-              }
-            }
-          def close(): Unit = ()
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, transport)
-        rt.ready()
-        rt.resumeSession("sess_disk")
-        posted.clear()
-        listener(heldNew)
-        val ids = posted.toList.collect { case m: HostMsg.SessionMeta => m.sessionId }
-        assertTrue(!ids.contains("sess_test"))
+        delayedNew().flatMap { case (transport, heldNew) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- rt.resumeSession("sess_disk")
+              _    <- posted.set(Nil)
+              _    <- rt.ingestData(heldNew.get)
+              msgs <- posted.get
+              ids = msgs.collect { case m: HostMsg.SessionMeta => m.sessionId }
+            yield assertTrue(!ids.contains("sess_test"))
+          }
+        }
       },
       test("resumeSession posts the disk title on sessionMeta") {
-        val rows   = List(SessionRow("sess_disk", "Walked history"))
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, listSessions = () => rows)
-        rt.ready()
-        posted.clear()
-        rt.resumeSession("sess_disk")
-        assertTrue(
-          posted.exists {
+        val rows = List(SessionRow("sess_disk", "Walked history"))
+        chat(listSessions = () => rows) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_disk")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
             case m: HostMsg.SessionMeta => m.sessionId == "sess_disk" && m.title == "Walked history"
             case _                      => false
-          }
-        )
+          })
+        }
       },
       test("resumeSession replays disk history into the transcript") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.resumeSession("sess_disk")
-        val model = posted.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
-        val snap  = posted.toList.collect { case HostMsg.Transcript(turns) => turns }.flatten
-        assertTrue(
-          posted.exists {
-            case HostMsg.Transcript(_) => true
-            case _                     => false
-          },
-          !posted.exists {
-            case _: HostMsg.UserMessage => true
-            case _: HostMsg.AgentChunk  => true
-            case _                      => false
-          },
-          snap.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
-          model.turns.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_disk")
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+            snap  = msgs.collect { case HostMsg.Transcript(turns) => turns }.flatten
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Transcript(_) => true
+              case _                     => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _: HostMsg.AgentChunk  => true
+              case _                      => false
+            },
+            snap.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
+            model.turns.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
+          )
+        }
       },
       test("locked session/load posts SessionLocked and leaves the current session") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _, AcpTransport.fake(FakeAgent(lockLoad = true)))
-        rt.ready()
-        posted.clear()
-        rt.resumeSession("sess_live")
-        assertTrue(
-          posted.exists {
-            case HostMsg.SessionLocked("sess_live", msg) => msg.contains("TUI")
-            case _                                       => false
-          },
-          !posted.exists {
-            case _: HostMsg.UserMessage => true
-            case _                      => false
-          },
-        )
+        chat(transport = AcpTransport.fake(FakeAgent(lockLoad = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_live")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.SessionLocked("sess_live", msg) => msg.contains("TUI")
+              case _                                       => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
       },
       test("newSession deletes an unused session this process created") {
         val deleted = scala.collection.mutable.ListBuffer.empty[String]
-        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt      = ChatRuntime(posted += _, scheduleEmptyDelete = deleted += _)
-        rt.ready()
-        rt.newSession()
-        assertTrue(deleted.contains("sess_test"))
+        chat(scheduleEmptyDelete = deleted += _) { (rt, _) =>
+          rt.ready *> rt.newSession.as(assertTrue(deleted.contains("sess_test")))
+        }
       },
       test("newSession keeps a session that already has a prompt") {
         val deleted = scala.collection.mutable.ListBuffer.empty[String]
-        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt      = ChatRuntime(posted += _, scheduleEmptyDelete = deleted += _)
-        rt.ready()
-        rt.send("hello")
-        deleted.clear()
-        rt.newSession()
-        assertTrue(deleted.isEmpty)
+        chat(scheduleEmptyDelete = deleted += _) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("hello")
+            _ <- ZIO.succeed(deleted.clear())
+            _ <- rt.newSession
+          yield assertTrue(deleted.isEmpty)
+        }
       },
       test("/model in the composer switches by id or display name") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("/model Grok Code Fast")
-        assertTrue(
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
-            case _                      => false
-          },
-          !posted.exists {
-            case HostMsg.UserMessage(_, "/model Grok Code Fast", _, _) => true
-            case _                                                     => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/model Grok Code Fast")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
+              case _                      => false
+            },
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "/model Grok Code Fast", _, _) => true
+              case _                                                     => false
+            },
+          )
+        }
       },
       test("unknown /model posts an error and does not prompt") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("/model nope")
-        assertTrue(
-          posted.exists {
-            case HostMsg.Error(message, _) => message.contains("nope")
-            case _                         => false
-          },
-          !posted.exists {
-            case _: HostMsg.UserMessage => true
-            case _                      => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/model nope")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("nope")
+              case _                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
       },
       test("/new in the composer starts a new session") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.ready()
-        posted.clear()
-        rt.send("/new")
-        assertTrue(
-          posted.exists {
-            case HostMsg.ClearTranscript => true
-            case _                       => false
-          },
-          !posted.exists {
-            case HostMsg.UserMessage(_, "/new", _, _) => true
-            case _                                    => false
-          },
-        )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/new")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.ClearTranscript => true
+              case _                       => false
+            },
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "/new", _, _) => true
+              case _                                    => false
+            },
+          )
+        }
       },
       test("setSetting posts the patched settings") {
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(posted += _)
-        rt.setSetting("useCtrlEnterToSend", true)
-        assertTrue(posted.exists {
-          case s: HostMsg.Settings => s.useCtrlEnterToSend
-          case _                   => false
-        })
+        chat() { (rt, posted) =>
+          rt.setSetting("useCtrlEnterToSend", true) *> posted.get.map { msgs =>
+            assertTrue(msgs.exists {
+              case s: HostMsg.Settings => s.useCtrlEnterToSend
+              case _                   => false
+            })
+          }
+        }
       },
       test("renameSession posts the new title on sessionMeta and the list") {
-        var rows   = List(SessionRow("sess_test", "Old"))
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(
-          posted += _,
+        var rows = List(SessionRow("sess_test", "Old"))
+        chat(
           listSessions = () => rows,
           renameOnDisk = (id, op) =>
             op match
@@ -640,27 +718,28 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 rows = rows.map(r => if r.id == id then r.copy(title = t) else r)
                 rows.find(_.id == id)
               case RenameOp.Auto => rows.find(_.id == id),
-        )
-        rt.ready()
-        posted.clear()
-        rt.renameSession("sess_test", RenameOp.Manual("Plan"))
-        assertTrue(
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.title == "Plan"
-            case _                      => false
-          },
-          posted.exists {
-            case HostMsg.SessionList(sessions, _, _) =>
-              sessions.exists(r => r.id == "sess_test" && r.title == "Plan")
-            case _ => false
-          },
-        )
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.renameSession("sess_test", RenameOp.Manual("Plan"))
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.title == "Plan"
+              case _                      => false
+            },
+            msgs.exists {
+              case HostMsg.SessionList(sessions, _, _) =>
+                sessions.exists(r => r.id == "sess_test" && r.title == "Plan")
+              case _ => false
+            },
+          )
+        }
       },
       test("send /rename applies a manual title and is not a prompt") {
-        var rows   = List(SessionRow("sess_test", "Old"))
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(
-          posted += _,
+        var rows = List(SessionRow("sess_test", "Old"))
+        chat(
           listSessions = () => rows,
           renameOnDisk = (id, op) =>
             op match
@@ -668,62 +747,146 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 rows = rows.map(r => if r.id == id then r.copy(title = t) else r)
                 rows.find(_.id == id)
               case RenameOp.Auto => rows.find(_.id == id),
-        )
-        rt.ready()
-        posted.clear()
-        rt.send("/rename Plan")
-        assertTrue(
-          posted.exists {
-            case m: HostMsg.SessionMeta => m.title == "Plan"
-            case _                      => false
-          },
-          !posted.exists {
-            case HostMsg.UserMessage(_, "/rename Plan", _, _) => true
-            case _                                            => false
-          },
-        )
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/rename Plan")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.title == "Plan"
+              case _                      => false
+            },
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "/rename Plan", _, _) => true
+              case _                                            => false
+            },
+          )
+        }
       },
       test("send /delete does not wipe without confirm") {
         var deleted = false
-        val posted  = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt      = ChatRuntime(
-          posted += _,
+        chat(
           deleteOnDisk = _ =>
-            deleted = true; true,
-        )
-        rt.ready()
-        posted.clear()
-        rt.send("/delete")
-        assertTrue(
-          !deleted,
-          !posted.exists {
-            case HostMsg.ClearTranscript => true
-            case _                       => false
-          },
-        )
+            deleted = true; true
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/delete")
+            msgs <- posted.get
+          yield assertTrue(
+            !deleted,
+            !msgs.exists {
+              case HostMsg.ClearTranscript => true
+              case _                       => false
+            },
+          )
+        }
       },
       test("deleteSession of another id refreshes the open picker") {
-        var rows   = List(SessionRow("keep", "Keep", activityMs = 2), SessionRow("gone", "Gone", activityMs = 1))
-        val posted = scala.collection.mutable.ListBuffer.empty[HostMsg]
-        val rt     = ChatRuntime(
-          posted += _,
+        var rows = List(SessionRow("keep", "Keep", activityMs = 2), SessionRow("gone", "Gone", activityMs = 1))
+        chat(
           listSessions = () => rows,
           deleteOnDisk = id =>
             rows = rows.filterNot(_.id == id)
             true,
-        )
-        rt.ready()
-        rt.openPicker()
-        posted.clear()
-        rt.deleteSession("gone")
-        assertTrue(
-          posted.exists {
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.openPicker
+            _    <- posted.set(Nil)
+            _    <- rt.deleteSession("gone")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
             case HostMsg.SessionList(sessions, _, true) => sessions.map(_.id) == List("keep")
             case _                                      => false
-          }
-        )
+          })
+        }
       },
     )
+
+  final class HeldLoad(var disk: String = "", var live: String = "")
+  final class HeldNew(var get: String = "")
+
+  def delayedLoad(): UIO[(AcpTransport, HeldLoad)] =
+    ZIO.succeed {
+      val held                        = HeldLoad()
+      var ingest: String => UIO[Unit] = _ => ZIO.unit
+      val agent                       = FakeAgent()
+      val transport                   = new AcpTransport:
+        def attach(next: String => UIO[Unit]): UIO[Unit] = ZIO.succeed { ingest = next }
+        def write(data: String): BeardError.Result[Unit] =
+          val (lines, _) = Ndjson.split("", data)
+          ZIO.foreachDiscard(lines) { line =>
+            Rpc.parse(line) match
+              case Right(Rpc.Request(id, "session/load", params)) =>
+                ZIO.succeed {
+                  val sid    = params.as[SessionLoadParams].toOption.map(_.sessionId).getOrElse("")
+                  val ndjson =
+                    if sid == "sess_disk" then ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
+                    else ChatRuntimeSpec.loadReplay(id, sid, "hello from live", "live agent")
+                  if sid == "sess_disk" then held.disk = ndjson else held.live = ndjson
+                }
+              case Right(msg) => ingest(agent.encodeReplies(msg))
+              case Left(_)    => ZIO.unit
+          }
+        end write
+        def close: UIO[Unit] = ZIO.unit
+      (transport, held)
+    }
+
+  def delayedNew(): UIO[(AcpTransport, HeldNew)] =
+    ZIO.succeed {
+      val held                        = HeldNew()
+      var ingest: String => UIO[Unit] = _ => ZIO.unit
+      val agent                       = FakeAgent()
+      val transport                   = new AcpTransport:
+        def attach(next: String => UIO[Unit]): UIO[Unit] = ZIO.succeed { ingest = next }
+        def write(data: String): BeardError.Result[Unit] =
+          val (lines, _) = Ndjson.split("", data)
+          ZIO.foreachDiscard(lines) { line =>
+            Rpc.parse(line) match
+              case Right(msg @ Rpc.Request(_, "session/new", _)) =>
+                ZIO.succeed { held.get = agent.encodeReplies(msg) }
+              case Right(msg) => ingest(agent.encodeReplies(msg))
+              case Left(_)    => ZIO.unit
+          }
+        def close: UIO[Unit] = ZIO.unit
+      (transport, held)
+    }
+
+  def chat(
+      transport: AcpTransport = AcpTransport.fake(),
+      searchFiles: String => List[MentionFile] = _ => Nil,
+      listSessions: () => List[SessionRow] = () => Nil,
+      scheduleEmptyDelete: String => Unit = _ => (),
+      renameOnDisk: (String, RenameOp) => Option[SessionRow] = (_, _) => None,
+      deleteOnDisk: String => Boolean = _ => false,
+      persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
+      readDisk: String => Option[String] = _ => None,
+  )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
+    ZIO.scoped {
+      for
+        posted <- Ref.make(List.empty[HostMsg])
+        rt     <- ChatRuntime
+          .make(transport = transport)
+          .provideSome[Scope](
+            ChatEnv.test(
+              post = msg => posted.update(_ :+ msg),
+              searchFiles = searchFiles,
+              listSessions = listSessions,
+              scheduleEmptyDelete = scheduleEmptyDelete,
+              renameOnDisk = renameOnDisk,
+              deleteOnDisk = deleteOnDisk,
+              persistChanges = persistChanges,
+              readDisk = readDisk,
+            )
+          )
+        result <- body(rt, posted)
+      yield result
+    }
 
   def loadReplay(id: RpcId, sessionId: String, user: String, agent: String): String =
     Ndjson.encodeChunk(

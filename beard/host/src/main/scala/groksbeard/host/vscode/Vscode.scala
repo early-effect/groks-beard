@@ -31,6 +31,7 @@ trait ExtensionContext extends js.Object:
   val subscriptions: js.Array[Disposable] = js.native
   val extensionUri: Uri                   = js.native
   def workspaceState: Memento             = js.native
+  def storageUri: js.UndefOr[Uri]         = js.native
 
 /** Options we send into a webview. Not `@js.native`: we construct these in Scala. */
 class WebviewOptions(
@@ -184,6 +185,7 @@ trait FileSystem extends js.Object:
   def writeFile(uri: Uri, content: js.typedarray.Uint8Array): js.Promise[Unit] = js.native
   def readFile(uri: Uri): js.Promise[js.typedarray.Uint8Array]                 = js.native
   def delete(uri: Uri): js.Promise[Unit]                                       = js.native
+  def createDirectory(uri: Uri): js.Promise[Unit]                              = js.native
 
 trait TextDocumentContentProvider extends js.Object:
   def provideTextDocumentContent(uri: Uri, token: CancellationToken): String

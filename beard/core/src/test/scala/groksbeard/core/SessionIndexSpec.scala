@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.*
 import zio.test.*
 
 object SessionIndexSpec extends ZIOSpecDefault:
@@ -149,8 +150,9 @@ object SessionIndexSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val rows = SessionIndex.listRows(fs, "/home", "/repo")
-        assertTrue(rows.map(_.id) == List("used", "empty-new"))
+        SessionIndex.listRows(fs, "/home", "/repo").map { rows =>
+          assertTrue(rows.map(_.id) == List("used", "empty-new"))
+        }
       },
       test("listRows prefers last_active_at over newer files and newer ids") {
         val fs = MemorySessionFs(
@@ -170,11 +172,12 @@ object SessionIndexSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val rows = SessionIndex.listRows(fs, "/home", "/repo")
-        assertTrue(
-          rows.map(_.id) == List("old", "neu"),
-          SessionSummary.epochMs("2026-09-04T15:00:00Z").exists(_ > 1_000_000_000_000L),
-        )
+        SessionIndex.listRows(fs, "/home", "/repo").map { rows =>
+          assertTrue(
+            rows.map(_.id) == List("old", "neu"),
+            SessionSummary.epochMs("2026-09-04T15:00:00Z").exists(_ > 1_000_000_000_000L),
+          )
+        }
       },
       test("listRows uses a SessionFs and sorts by activity") {
         val fs = MemorySessionFs(
@@ -190,8 +193,9 @@ object SessionIndexSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val rows = SessionIndex.listRows(fs, "/home", "/repo")
-        assertTrue(rows.map(_.id) == List("new", "old"), rows.head.title == "Newest")
+        SessionIndex.listRows(fs, "/home", "/repo").map { rows =>
+          assertTrue(rows.map(_.id) == List("new", "old"), rows.head.title == "Newest")
+        }
       },
       test("groupDirs includes a slug dir whose .cwd matches") {
         val fs = MemorySessionFs(
@@ -205,8 +209,9 @@ object SessionIndexSpec extends ZIOSpecDefault:
             ),
           )
         )
-        val rows = SessionIndex.listRows(fs, "/home", "/very/long/cwd")
-        assertTrue(rows.map(_.id) == List("s1"), rows.head.title == "Hashed")
+        SessionIndex.listRows(fs, "/home", "/very/long/cwd").map { rows =>
+          assertTrue(rows.map(_.id) == List("s1"), rows.head.title == "Hashed")
+        }
       },
       test("SessionCommands merge keeps advertised names first") {
         val advertised = List(SlashCommand("compact", "Compact context"))
@@ -235,16 +240,19 @@ object SessionIndexSpec extends ZIOSpecDefault:
   final case class File(mtime: Long, text: String) extends Entry
 
   final class MemorySessionFs(files: Map[String, Entry]) extends SessionFs:
-    def listNames(dir: String): List[String] =
+    def listNames(dir: String): BeardError.Result[List[String]] =
       val prefix = if dir.endsWith("/") then dir else dir + "/"
-      files.keys.iterator
-        .filter(p => p.startsWith(prefix) && !p.substring(prefix.length).contains("/"))
-        .map(_.substring(prefix.length))
-        .toList
-    def isDirectory(path: String): Boolean  = files.get(path).contains(Dir)
-    def mtimeMs(path: String): Option[Long] =
-      files.get(path).collect { case File(m, _) => m }
-    def readText(path: String): Option[String] =
-      files.get(path).collect { case File(_, t) => t }
+      ZIO.succeed(
+        files.keys.iterator
+          .filter(p => p.startsWith(prefix) && !p.substring(prefix.length).contains("/"))
+          .map(_.substring(prefix.length))
+          .toList
+      )
+    def isDirectory(path: String): BeardError.Result[Boolean] =
+      ZIO.succeed(files.get(path).contains(Dir))
+    def mtimeMs(path: String): BeardError.Result[Option[Long]] =
+      ZIO.succeed(files.get(path).collect { case File(m, _) => m })
+    def readText(path: String): BeardError.Result[Option[String]] =
+      ZIO.succeed(files.get(path).collect { case File(_, t) => t })
   end MemorySessionFs
 end SessionIndexSpec

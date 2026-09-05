@@ -1,7 +1,8 @@
 package groksbeard.host
 
-import groksbeard.core.{DiffPair, UndoMutation}
+import groksbeard.core.{BeardError, DiffPair, UndoMutation}
 import groksbeard.host.vscode.*
+import zio.*
 
 import scala.scalajs.js
 import scala.scalajs.js.typedarray.Uint8Array
@@ -26,17 +27,16 @@ final class Review(docs: BeardDocs):
 
   def readDisk(path: String): Option[String] = None
 
-  def applyUndo(mutations: List[UndoMutation]): Unit =
-    mutations.foreach {
+  def applyUndo(mutations: List[UndoMutation]): BeardError.Result[Unit] =
+    ZIO.foreachDiscard(mutations) {
       case UndoMutation.Replace(path, text) => write(path, text)
       case UndoMutation.Create(path, text)  => write(path, text)
       case UndoMutation.Delete(path)        =>
-        val _ = vscode.workspace.fs.delete(vscode.Uri.file(path))
+        ChangeDisk.fromPromise(vscode.workspace.fs.delete(vscode.Uri.file(path)))
     }
 
-  private def write(path: String, text: String): Unit =
-    val bytes = Review.utf8(text)
-    val _     = vscode.workspace.fs.writeFile(vscode.Uri.file(path), bytes)
+  private def write(path: String, text: String): BeardError.Result[Unit] =
+    ChangeDisk.fromPromise(vscode.workspace.fs.writeFile(vscode.Uri.file(path), Review.utf8(text)))
 end Review
 
 object Review:

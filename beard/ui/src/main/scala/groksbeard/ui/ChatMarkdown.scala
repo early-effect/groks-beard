@@ -4,13 +4,29 @@ import ascent.*
 import ascent.dsl.*
 import groksbeard.core.Markdown
 import groksbeard.core.Markdown.{Block, Inline}
+import groksbeard.core.TurnView
+import zio.Chunk
 
 object ChatMarkdown:
 
-  def render(text: String): ascent.ast.UI[Any] =
-    E.div(Markdown.parse(text).map(block)*)
+  def parts(turn: TurnView): (Seq[(String, Block)], String) =
+    val (done, tail) =
+      if turn.stopReason.isEmpty then Markdown.streamParts(turn.agent)
+      else (Chunk.fromIterable(Markdown.parse(turn.agent)), "")
+    (done.zipWithIndex.map((b, i) => (s"$i", b)).toSeq, tail)
 
-  private def block(b: Block): ascent.ast.UI[Any] =
+  def render(text: String, live: Boolean = false): ascent.ast.UI[Any] =
+    val (done, tail) =
+      if live then Markdown.streamParts(text)
+      else (Chunk.fromIterable(Markdown.parse(text)), "")
+    val nodes = done.map(block).toSeq ++ (if tail.isEmpty then Seq.empty else Seq(tailEl(tail)))
+    E.div(Arg.ArgsArg(nodes.map(Arg.ChildArg(_))))
+
+  def tailEl(tail: String): ascent.ast.UI[Any] =
+    if tail.startsWith("```") then E.pre(E.code(tail))
+    else E.p(tail)
+
+  def block(b: Block): ascent.ast.UI[Any] =
     b match
       case Block.Paragraph(in)  => E.p(in.map(inline)*)
       case Block.Heading(1, in) => E.h1(in.map(inline)*)

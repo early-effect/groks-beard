@@ -12,25 +12,23 @@ import java.nio.file.Path as JPath
   *
   *   - `GET /__beard/events?client=` SSE of [[HostMsg]]
   *   - `POST /__beard/msg?client=` body is one [[WebviewMsg]]
+  *
+  * [[Preview.serve]] owns static files, stamp reload, and the HTTP scope. Clients are acquired in that same `Scope`
+  * before bind so extra routes cannot race the resource.
   */
 object LiveMain extends ZIOAppDefault:
 
   def run =
     for
       args <- getArgs
-      root = resolvePreviewRoot(args)
-      port = resolvePort(args)
-      log  = (line: String) => java.lang.System.err.println(s"[beard] $line")
-      _ <- ZIO.scoped {
-        LiveClients.grok(log).flatMap { clients =>
-          ZIO.logInfo(s"Grok's Beard preview on http://localhost:$port serving $root") *>
-            Server.serve(routes(root, port, clients)).provide(Server.defaultWith(_.port(port)))
-        }
-      }
+      config = configFromArgs(args)
+      log    = (line: String) => java.lang.System.err.println(s"[beard] $line")
+      clients <- LiveClients.grok(log)
+      _       <- ZIO.logInfo(s"Grok's Beard preview on http://localhost:${config.port} serving ${config.root}")
+      _       <- Preview
+        .serve(config, extraRoutes = apiRoutes(clients))
+        .provideSome[Scope](Server.defaultWith(_.port(config.port)))
     yield ()
-
-  def routes(previewRoot: JPath, port: Int, clients: LiveClients): Routes[Any, Response] =
-    Preview.routes(PreviewConfig(root = previewRoot, port = port)) ++ apiRoutes(clients)
 
   def apiRoutes(clients: LiveClients): Routes[Any, Response] =
     Routes(
@@ -56,14 +54,16 @@ object LiveMain extends ZIOAppDefault:
   def clientId(req: Request): Option[String] =
     req.queryParam("client").map(_.trim).filter(LiveClients.validId)
 
-  def resolvePreviewRoot(args: Chunk[String]): JPath =
-    val positional = args.filterNot(a => a == "--open" || a.forall(_.isDigit))
-    positional.headOption
+  def configFromArgs(args: Chunk[String]): PreviewConfig =
+    val open       = args.contains("--open")
+    val positional = args.filterNot(_ == "--open")
+    val port       = positional.headOption.filter(_.forall(_.isDigit)).map(_.toInt).getOrElse(8765)
+    val root       = positional
+      .lift(1)
       .map(JPath.of(_))
       .getOrElse(JPath.of("beard/ui/target/preview"))
       .toAbsolutePath
       .normalize
-
-  def resolvePort(args: Chunk[String]): Int =
-    args.find(_.forall(_.isDigit)).map(_.toInt).getOrElse(8765)
+    PreviewConfig(root = root, port = port, openBrowser = open)
+  end configFromArgs
 end LiveMain

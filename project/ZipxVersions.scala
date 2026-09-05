@@ -16,18 +16,18 @@ object MyVersions extends ZipxVersions:
   val scalaJavaTime     = Lib("io.github.cquiroz", "scala-java-time", "2.7.0")
   val scalaJavaTimeTzdb = scalaJavaTime.mod("scala-java-time-tzdb")
 
-  val ascent        = Lib("rocks.earlyeffect", "ascent-core", "0.6.1")
+  val ascent        = Lib("rocks.earlyeffect", "ascent-core", "0.6.2")
   val ascentCss     = ascent.mod("ascent-css")
   val ascentJs      = ascent.mod("ascent-js")
   val ascentHistory = ascent.mod("ascent-history")
   val ascentChekhov = ascent.mod("ascent-chekhov")
-  val ascentPreview = Lib("rocks.earlyeffect", "ascent-preview", "0.6.1")
+  val ascentPreview = Lib("rocks.earlyeffect", "ascent-preview", "0.6.2")
 
   val scalajs          = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
   val scalafmt         = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   val dynverCi         = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val sbtSplice        = Plugin("rocks.earlyeffect", "sbt-splice", "0.1.0")
-  val sbtAscentPreview = Plugin("rocks.earlyeffect", "sbt-ascent-preview", "0.6.1")
+  val sbtAscentPreview = Plugin("rocks.earlyeffect", "sbt-ascent-preview", "0.6.2")
   val sbtChekhov       = Plugin("rocks.earlyeffect", "sbt-chekhov", "0.0.5")
 
   def zioTests      = library(zioTest.test, zioTestSbt.test)

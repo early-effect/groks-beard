@@ -130,17 +130,11 @@ lazy val preview = (project in file("beard/preview"))
     Compile / mainClass       := Def.uncached(Some("groksbeard.preview.LiveMain")),
     Compile / run / mainClass := Def.uncached(Some("groksbeard.preview.LiveMain")),
     Compile / run / fork      := true,
-    Compile / run / javaOptions ++= BeardPreview.jdk24PlusRunOptions,
+    Compile / run / javaOptions ++= Seq(
+      "--sun-misc-unsafe-memory-access=allow",
+      "--enable-native-access=ALL-UNNAMED",
+    ),
     Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
-    Compile / run / forkOptions   := Def.uncached {
-      (Compile / forkOptions).value
-        .withWorkingDirectory((ThisBuild / baseDirectory).value)
-        .withRunJVMOptions(
-          (Compile / forkOptions).value.runJVMOptions ++ BeardPreview.jdk24PlusRunOptions.toVector
-        )
-        .withConnectInput(false)
-    },
-    Compile / bgRun / bgCopyClasspath := false,
   )
 
 lazy val ui = (projectMatrix in file("beard/ui"))
@@ -172,6 +166,8 @@ lazy val ui = (projectMatrix in file("beard/ui"))
             (ThisBuild / baseDirectory).value / "beard" / "ui" / "target" / "splice" / "full.js"
           ),
           ascentPreviewAutoServe := true,
+          ascentPreviewMain      := "groksbeard.preview.LiveMain",
+          ascentPreviewClasspath := Def.uncached((LocalProject("preview") / Compile / fullClasspath).value),
           ascentPreviewServe     := Def.uncached(BeardPreview.serveLive.value),
           ascentPreview / watchOnTermination := BeardPreview.watchStop,
           ascentPreviewRebuild               := Def.uncached {

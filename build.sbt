@@ -95,7 +95,7 @@ lazy val root = (project in file("."))
   )
 
 // JVM + JS. `core/testFull` is JVM-only; CI links and runs coreJS. Use `testCore`.
-lazy val core = (projectMatrix in file("beard/core"))
+lazy val core = (projectMatrix in file("core"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .settings(
     name := "groks-beard-core",
@@ -108,7 +108,7 @@ lazy val core = (projectMatrix in file("beard/core"))
   .jvmPlatform(scalaVersions = scalaVersions)
   .jsPlatform(scalaVersions = scalaVersions, javaTimePolyfill)
 
-lazy val facade = (project in file("beard/facade"))
+lazy val facade = (project in file("facade"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
   .settings(
@@ -118,7 +118,7 @@ lazy val facade = (project in file("beard/facade"))
     javaTimePolyfill,
   )
 
-lazy val preview = (project in file("beard/preview"))
+lazy val preview = (project in file("preview"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .dependsOn(LocalProject("core"))
   .settings(
@@ -137,7 +137,7 @@ lazy val preview = (project in file("beard/preview"))
     Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
   )
 
-lazy val ui = (projectMatrix in file("beard/ui"))
+lazy val ui = (projectMatrix in file("ui"))
   .dependsOn(core)
   .settings(
     name := "groks-beard-ui",
@@ -163,7 +163,7 @@ lazy val ui = (projectMatrix in file("beard/ui"))
           Test / scalaJSUseMainModuleInitializer    := false,
           spliceFastOutput                := Def.uncached(ascentPreviewRoot.value / "fast.js"),
           spliceFullOutput                := Def.uncached(
-            (ThisBuild / baseDirectory).value / "beard" / "ui" / "target" / "splice" / "full.js"
+            (ThisBuild / baseDirectory).value / "ui" / "target" / "splice" / "full.js"
           ),
           ascentPreviewAutoServe := true,
           ascentPreviewMain      := "groksbeard.preview.LiveMain",
@@ -172,7 +172,7 @@ lazy val ui = (projectMatrix in file("beard/ui"))
           ascentPreview / watchOnTermination := BeardPreview.watchStop,
           ascentPreviewRebuild               := Def.uncached {
             val dest = ascentPreviewStage.value
-            val logo = (ThisBuild / baseDirectory).value / "beard" / "media" / "logo.png"
+            val logo = (ThisBuild / baseDirectory).value / "media" / "logo.png"
             IO.copyFile(logo, dest / "logo.png")
             ()
           },
@@ -180,12 +180,12 @@ lazy val ui = (projectMatrix in file("beard/ui"))
   )
 
 lazy val stageExtension =
-  taskKey[File]("Copy host fastLinkJS, mcp-proxy, and ui spliceFull into beard/dist")
+  taskKey[File]("Copy host fastLinkJS, mcp-proxy, and ui spliceFull into dist")
 
 lazy val packageVsix =
-  taskKey[File]("Stage the extension and pack beard/groks-beard.vsix with vsce")
+  taskKey[File]("Stage the extension and pack groks-beard.vsix with vsce")
 
-lazy val host = (project in file("beard/host"))
+lazy val host = (project in file("host"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
   .dependsOn(LocalProject("coreJS"))
@@ -202,7 +202,7 @@ lazy val host = (project in file("beard/host"))
     Test / test     := Def.uncached(sbt.protocol.testing.TestResult.Passed),
     Test / testFull := Def.uncached(sbt.protocol.testing.TestResult.Passed),
     stageExtension := Def.uncached {
-      val dest    = (ThisBuild / baseDirectory).value / "beard" / "dist"
+      val dest    = (ThisBuild / baseDirectory).value / "dist"
       val webview = dest / "webview"
       IO.createDirectory(webview)
       val hostOut = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
@@ -218,13 +218,11 @@ lazy val host = (project in file("beard/host"))
     packageVsix := Def.uncached {
       val dest = stageExtension.value
       val base = (ThisBuild / baseDirectory).value
-      val cwd  = base / "beard"
-      val vsix = cwd / "groks-beard.vsix"
-      IO.copyFile(base / "LICENSE", cwd / "LICENSE")
+      val vsix = base / "groks-beard.vsix"
       import scala.sys.process.*
       val code = Process(
         Seq("npx", "--yes", "@vscode/vsce", "package", "--no-dependencies", "-o", vsix.getAbsolutePath),
-        cwd,
+        base,
       ).!
       if code != 0 then sys.error(s"vsce package failed with $code")
       val _ = dest
@@ -232,7 +230,7 @@ lazy val host = (project in file("beard/host"))
     },
   )
 
-lazy val mcp = (project in file("beard/mcp"))
+lazy val mcp = (project in file("mcp"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
   .dependsOn(LocalProject("coreJS"))

@@ -61,7 +61,7 @@ object LiveMain extends ZIOAppDefault:
     val root       = positional
       .lift(1)
       .map(JPath.of(_))
-      .getOrElse(JPath.of("beard/ui/target/preview"))
+      .getOrElse(JPath.of("ui/target/preview"))
       .toAbsolutePath
       .normalize
     PreviewConfig(root = root, port = port, openBrowser = open)

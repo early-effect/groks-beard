@@ -6,7 +6,6 @@ node_modules/
 dist/
 out/
 *.vsix
-beard/LICENSE
 .vscode-test/
 coverage/
 
@@ -26,7 +25,7 @@ build.sbt.semanticdb
 .DS_Store
 *.log
 
-# Agent / Playwright review captures. Product images live under beard/media/.
+# Agent / Playwright review captures. Product images live under media/.
 /*.png
 /test-results/
 /playwright-report/

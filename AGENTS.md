@@ -13,7 +13,7 @@ Priorities, in order:
 3. **UX.** The bar is the Grok Build TUI: tight chrome, readable copy, no slop. Full-width menus and permission rows, mashed labels (`+2/-11 fileShow`), UUID session titles, composer-sized filters, toolbar crowding, and duplicate actions are defects. Fix them in the same change. Do not PR them as known leftover. A green Chekhov scene does not make ugly chrome shippable.
 4. **Completeness.** Client-owned TUI commands (`/new`, `/resume`, `/model`, …) should work with and without arguments the way the pager does.
 
-Not a priority: API stability, UI snapshot stability, "we already shipped this shape." A breaking change inside `beard/` is cheap. A muddled runtime is expensive. "We'll tidy the UI later" is not a reason to open the PR.
+Not a priority: API stability, UI snapshot stability, "we already shipped this shape." A breaking change in this repo is cheap. A muddled runtime is expensive. "We'll tidy the UI later" is not a reason to open the PR.
 
 ## ZIO 2: this repo is the example
 
@@ -81,8 +81,8 @@ Chekhov passing is not visual review. A screenshot of the default scene is not v
 
 Screenshots, Playwright dumps, and other review temp files are not product. Before every commit that goes on a PR:
 
-1. Delete root-level captures (`beard-*.png`, `page-*.png`, MCP `filename` screenshots). They are gitignored as `/*.png`. Product images live under `beard/media/`.
+1. Delete root-level captures (`beard-*.png`, `page-*.png`, MCP `filename` screenshots). They are gitignored as `/*.png`. Product images live under `media/`.
 2. Do not `git add -A` from the repo root. That will still miss ignored pngs, but it will pick up other junk (`*.log` is ignored; untracked notes and worktrees are not).
 3. `git status` must show no leftover review files. If an untracked png is listed, it is not ignored yet: add the pattern, delete the file, and only then commit.
 
-Applies to: `beard/ui/**`, `beard/host/**`, `beard/preview/**`
+Applies to: `ui/**`, `host/**`, `preview/**`

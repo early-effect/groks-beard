@@ -21,7 +21,7 @@ object LiveMainSpec extends ZIOSpecDefault:
           b.root == site,
           c.port == 8765,
           !c.openBrowser,
-          c.root.endsWith(JPath.of("beard", "ui", "target", "preview")),
+          c.root.endsWith(JPath.of("ui", "target", "preview")),
         )
       }
     )

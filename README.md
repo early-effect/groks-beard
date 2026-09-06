@@ -6,7 +6,7 @@ Created by [Russell White](https://github.com/russwyte). Published as **`early-e
 
 > **Status: 0.2.0 (Scala).** Dogfood from source. The [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=early-effect.groks-beard) and [Open VSX](https://open-vsx.org/extension/early-effect/groks-beard) listings are still the older 0.1 TypeScript build. Not a fork of the community Grok Build extension. Not affiliated with or endorsed by SpaceXAI (formerly xAI). *Grok* and *Grok Build* are trademarks of xAI; this project uses those names only to describe what it is compatible with.
 
-The product is Scala 3 under `beard/` (Ascent, Scala.js, ZIO). Preview in the browser and the editor sidebar are the same UI.
+The product is Scala 3 at the repo root (Ascent, Scala.js, ZIO). Preview in the browser and the editor sidebar are the same UI.
 
 | | **Editor chat** | **Browser preview** | **TUI sidecar** |
 | --- | --- | --- | --- |
@@ -29,15 +29,15 @@ From this repo (`main`):
 
 ```bash
 sbt --no-server host/packageVsix
-code --install-extension beard/groks-beard.vsix --force
-# Cursor: cursor --install-extension beard/groks-beard.vsix --force
+code --install-extension groks-beard.vsix --force
+# Cursor: cursor --install-extension groks-beard.vsix --force
 ```
 
 Or iterate without packing:
 
 ```bash
 sbt --no-server host/stageExtension
-code --extensionDevelopmentPath=beard
+code --extensionDevelopmentPath=.
 ```
 
 Open chat with `Ctrl+;` / `Cmd+;`.
@@ -79,13 +79,14 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/copy
 
 | Path | Role |
 | --- | --- |
-| `beard/core` | Protocol, ChatRuntime, diffs, MCP tool dispatch (JVM + JS; `sbt testCore`) |
-| `beard/ui` | Ascent chat webview |
-| `beard/host` | VS Code / Cursor extension |
-| `beard/mcp` | stdio MCP proxy for the external TUI |
-| `beard/preview` | Live preview server (`LiveMain`) |
+| `core` | Protocol, ChatRuntime, diffs, MCP tool dispatch (JVM + JS; `sbt testCore`) |
+| `ui` | Ascent chat webview |
+| `host` | VS Code / Cursor extension |
+| `mcp` | stdio MCP proxy for the external TUI |
+| `preview` | Live preview server (`LiveMain`) |
+| `facade` | VS Code webview API facade |
 
-Tests: `sbt --no-server testCore` or `sbt --no-server verifyBeard`. The CLI owns tools, skills, MCP, memory, and compaction. The sidecar is path-only eyes (no writes).
+`core` is a projectMatrix. `core/testFull` is the JVM axis only; `testCore` is `core/testFull; coreJS/testFull`. Match CI (Chekhov + every module + splice) with `sbt --no-server verifyBeard`. UI tests: `sbt --no-server "uiJS/chekhovInstall; uiJS/testFull"`. The CLI owns tools, skills, MCP, memory, and compaction. The sidecar is path-only eyes (no writes). The TUI proxy is `dist/mcp-proxy.js` (Node, not `process.execPath`).
 
 ## Copyright and license
 

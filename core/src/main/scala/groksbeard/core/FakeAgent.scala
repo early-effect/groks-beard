@@ -108,6 +108,7 @@ final class FakeAgent(
                     newText = Some("object Main:\n  def run = ()"),
                   )
                 ),
+                locations = List(ToolLocation("/tmp/Main.scala", Some(1))),
               ),
               options = List(PermissionOption("allow-once", "Allow once", "allow_once")),
             ),
@@ -128,6 +129,7 @@ final class FakeAgent(
                     newText = Some("object Main:\n  def run = ()"),
                   )
                 ),
+                locations = List(ToolLocation("/tmp/Main.scala", Some(1))),
               ),
             ),
           ),

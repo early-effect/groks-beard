@@ -53,6 +53,7 @@ final class ChatRuntime private (
   private var listOpen                  = false
   private var listed                    = List.empty[SessionRow]
   private var live                      = false
+  private var lastFollow                = Option.empty[FollowTarget]
 
   private def exclusive(body: UIO[Unit]): UIO[Unit] =
     reentrant.get.flatMap { held =>
@@ -480,6 +481,7 @@ final class ChatRuntime private (
     occupancy = None
     running = false
     loadModel = ChatModel.empty
+    lastFollow = None
   end resetTurnState
 
   private def resetLocal(): Unit =
@@ -707,20 +709,28 @@ final class ChatRuntime private (
       case _                                    => ZIO.unit
 
   private def ingestTool(status: String, body: AcpToolCall): UIO[Unit] =
-    reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
-      if diffs.isEmpty then ZIO.unit
-      else
-        ZIO.suspendSucceed {
-          store.ingest(
-            sessionId.getOrElse(fallbackSessionId),
-            currentTurn,
-            currentTitle,
-            diffs.map(DiffContent.fileChangeFrom),
-          )
-          postChanges
-        }
-    }
+    followLocations(body) *>
+      reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
+        if diffs.isEmpty then ZIO.unit
+        else
+          ZIO.suspendSucceed {
+            store.ingest(
+              sessionId.getOrElse(fallbackSessionId),
+              currentTurn,
+              currentTitle,
+              diffs.map(DiffContent.fileChangeFrom),
+            )
+            postChanges
+          }
+      }
   end ingestTool
+
+  private def followLocations(body: AcpToolCall): UIO[Unit] =
+    FollowAlong.pick(body.locations, body.toolCallId) match
+      case Some(next) if FollowAlong.changed(lastFollow, next) =>
+        lastFollow = Some(next)
+        review.follow(next.path, next.line)
+      case _ => ZIO.unit
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
     AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)

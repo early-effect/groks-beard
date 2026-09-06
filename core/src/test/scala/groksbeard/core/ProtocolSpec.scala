@@ -23,8 +23,16 @@ object ProtocolSpec extends ZIOSpecDefault:
           modelId = "grok-4.6",
           availableModels = List(ModelOption("grok-4.6", "Grok 4.6")),
         )
-        val set: WebviewMsg = WebviewMsg.SetModel("grok-4.6")
-        assertTrue(msg.toJson.fromJson[HostMsg] == Right(msg), set.toJson.fromJson[WebviewMsg] == Right(set))
+        val set: WebviewMsg     = WebviewMsg.SetModel("grok-4.6")
+        val effort: WebviewMsg  = WebviewMsg.SetEffort("high")
+        val withEffort: HostMsg =
+          HostMsg.SessionMeta("s1", "Grok's Beard", "normal", modelId = "grok-4.6", effort = "high")
+        assertTrue(
+          msg.toJson.fromJson[HostMsg] == Right(msg),
+          set.toJson.fromJson[WebviewMsg] == Right(set),
+          effort.toJson.fromJson[WebviewMsg] == Right(effort),
+          withEffort.toJson.fromJson[HostMsg] == Right(withEffort),
+        )
       },
       test("queued follow-ups round-trip") {
         val msg: HostMsg = HostMsg.Queued(List(QueuedPrompt("q1", "later")))

@@ -38,6 +38,7 @@ enum HostMsg derives JsonCodec:
       occupancy: Option[Occupancy] = None,
       modelId: String = "",
       availableModels: List[ModelOption] = Nil,
+      effort: String = "",
   )
   @jsonHint("sessionList") case SessionList(
       sessions: List[SessionRow],
@@ -146,7 +147,8 @@ enum WebviewMsg derives JsonCodec:
   )
   @jsonHint("cycleMode") case CycleMode
   @jsonHint("setMode") case SetMode(modeId: String)
-  @jsonHint("setModel") case SetModel(modelId: String)
+  @jsonHint("setModel") case SetModel(modelId: String, effort: String = "")
+  @jsonHint("setEffort") case SetEffort(level: String)
   @jsonHint("openSettings") case OpenSettings
   @jsonHint("setSetting") case SetSetting(key: String, value: String | Boolean)
   @jsonHint("permissionChoice") case PermissionChoice(requestId: String, optionId: String)

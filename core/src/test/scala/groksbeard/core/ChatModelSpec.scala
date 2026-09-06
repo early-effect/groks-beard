@@ -137,6 +137,31 @@ object ChatModelSpec extends ZIOSpecDefault:
           modeOnly.models.exists(_.modelId == "grok-4.6"),
         )
       },
+      test("sessionMeta effort sticks across a later mode-only meta and clears on a model switch") {
+        val withEffort = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.SessionMeta(
+            "s1",
+            "Grok's Beard",
+            "normal",
+            modelId = "grok-4.6",
+            availableModels = List(ModelOption("grok-4.6", "Grok 4.6")),
+            effort = "high",
+          ),
+        )
+        val modeOnly = ChatModel.applyMsg(withEffort, HostMsg.SessionMeta("", "", "plan"))
+        val switched = ChatModel.applyMsg(
+          modeOnly,
+          HostMsg.SessionMeta("", "", "", modelId = "grok-code-fast-1", effort = ""),
+        )
+        assertTrue(
+          withEffort.effort == "high",
+          modeOnly.effort == "high",
+          modeOnly.modeId == "plan",
+          switched.modelId == "grok-code-fast-1",
+          switched.effort.isEmpty,
+        )
+      },
       test("composerChip upserts by path and range") {
         val first = ChatModel.applyMsg(
           ChatModel.empty,

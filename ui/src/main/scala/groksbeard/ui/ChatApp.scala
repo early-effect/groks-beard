@@ -16,7 +16,7 @@ import zio.*
 import zio.stream.ZStream
 
 enum OpenMenu:
-  case Mode, Settings, Model
+  case Mode, Settings, Model, Effort
 
 final case class SessionLeave(id: String, fromPicker: Boolean)
 
@@ -40,6 +40,10 @@ object Scene:
 end Scene
 
 object ChatApp:
+
+  private def isMenuNav(key: String, shift: Boolean): Boolean =
+    key == "ArrowUp" || key == "ArrowDown" || key == "Home" || key == "End" ||
+      ((key == "Enter" || key == "Tab") && !shift)
 
   private val LeaveMs      = 320L
   private val fg           = Color.Keyword("var(--vscode-foreground, #f3e6d0)")
@@ -132,6 +136,34 @@ object ChatApp:
         color(fg),
         fontSize.px(12),
         cursor.pointer,
+      )
+
+  object ChipGroup
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        flexShrink(0),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(4),
+        backgroundColor(inputBg),
+        overflow.hidden,
+      )
+
+  object ChipSeg
+      extends CssClass(
+        border.none,
+        borderRadius.px(0),
+        padding(2.px, 8.px),
+        backgroundColor(Color.transparent),
+        color(fg),
+        fontSize.px(12),
+        cursor.pointer,
+      )
+
+  object ChipSegSplit
+      extends CssClass(
+        borderLeft(Border.solid(1.px, widgetBorder)),
+        color(muted),
       )
 
   object ChipRow
@@ -817,11 +849,14 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
+      scope          <- ZIO.scope
       chat           <- sq(PreviewScenes.seed(scene))
       draft          <- sq(initialDraft)
       dismissed      <- sq(false)
       mentionIdx     <- sq(Option.empty[Int])
+      slashIdx       <- sq(if ComposerQuery.slashQuery(initialDraft).isDefined then Some(0) else None)
       openMenu       <- sq(initialMenu)
+      menuIdx        <- sq(if initialMenu.isDefined then Some(0) else None)
       pickerQuery    <- sq("")
       changesOpen    <- sq(false)
       leaving        <- sq(Option.empty[SessionLeave])
@@ -941,15 +976,13 @@ object ChatApp:
               case Some(cmd) if SessionCommands.isResume(cmd.name) || SessionCommands.isHome(cmd.name) =>
                 draft.set("") *> openPicker
               case Some(cmd) if SessionCommands.isModel(cmd.name) && cmd.args.isEmpty =>
-                draft.set("") *> openMenu.set(Some(OpenMenu.Model))
+                draft.set("") *> showMenu(OpenMenu.Model)
               case Some(cmd) if SessionCommands.isModel(cmd.name) =>
-                ModelOption.pick(cmd.args, c.models) match
-                  case Some(m) =>
-                    draft.set("") *>
-                      chat.update(_.copy(modelId = m.modelId, error = None)) *>
-                      ZIO.succeed(bridge.post(WebviewMsg.SetModel(m.modelId)))
-                  case None =>
-                    draft.set("") *> chat.update(_.copy(error = Some(s"Unknown model: ${cmd.args}")))
+                applyModel(cmd.args, c)
+              case Some(cmd) if SessionCommands.isEffort(cmd.name) && cmd.args.isEmpty =>
+                openEffort
+              case Some(cmd) if SessionCommands.isEffort(cmd.name) =>
+                applyEffort(cmd.args, c)
               case Some(cmd) if SessionCommands.isRename(cmd.name) =>
                 SessionEdit.parseRename(cmd.args) match
                   case Left("empty") =>
@@ -1020,7 +1053,7 @@ object ChatApp:
           if key == "Escape" then
             e.preventDefault()
             openMenu.get.flatMap {
-              case Some(_) => openMenu.set(None)
+              case Some(_) => hideMenu
               case None    =>
                 pendingDelete.get.flatMap {
                   case Some(_) => cancelDelete
@@ -1045,48 +1078,55 @@ object ChatApp:
                     }
                 }
             }
-          else if e.shiftKey && key == "Tab" && !ctrlOrMeta then
-            e.preventDefault()
-            if c.question.isDefined || c.permission.isDefined then ZIO.unit
-            else openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
-          else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
-            e.preventDefault()
-            ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId)))
           else
-            pendingDelete.get.flatMap {
-              case Some(_) if key == "y" || key == "Y" =>
-                e.preventDefault()
-                confirmDelete
-              case Some(_) if key == "n" || key == "N" =>
-                e.preventDefault()
-                cancelDelete
-              case _ =>
-                c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
-                  case Some(opt) =>
-                    e.preventDefault()
-                    ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
-                  case None =>
-                    c.question match
-                      case Some(_) if typingInField(e) => ZIO.unit
-                      case Some(card)                  =>
-                        questionDraft.get.flatMap { held =>
-                          val d = QuestionDraft.align(card, held)
-                          QuestionDraft.navKey(key) match
-                            case Some("prev") =>
-                              e.preventDefault()
-                              questionDraft.set(QuestionDraft.prev(card, d))
-                            case Some("next") =>
-                              e.preventDefault()
-                              questionDraft.set(QuestionDraft.next(card, d))
-                            case _ =>
-                              QuestionDraft.current(card, d).flatMap(q => QuestionDraft.optionKey(key, q)) match
-                                case Some(oid) =>
-                                  e.preventDefault()
-                                  applyQuestionPick(card, oid)
-                                case None => ZIO.unit
-                          end match
-                        }
-                      case None => ZIO.unit
+            (if typingInField(e) then ZIO.succeed(false) else onMenuKey(e)).flatMap {
+              case true  => ZIO.unit
+              case false =>
+                if e.shiftKey && key == "Tab" && !ctrlOrMeta then
+                  e.preventDefault()
+                  if c.question.isDefined || c.permission.isDefined then ZIO.unit
+                  else hideMenu *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+                else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
+                  e.preventDefault()
+                  ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId)))
+                else
+                  pendingDelete.get.flatMap {
+                    case Some(_) if key == "y" || key == "Y" =>
+                      e.preventDefault()
+                      confirmDelete
+                    case Some(_) if key == "n" || key == "N" =>
+                      e.preventDefault()
+                      cancelDelete
+                    case _ =>
+                      c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
+                        case Some(opt) =>
+                          e.preventDefault()
+                          ZIO.succeed(
+                            bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId))
+                          )
+                        case None =>
+                          c.question match
+                            case Some(_) if typingInField(e) => ZIO.unit
+                            case Some(card)                  =>
+                              questionDraft.get.flatMap { held =>
+                                val d = QuestionDraft.align(card, held)
+                                QuestionDraft.navKey(key) match
+                                  case Some("prev") =>
+                                    e.preventDefault()
+                                    questionDraft.set(QuestionDraft.prev(card, d))
+                                  case Some("next") =>
+                                    e.preventDefault()
+                                    questionDraft.set(QuestionDraft.next(card, d))
+                                  case _ =>
+                                    QuestionDraft.current(card, d).flatMap(q => QuestionDraft.optionKey(key, q)) match
+                                      case Some(oid) =>
+                                        e.preventDefault()
+                                        applyQuestionPick(card, oid)
+                                      case None => ZIO.unit
+                                end match
+                              }
+                            case None => ZIO.unit
+                  }
             }
         }
       end onCardKey
@@ -1105,7 +1145,7 @@ object ChatApp:
             chat.update(adoptView(_, id, waiting)) *>
             commit(hist, lastHref, BeardPath.sessionHref(id), WebviewMsg.ResumeSession(id), bridge) *>
             (ZIO.sleep(LeaveMs.millis) *>
-              ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkDaemon.unit
+              ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkIn(scope).unit
         }
 
       def showPicker(c: ChatModel, leave: Option[SessionLeave]): Boolean =
@@ -1123,10 +1163,153 @@ object ChatApp:
       def pickHistory(text: String): UIO[Unit] =
         historyBrowse.set(None) *> historyPickIdx.set(None) *> draft.set(text)
 
+      def levelsOf(c: ChatModel): List[EffortLevel] =
+        Effort.of(c.models.find(_.modelId == c.modelId))
+
+      def menuIds(c: ChatModel, menu: OpenMenu): List[String] =
+        menu match
+          case OpenMenu.Mode     => c.modes.map(_.id)
+          case OpenMenu.Model    => c.models.map(_.modelId)
+          case OpenMenu.Effort   => levelsOf(c).map(_.value)
+          case OpenMenu.Settings => List("useCtrlEnterToSend", "includeActiveFileByDefault")
+
+      def menuStart(c: ChatModel, menu: OpenMenu): Int =
+        val ids = menuIds(c, menu)
+        val cur = menu match
+          case OpenMenu.Mode     => c.modeId
+          case OpenMenu.Model    => c.modelId
+          case OpenMenu.Effort   => c.effort
+          case OpenMenu.Settings => ""
+        val i = ids.indexOf(cur)
+        if i >= 0 then i else 0
+
+      def hideMenu: UIO[Unit] =
+        openMenu.set(None) *> menuIdx.set(None)
+
+      def showMenu(menu: OpenMenu): UIO[Unit] =
+        chat.get.flatMap { c =>
+          openMenu.set(Some(menu)) *>
+            menuIdx.set(Some(menuStart(c, menu))) *>
+            (if menu == OpenMenu.Settings then ZIO.succeed(bridge.post(WebviewMsg.OpenSettings)) else ZIO.unit)
+        }
+
+      def toggleMenu(menu: OpenMenu): UIO[Unit] =
+        openMenu.get.flatMap {
+          case Some(m) if m == menu => hideMenu
+          case _                    => showMenu(menu)
+        }
+
+      def chooseMode(id: String): UIO[Unit] =
+        hideMenu *>
+          chat.update(_.copy(modeId = id)) *>
+          ZIO.succeed(bridge.post(WebviewMsg.SetMode(id)))
+
+      def chooseModel(model: ModelOption): UIO[Unit] =
+        chat.get.flatMap { c =>
+          val allowed    = Effort.of(Some(model))
+          val nextEffort =
+            if allowed.exists(_.value == c.effort) then c.effort else Effort.defaultOf(Some(model))
+          hideMenu *>
+            chat.update(_.copy(modelId = model.modelId, effort = nextEffort, error = None)) *>
+            ZIO.succeed(bridge.post(WebviewMsg.SetModel(model.modelId)))
+        }
+
+      def chooseEffort(level: EffortLevel): UIO[Unit] =
+        hideMenu *>
+          chat.update(_.copy(effort = level.value, error = None)) *>
+          ZIO.succeed(bridge.post(WebviewMsg.SetEffort(level.value)))
+
+      def chooseSetting(id: String): UIO[Unit] =
+        chat.get.flatMap { c =>
+          id match
+            case "useCtrlEnterToSend" =>
+              val next = !c.settings.useCtrlEnterToSend
+              chat.update(_.copy(settings = c.settings.copy(useCtrlEnterToSend = next))) *>
+                ZIO.succeed(bridge.post(WebviewMsg.SetSetting("useCtrlEnterToSend", next)))
+            case "includeActiveFileByDefault" =>
+              val next = !c.settings.includeActiveFileByDefault
+              chat.update(_.copy(settings = c.settings.copy(includeActiveFileByDefault = next))) *>
+                ZIO.succeed(bridge.post(WebviewMsg.SetSetting("includeActiveFileByDefault", next)))
+            case _ => ZIO.unit
+        }
+
+      def pickMenuRow(menu: OpenMenu, id: String): UIO[Unit] =
+        menu match
+          case OpenMenu.Mode  => chooseMode(id)
+          case OpenMenu.Model =>
+            chat.get.flatMap { c =>
+              c.models.find(_.modelId == id).map(chooseModel).getOrElse(ZIO.unit)
+            }
+          case OpenMenu.Effort =>
+            chat.get.flatMap { c =>
+              levelsOf(c).find(_.value == id).map(chooseEffort).getOrElse(ZIO.unit)
+            }
+          case OpenMenu.Settings => chooseSetting(id)
+
+      def onMenuKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
+        val key = e.key
+        if !ChatApp.isMenuNav(key, e.shiftKey) then ZIO.succeed(false)
+        else
+          openMenu.get.flatMap {
+            case None       => ZIO.succeed(false)
+            case Some(menu) =>
+              chat.get.flatMap { c =>
+                val ids = menuIds(c, menu)
+                if ids.isEmpty then ZIO.succeed(false)
+                else if key == "Enter" || key == "Tab" then
+                  e.preventDefault()
+                  menuIdx.get.flatMap { idx =>
+                    ids.lift(idx.getOrElse(0)) match
+                      case None     => ZIO.succeed(true)
+                      case Some(id) => pickMenuRow(menu, id).as(true)
+                  }
+                else
+                  e.preventDefault()
+                  menuIdx.update(i => ComposerQuery.moveIndex(i, key, ids.size)).as(true)
+                end if
+              }
+          }
+        end if
+      end onMenuKey
+
+      def openEffort: UIO[Unit] =
+        chat.get.flatMap { c =>
+          val allowed = levelsOf(c)
+          if c.modelId.isEmpty then draft.set("") *> chat.update(_.copy(error = Some(Effort.NoModel)))
+          else if allowed.isEmpty then draft.set("") *> chat.update(_.copy(error = Some(Effort.unknown("", Nil))))
+          else draft.set("") *> showMenu(OpenMenu.Effort)
+        }
+
+      def applyEffort(raw: String, c: ChatModel): UIO[Unit] =
+        val allowed = levelsOf(c)
+        if c.modelId.isEmpty then draft.set("") *> chat.update(_.copy(error = Some(Effort.NoModel)))
+        else
+          Effort.pick(raw, allowed) match
+            case Some(level) =>
+              draft.set("") *>
+                chat.update(_.copy(effort = level.value, error = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.SetEffort(level.value)))
+            case None =>
+              draft.set("") *> chat.update(_.copy(error = Some(Effort.unknown(raw, allowed))))
+      end applyEffort
+
+      def applyModel(args: String, c: ChatModel): UIO[Unit] =
+        Effort.splitModelArgs(args, c.models) match
+          case Left(err) =>
+            draft.set("") *> chat.update(_.copy(error = Some(err)))
+          case Right((m, e)) =>
+            val allowed    = Effort.of(Some(m))
+            val nextEffort =
+              e.getOrElse(if allowed.exists(_.value == c.effort) then c.effort else Effort.defaultOf(Some(m)))
+            draft.set("") *>
+              chat.update(_.copy(modelId = m.modelId, effort = nextEffort, error = None)) *>
+              ZIO.succeed(bridge.post(WebviewMsg.SetModel(m.modelId, e.getOrElse(""))))
+
       def pickSlash(name: String): UIO[Unit] =
         if SessionCommands.isNew(name) then draft.set("") *> startNew
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then draft.set("") *> openPicker
-        else if SessionCommands.isModel(name) then draft.set("") *> openMenu.set(Some(OpenMenu.Model))
+        else if SessionCommands.isModel(name) then draft.set("") *> showMenu(OpenMenu.Model)
+        else if SessionCommands.isEffort(name) then openEffort
         else if SessionCommands.isRename(name) then draft.set("/rename ")
         else if SessionCommands.isDelete(name) then draft.set("") *> chat.get.flatMap(c => armDelete(c.sessionId))
         else if SessionCommands.isHistory(name) then draft.set("/history ") *> historyPickIdx.set(Some(0))
@@ -1189,7 +1372,7 @@ object ChatApp:
       def openPicker: UIO[Unit] =
         leaving.set(None) *>
           pickerQuery.set("") *>
-          openMenu.set(None) *>
+          hideMenu *>
           chat.update(ChatModel.thaw) *>
           ZIO.succeed(bridge.post(WebviewMsg.OpenSessionPicker))
 
@@ -1211,9 +1394,11 @@ object ChatApp:
 
       def onDraft(text: String): UIO[Unit] =
         draft.set(text) *>
-          openMenu.set(None) *>
+          hideMenu *>
           (if PromptHistory.query(text).isDefined then historyPickIdx.set(Some(0))
            else historyPickIdx.set(None)) *>
+          (if ComposerQuery.slashQuery(text).isDefined then slashIdx.set(Some(0))
+           else slashIdx.set(None)) *>
           (ComposerQuery.mentionQuery(text) match
             case None =>
               dismissed.set(false) *> mentionIdx.set(None) *>
@@ -1226,7 +1411,7 @@ object ChatApp:
         Shell,
         Page,
         Ev.onKeyDown(onCardKey),
-        renderToolbar(bridge, chat, openMenu, openPicker, startNew),
+        renderToolbar(chat, toggleMenu, openPicker, startNew),
         E.div(
           Stage,
           when(Squawk.zipWith(chat, leaving)(showPicker))(
@@ -1356,78 +1541,7 @@ object ChatApp:
             chat.map(_.error.getOrElse("")),
           )
         ),
-        when(openMenu.map(_.contains(OpenMenu.Mode)))(
-          E.div(
-            Popover,
-            TestId("mode-menu"),
-            forEach(chat.map(_.modes))(_.id) { mode =>
-              E.button(
-                MenuItem,
-                TestId(s"mode-${mode.id}"),
-                A.title(ModeLabel.modeTip(mode.id)),
-                Ev.onClick(_ =>
-                  openMenu.set(None) *>
-                    chat.update(_.copy(modeId = mode.id)) *>
-                    ZIO.succeed(bridge.post(WebviewMsg.SetMode(mode.id)))
-                ),
-                mode.name,
-              )
-            },
-          )
-        ),
-        when(openMenu.map(_.contains(OpenMenu.Model)))(
-          E.div(
-            Popover,
-            TestId("model-menu"),
-            forEach(chat.map(_.models))(_.modelId) { model =>
-              E.button(
-                MenuItem,
-                TestId(s"model-${model.modelId}"),
-                A.title(model.description.getOrElse(model.modelId)),
-                Ev.onClick(_ =>
-                  openMenu.set(None) *>
-                    chat.update(_.copy(modelId = model.modelId, error = None)) *>
-                    ZIO.succeed(bridge.post(WebviewMsg.SetModel(model.modelId)))
-                ),
-                model.name,
-              )
-            },
-          )
-        ),
-        when(openMenu.map(_.contains(OpenMenu.Settings)))(
-          E.div(
-            PopoverEnd,
-            TestId("settings-panel"),
-            E.button(
-              MenuItem,
-              TestId("setting-ctrl-enter"),
-              Ev.onClick(_ =>
-                chat.get.flatMap { c =>
-                  val next = !c.settings.useCtrlEnterToSend
-                  chat.update(_.copy(settings = c.settings.copy(useCtrlEnterToSend = next))) *>
-                    ZIO.succeed(bridge.post(WebviewMsg.SetSetting("useCtrlEnterToSend", next)))
-                }
-              ),
-              chat.map(c =>
-                if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off"
-              ),
-            ),
-            E.button(
-              MenuItem,
-              TestId("setting-active-file"),
-              Ev.onClick(_ =>
-                chat.get.flatMap { c =>
-                  val next = !c.settings.includeActiveFileByDefault
-                  chat.update(_.copy(settings = c.settings.copy(includeActiveFileByDefault = next))) *>
-                    ZIO.succeed(bridge.post(WebviewMsg.SetSetting("includeActiveFileByDefault", next)))
-                }
-              ),
-              chat.map(c =>
-                if c.settings.includeActiveFileByDefault then "Include active file: on" else "Include active file: off"
-              ),
-            ),
-          )
-        ),
+        renderChromeMenus(chat, openMenu, menuIdx, chooseMode, chooseModel, chooseEffort, chooseSetting),
         when(historyShown.map(_.nonEmpty))(
           E.ul(
             ComposerMenu,
@@ -1455,10 +1569,15 @@ object ChatApp:
             ComposerMenu,
             TestId("slash"),
             A.role("listbox"),
-            forEach(slashShown)(_.name) { cmd =>
+            forEach(
+              Squawk.zipWith(slashShown, slashIdx) { (cmds, idx) =>
+                cmds.zipWithIndex.map { (cmd, i) => (cmd, i, idx.contains(i)) }
+              }
+            )(t => s"${t._1.name}-${t._3}") { t =>
+              val (cmd, _, on) = t
               E.li(
                 E.button(
-                  MenuItem,
+                  if on then Send else MenuItem,
                   TestId(s"slash-${cmd.name}"),
                   Ev.onClick(_ => pickSlash(cmd.name)),
                   cmd.name,
@@ -1490,6 +1609,8 @@ object ChatApp:
           nowMs,
           draft,
           mentionIdx,
+          slashIdx,
+          openMenu,
           slashShown,
           mentionShown,
           historyShown,
@@ -1501,15 +1622,121 @@ object ChatApp:
           pickMention,
           pickSlash,
           pickHistory,
+          onMenuKey,
         ),
       )
     end for
   end component
 
-  private def renderToolbar(
-      bridge: HostBridge,
+  private def renderChromeMenus(
       chat: ascent.Source[ChatModel],
       openMenu: ascent.Source[Option[OpenMenu]],
+      menuIdx: ascent.Source[Option[Int]],
+      chooseMode: String => UIO[Unit],
+      chooseModel: ModelOption => UIO[Unit],
+      chooseEffort: EffortLevel => UIO[Unit],
+      chooseSetting: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    E.div(
+      when(openMenu.map(_.contains(OpenMenu.Mode)))(
+        E.div(
+          Popover,
+          TestId("mode-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              c.modes.zipWithIndex.map { (mode, i) => (mode, idx.contains(i)) }
+            }
+          )(t => s"${t._1.id}-${t._2}") { t =>
+            val (mode, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"mode-${mode.id}"),
+              A.title(ModeLabel.modeTip(mode.id)),
+              Ev.onClick(_ => chooseMode(mode.id)),
+              mode.name,
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Model)))(
+        E.div(
+          Popover,
+          TestId("model-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              c.models.zipWithIndex.map { (model, i) => (model, idx.contains(i)) }
+            }
+          )(t => s"${t._1.modelId}-${t._2}") { t =>
+            val (model, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"model-${model.modelId}"),
+              A.title(model.description.getOrElse(model.modelId)),
+              Ev.onClick(_ => chooseModel(model)),
+              model.name,
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Effort)))(
+        E.div(
+          Popover,
+          TestId("effort-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              Effort.of(c.models.find(_.modelId == c.modelId)).zipWithIndex.map { (level, i) =>
+                (level, idx.contains(i))
+              }
+            }
+          )(t => s"${t._1.value}-${t._2}") { t =>
+            val (level, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"effort-${level.value}"),
+              Ev.onClick(_ => chooseEffort(level)),
+              level.label.getOrElse(level.value),
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Settings)))(
+        E.div(
+          PopoverEnd,
+          TestId("settings-panel"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              List(
+                (
+                  "ctrl-enter",
+                  "useCtrlEnterToSend",
+                  if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off",
+                  idx.contains(0),
+                ),
+                (
+                  "active-file",
+                  "includeActiveFileByDefault",
+                  if c.settings.includeActiveFileByDefault then "Include active file: on"
+                  else "Include active file: off",
+                  idx.contains(1),
+                ),
+              )
+            }
+          )(t => s"${t._1}-${t._3}-${t._4}") { t =>
+            val (testId, id, label, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"setting-$testId"),
+              Ev.onClick(_ => chooseSetting(id)),
+              label,
+            )
+          },
+        )
+      ),
+    )
+
+  private def renderToolbar(
+      chat: ascent.Source[ChatModel],
+      toggleMenu: OpenMenu => UIO[Unit],
       openPicker: UIO[Unit],
       startNew: UIO[Unit],
   ): ascent.ast.UI[Any] =
@@ -1519,26 +1746,35 @@ object ChatApp:
         Chip,
         TestId("mode"),
         A.title(chat.map(c => ModeLabel.modeTip(c.modeId))),
-        Ev.onClick(_ =>
-          openMenu.update {
-            case Some(OpenMenu.Mode) => None
-            case _                   => Some(OpenMenu.Mode)
-          }
-        ),
+        Ev.onClick(_ => toggleMenu(OpenMenu.Mode)),
         chat.map(c => ModeLabel.modeLabel(c.modeId, c.modes)),
       ),
       when(chat.map(_.models.nonEmpty))(
-        E.button(
-          Chip,
-          TestId("model"),
-          A.title("Switch model"),
-          Ev.onClick(_ =>
-            openMenu.update {
-              case Some(OpenMenu.Model) => None
-              case _                    => Some(OpenMenu.Model)
-            }
+        E.div(
+          ChipGroup,
+          TestId("model-group"),
+          E.button(
+            ChipSeg,
+            TestId("model"),
+            A.title("Switch model"),
+            Ev.onClick(_ => toggleMenu(OpenMenu.Model)),
+            chat.map(c => ModelOption.label(c.modelId, c.models)),
           ),
-          chat.map(c => ModelOption.label(c.modelId, c.models)),
+          when(chat.map(c => Effort.of(c.models.find(_.modelId == c.modelId)).nonEmpty))(
+            E.button(
+              ChipSeg,
+              ChipSegSplit,
+              TestId("effort"),
+              A.title("Set reasoning effort"),
+              Ev.onClick(_ => toggleMenu(OpenMenu.Effort)),
+              chat.map { c =>
+                if c.effort.nonEmpty then c.effort
+                else
+                  val d = Effort.defaultOf(c.models.find(_.modelId == c.modelId))
+                  if d.nonEmpty then d else "effort"
+              },
+            )
+          ),
         )
       ),
       E.button(
@@ -1559,14 +1795,7 @@ object ChatApp:
       E.button(
         Chip,
         TestId("settings"),
-        Ev.onClick(_ =>
-          openMenu.get.flatMap {
-            case Some(OpenMenu.Settings) => openMenu.set(None)
-            case _                       =>
-              openMenu.set(Some(OpenMenu.Settings)) *>
-                ZIO.succeed(bridge.post(WebviewMsg.OpenSettings))
-          }
-        ),
+        Ev.onClick(_ => toggleMenu(OpenMenu.Settings)),
         "Settings",
       ),
     )
@@ -1577,6 +1806,8 @@ object ChatApp:
       nowMs: ascent.Source[Long],
       draft: ascent.Source[String],
       mentionIdx: ascent.Source[Option[Int]],
+      slashIdx: ascent.Source[Option[Int]],
+      openMenu: ascent.Source[Option[OpenMenu]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
       historyShown: Squawk[List[String]],
@@ -1588,6 +1819,7 @@ object ChatApp:
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
+      onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -1597,6 +1829,8 @@ object ChatApp:
         chat,
         draft,
         mentionIdx,
+        slashIdx,
+        openMenu,
         slashShown,
         mentionShown,
         historyShown,
@@ -1607,6 +1841,7 @@ object ChatApp:
         pickMention,
         pickSlash,
         pickHistory,
+        onMenuKey,
       ),
       renderComposerBar(bridge, chat, sendDraft),
     )
@@ -1646,6 +1881,8 @@ object ChatApp:
       chat: ascent.Source[ChatModel],
       draft: ascent.Source[String],
       mentionIdx: ascent.Source[Option[Int]],
+      slashIdx: ascent.Source[Option[Int]],
+      openMenu: ascent.Source[Option[OpenMenu]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
       historyShown: Squawk[List[String]],
@@ -1656,6 +1893,7 @@ object ChatApp:
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
+      onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -1675,6 +1913,8 @@ object ChatApp:
           chat,
           draft,
           mentionIdx,
+          slashIdx,
+          openMenu,
           slashShown,
           mentionShown,
           historyShown,
@@ -1684,6 +1924,7 @@ object ChatApp:
           pickMention,
           pickSlash,
           pickHistory,
+          onMenuKey,
         )
       ),
     )
@@ -1717,6 +1958,8 @@ object ChatApp:
       chat: ascent.Source[ChatModel],
       draft: ascent.Source[String],
       mentionIdx: ascent.Source[Option[Int]],
+      slashIdx: ascent.Source[Option[Int]],
+      openMenu: ascent.Source[Option[OpenMenu]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
       historyShown: Squawk[List[String]],
@@ -1726,6 +1969,7 @@ object ChatApp:
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
+      onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
@@ -1733,31 +1977,34 @@ object ChatApp:
       e.preventDefault()
       z
     for
-      slash    <- slashShown.get
-      mentions <- mentionShown.get
-      history  <- historyShown.get
-      idx      <- mentionIdx.get
-      pick     <- historyPickIdx.get
-      browse   <- historyBrowse.get
-      text     <- draft.get
-      c        <- chat.get
+      slash     <- slashShown.get
+      mentions  <- mentionShown.get
+      history   <- historyShown.get
+      idx       <- mentionIdx.get
+      slashPick <- slashIdx.get
+      pick      <- historyPickIdx.get
+      browse    <- historyBrowse.get
+      text      <- draft.get
+      menu      <- openMenu.get
+      c         <- chat.get
       s    = c.settings
       list = PromptHistory.entries(c)
+      step = key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End"
       out <-
-        if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
-          go(mentionIdx.set(ComposerQuery.moveMentionIndex(idx, key, mentions.size)))
+        if menu.isDefined && isMenuNav(key, e.shiftKey) then onMenuKey(e).unit
+        else if mentions.nonEmpty && step then go(mentionIdx.set(ComposerQuery.moveIndex(idx, key, mentions.size)))
         else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
           mentions.lift(idx.getOrElse(0)) match
             case Some(file) => go(pickMention(file))
             case None       => ZIO.unit
-        else if history.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
-          go(historyPickIdx.set(ComposerQuery.moveMentionIndex(pick, key, history.size)))
+        else if history.nonEmpty && step then go(historyPickIdx.set(ComposerQuery.moveIndex(pick, key, history.size)))
         else if history.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
           history.lift(pick.getOrElse(0)) match
             case Some(row) => go(pickHistory(row))
             case None      => ZIO.unit
-        else if slash.nonEmpty && key == "Enter" && !e.shiftKey && !ctrlOrMeta then
-          slash.headOption match
+        else if slash.nonEmpty && step then go(slashIdx.set(ComposerQuery.moveIndex(slashPick, key, slash.size)))
+        else if slash.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
+          slash.lift(slashPick.getOrElse(0)) match
             case Some(cmd) => go(pickSlash(cmd.name))
             case None      => ZIO.unit
         else if key == "ArrowUp" && mentions.isEmpty && slash.isEmpty && history.isEmpty then

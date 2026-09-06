@@ -8,6 +8,7 @@ object SessionCommands:
   val Resume: SlashCommand  = SlashCommand("resume", "Resume a previous session")
   val Home: SlashCommand    = SlashCommand("home", "Return to the session list")
   val Model: SlashCommand   = SlashCommand("model", "Switch model")
+  val Effort: SlashCommand  = SlashCommand("effort", "Set reasoning effort")
   val Rename: SlashCommand  = SlashCommand("rename", "Rename this session")
   val Title: SlashCommand   = SlashCommand("title", "Rename this session")
   val Delete: SlashCommand  = SlashCommand("delete", "Delete this session")
@@ -15,7 +16,8 @@ object SessionCommands:
   val Copy: SlashCommand    = SlashCommand("copy", "Copy the last reply")
   val Export: SlashCommand  = SlashCommand("export", "Export this conversation")
 
-  val All: List[SlashCommand] = List(New, Clear, Resume, Home, Model, Rename, Title, Delete, History, Copy, Export)
+  val All: List[SlashCommand] =
+    List(New, Clear, Resume, Home, Model, Effort, Rename, Title, Delete, History, Copy, Export)
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
     val names = advertised.map(_.name.toLowerCase).toSet
@@ -35,6 +37,9 @@ object SessionCommands:
   def isModel(name: String): Boolean =
     val n = name.stripPrefix("/").toLowerCase
     n == "model" || n == "m"
+
+  def isEffort(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "effort"
 
   def isRename(name: String): Boolean =
     val n = name.stripPrefix("/").toLowerCase
@@ -62,8 +67,8 @@ object SessionCommands:
         if i < 0 then (rest, "")
         else (rest.take(i), rest.drop(i).trim)
       val name = raw.toLowerCase
-      if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isRename(name) || isDelete(name) ||
-        isHistory(name) || isCopy(name) || isExport(name)
+      if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
+        isDelete(name) || isHistory(name) || isCopy(name) || isExport(name)
       then Some(ClientCommand(name, args))
       else None
     end if

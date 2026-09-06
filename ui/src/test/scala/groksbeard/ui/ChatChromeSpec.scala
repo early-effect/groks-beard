@@ -42,6 +42,22 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("slash arrows move the highlight and Enter picks it") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "slash-compact")
+              _     <- waitPresent(root, "slash-always-approve")
+              _     <- root.textarea("draft").press("ArrowDown")
+              _     <- root.textarea("draft").press("Enter")
+              draft <- waitValue(root, "/always-approve ")
+            yield assertTrue(draft == "/always-approve ")
+          }
+        yield result
+        end for
+      },
       test("mentions scene lists files and picking one chips the path") {
         val bridge = PreviewBridge()
         for
@@ -644,12 +660,120 @@ object ChatChromeSpec extends ZIOSpecDefault:
             for
               _      <- waitPresent(root, "model")
               before <- root.button("model").innerText
+              _      <- waitPresent(root, "effort")
               _      <- root.button("model").click
               _      <- waitPresent(root, "model-menu")
               _      <- root.button("model-grok-code-fast-1").click
               _      <- waitGone(root, "model-menu")
               after  <- waitText(root, "model", "Grok Code Fast")
+              _      <- waitGone(root, "effort")
             yield assertTrue(before.contains("Grok 4.6"), after.contains("Grok Code Fast"))
+          }
+        yield result
+        end for
+      },
+      test("effort arrows move the highlight and Enter picks it") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "effort")
+              _     <- root.button("effort").click
+              _     <- waitPresent(root, "effort-menu")
+              _     <- root.textarea("draft").press("ArrowDown")
+              _     <- root.textarea("draft").press("Enter")
+              after <- waitText(root, "effort", "xhigh")
+            yield assertTrue(after == "xhigh")
+          }
+        yield result
+        end for
+      },
+      test("mode arrows move the highlight and Enter picks it") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "mode")
+              _     <- root.button("mode").click
+              _     <- waitPresent(root, "mode-plan")
+              _     <- root.textarea("draft").press("ArrowDown")
+              _     <- root.textarea("draft").press("Enter")
+              after <- waitText(root, "mode", "Plan")
+            yield assertTrue(after.contains("Plan"))
+          }
+        yield result
+        end for
+      },
+      test("effort chip opens a menu and picking one updates the label") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "effort")
+              before <- root.button("effort").innerText
+              _      <- root.button("effort").click
+              _      <- waitPresent(root, "effort-menu")
+              _      <- root.button("effort-xhigh").click
+              _      <- waitGone(root, "effort-menu")
+              after  <- waitText(root, "effort", "xhigh")
+              model  <- root.button("model").innerText
+            yield assertTrue(before == "high", after == "xhigh", model == "Grok 4.6")
+          }
+        yield result
+        end for
+      },
+      test("slash effort opens the effort menu") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "slash-effort")
+              _ <- root.button("slash-effort").click
+              _ <- waitPresent(root, "effort-menu")
+              _ <- waitPresent(root, "effort-high")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("picking an effort from slash updates the effort chip") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "effort")
+              _     <- root.textarea("draft").fill("/effort")
+              _     <- root.button("send").click
+              _     <- waitPresent(root, "effort-menu")
+              _     <- root.button("effort-xhigh").click
+              _     <- waitGone(root, "effort-menu")
+              after <- waitText(root, "effort", "xhigh")
+            yield assertTrue(after == "xhigh")
+          }
+        yield result
+        end for
+      },
+      test("slash effort on a model without reasoning toasts") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "model")
+              _      <- root.button("model").click
+              _      <- waitPresent(root, "model-menu")
+              _      <- root.button("model-grok-code-fast-1").click
+              _      <- waitGone(root, "model-menu")
+              _      <- waitText(root, "model", "Grok Code Fast")
+              _      <- root.textarea("draft").fill("/effort high")
+              _      <- root.button("send").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status.contains("does not support"))
           }
         yield result
         end for

@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import zio.json.*
+import zio.json.ast.Json
 
 final case class SlashCommand(name: String, description: String, @jsonExclude hint: Option[String] = None)
     derives JsonCodec
@@ -9,7 +10,12 @@ final case class MentionFile(path: String, absPath: String) derives JsonCodec
 
 final case class ModeOption(id: String, name: String) derives JsonCodec
 
-final case class ModelOption(modelId: String, name: String, description: Option[String] = None) derives JsonCodec
+final case class ModelOption(
+    modelId: String,
+    name: String,
+    description: Option[String] = None,
+    _meta: Option[Json] = None,
+) derives JsonCodec
 
 object ModelOption:
   def label(id: String, models: List[ModelOption]): String =
@@ -68,13 +74,15 @@ object ComposerQuery:
       case Some(q) if mentionPopoverOpen(draft, dismissed) && q == hostQuery => files
       case _                                                                 => Nil
 
-  def moveMentionIndex(current: Option[Int], key: String, count: Int): Option[Int] =
+  def moveIndex(current: Option[Int], key: String, count: Int): Option[Int] =
     if count <= 0 then None
     else
       val start = current.getOrElse(0)
       key match
         case "ArrowDown" => Some(math.min(count - 1, start + (if current.isEmpty then 0 else 1)))
         case "ArrowUp"   => Some(math.max(0, if current.isEmpty then 0 else start - 1))
+        case "Home"      => Some(0)
+        case "End"       => Some(math.max(0, count - 1))
         case _           => current
 
   def permissionOption(key: String, options: List[PermissionOption]): Option[PermissionOption] =

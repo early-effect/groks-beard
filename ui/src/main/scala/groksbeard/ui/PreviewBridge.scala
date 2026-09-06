@@ -7,6 +7,7 @@ final class PreviewBridge extends HostBridge:
   private var settings: SettingsState   = SettingsState.defaults
   private var modeId: String            = "normal"
   private var modelId: String           = "grok-4.6"
+  private var effort: String            = "high"
 
   private val modes = List(
     ModeOption("normal", "Normal"),
@@ -16,7 +17,7 @@ final class PreviewBridge extends HostBridge:
   )
 
   private val models = List(
-    ModelOption("grok-4.6", "Grok 4.6"),
+    ModelOption("grok-4.6", "Grok 4.6", _meta = Some(Effort.grokMeta())),
     ModelOption("grok-code-fast-1", "Grok Code Fast"),
   )
 
@@ -79,9 +80,18 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.SetMode(id) =>
         modeId = id
         emitMeta()
-      case WebviewMsg.SetModel(id) =>
+      case WebviewMsg.SetModel(id, requested) =>
         modelId = id
+        effort = resolveEffort(requested)
         emitMeta()
+      case WebviewMsg.SetEffort(level) =>
+        val allowed = Effort.of(models.find(_.modelId == modelId))
+        Effort.pick(level, allowed) match
+          case Some(e) =>
+            effort = e.value
+            emitMeta()
+          case None =>
+            emit(HostMsg.Error(Effort.unknown(level, allowed)))
       case WebviewMsg.CycleMode =>
         val ids  = modes.map(_.id)
         val next = ids.lift(ids.indexOf(modeId) + 1).getOrElse(ids.head)
@@ -230,11 +240,20 @@ final class PreviewBridge extends HostBridge:
   def onHost(f: HostMsg => Unit): Unit =
     listener = f
 
+  private def resolveEffort(requested: String): String =
+    val target  = models.find(_.modelId == modelId)
+    val allowed = Effort.of(target)
+    if requested.nonEmpty then Effort.pick(requested, allowed).map(_.value).getOrElse(Effort.defaultOf(target))
+    else if allowed.exists(_.value == effort) then effort
+    else Effort.defaultOf(target)
+
   private def emit(msg: HostMsg): Unit =
     listener(msg)
 
-  private def emitMeta(sessionId: String = "preview", title: String = "Grok's Beard"): Unit =
-    emit(HostMsg.SessionMeta(sessionId, title, modeId, modes, modelId = modelId, availableModels = models))
+  private def emitMeta(sessionId: String = currentId, title: String = "Grok's Beard"): Unit =
+    emit(
+      HostMsg.SessionMeta(sessionId, title, modeId, modes, modelId = modelId, availableModels = models, effort = effort)
+    )
 
   private def emitChanges(): Unit =
     val (add, del) = pending.foldLeft((0, 0)) { case ((a, d), f) => (a + f.additions, d + f.deletions) }

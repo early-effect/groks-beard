@@ -68,14 +68,16 @@ object ComposerQuerySpec extends ZIOSpecDefault:
           ComposerQuery.mentionChoices("@a", "ab", files, dismissed = false).isEmpty,
         )
       },
-      test("moves the mention highlight from the keyboard") {
+      test("moves a picker highlight from the keyboard") {
         assertTrue(
-          ComposerQuery.moveMentionIndex(None, "ArrowUp", 3) == Some(0),
-          ComposerQuery.moveMentionIndex(None, "ArrowDown", 3) == Some(0),
-          ComposerQuery.moveMentionIndex(Some(0), "ArrowDown", 3) == Some(1),
-          ComposerQuery.moveMentionIndex(Some(0), "ArrowUp", 3) == Some(0),
-          ComposerQuery.moveMentionIndex(Some(2), "ArrowDown", 3) == Some(2),
-          ComposerQuery.moveMentionIndex(Some(0), "ArrowUp", 0).isEmpty,
+          ComposerQuery.moveIndex(None, "ArrowUp", 3) == Some(0),
+          ComposerQuery.moveIndex(None, "ArrowDown", 3) == Some(0),
+          ComposerQuery.moveIndex(Some(0), "ArrowDown", 3) == Some(1),
+          ComposerQuery.moveIndex(Some(0), "ArrowUp", 3) == Some(0),
+          ComposerQuery.moveIndex(Some(2), "ArrowDown", 3) == Some(2),
+          ComposerQuery.moveIndex(Some(2), "Home", 3) == Some(0),
+          ComposerQuery.moveIndex(Some(0), "End", 3) == Some(2),
+          ComposerQuery.moveIndex(Some(0), "ArrowUp", 0).isEmpty,
         )
       },
       test("maps 1-9 onto permission options") {

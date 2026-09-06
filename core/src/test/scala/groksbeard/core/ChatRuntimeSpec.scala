@@ -684,6 +684,123 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(deleted.isEmpty)
         }
       },
+      test("setEffort writes session/set_model with reasoningEffort") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.setEffort("xhigh")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("session/set_model") && l.contains("reasoningEffort") && l.contains("xhigh")),
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.effort == "xhigh" && m.modelId == "grok-4.6"
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("/effort high sets effort on the current model") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/effort high")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.effort == "high"
+              case _                      => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("unknown /effort posts an error and does not prompt") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/effort nope")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("nope")
+              case _                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("/effort on a model without reasoning posts an error") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.setModel("grok-code-fast-1")
+            _    <- posted.set(Nil)
+            _    <- rt.send("/effort high")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("does not support")
+              case _                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("/model grok-4.6 high sets model and effort") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.setModel("grok-code-fast-1")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.send("/model grok-4.6 xhigh")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("session/set_model") && l.contains("grok-4.6") && l.contains("xhigh")),
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.modelId == "grok-4.6" && m.effort == "xhigh"
+              case _                      => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("setModel to a non-reasoning model clears effort") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.setEffort("high")
+            _    <- posted.set(Nil)
+            _    <- rt.setModel("grok-code-fast-1")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1" && m.effort.isEmpty
+              case _                      => false
+            }
+          )
+        }
+      },
       test("/model in the composer switches by id or display name") {
         chat() { (rt, posted) =>
           for

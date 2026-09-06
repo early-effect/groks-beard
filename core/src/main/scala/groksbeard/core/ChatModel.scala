@@ -113,6 +113,7 @@ final case class ChatModel(
     queue: List[QueuedPrompt] = Nil,
     changes: Option[ChangesSummary] = None,
     diff: Option[DiffView] = None,
+    todos: List[TodoEntry] = Nil,
     error: Option[String] = None,
     runningSinceMs: Option[Long] = None,
     awaitingSession: Option[String] = None,
@@ -167,6 +168,7 @@ object ChatModel:
       queue = Nil,
       changes = None,
       diff = None,
+      todos = Nil,
       error = None,
       pickerOpen = false,
       locked = None,
@@ -182,8 +184,9 @@ object ChatModel:
       case None       => false
       case Some(want) =>
         msg match
-          case HostMsg.Ready | HostMsg.ClearTranscript | _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied |
-              _: HostMsg.AvailableCommands | _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList =>
+          case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | _: HostMsg.Transcript |
+              _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings |
+              _: HostMsg.MentionResults | _: HostMsg.SessionList =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -289,6 +292,10 @@ object ChatModel:
         model.copy(error = Some(message))
       case HostMsg.Copied(message, _) =>
         model.copy(error = Some(message))
+      case HostMsg.Todos(entries) =>
+        model.copy(todos = Todos.fromEntries(entries))
+      case HostMsg.ToggleTodos =>
+        model
       case HostMsg.ClearTranscript =>
         model.copy(
           turns = Nil,
@@ -300,6 +307,7 @@ object ChatModel:
           queue = Nil,
           changes = None,
           diff = None,
+          todos = Nil,
           error = None,
           pickerOpen = false,
           locked = None,

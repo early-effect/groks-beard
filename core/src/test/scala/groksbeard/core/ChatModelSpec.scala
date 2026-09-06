@@ -85,6 +85,26 @@ object ChatModelSpec extends ZIOSpecDefault:
         val next = ChatModel.applyMsg(ChatModel.empty, HostMsg.Copied("Copied!"))
         assertTrue(next.error.contains("Copied!"))
       },
+      test("todos replace the list and survive a turn end") {
+        val first = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.Todos(List(TodoEntry("One", "pending"), TodoEntry("Two", "in_progress"))),
+        )
+        val next = ChatModel.applyMsg(
+          first,
+          HostMsg.Todos(List(TodoEntry("One", "completed"), TodoEntry("Two", "in_progress"))),
+        )
+        val ended = ChatModel.applyMsg(next, HostMsg.TurnEnd("t1", "end_turn"))
+        val gone  = ChatModel.applyMsg(ended, HostMsg.ClearTranscript)
+        val home  = ChatModel.adopt(next, "", "Grok's Beard")
+        assertTrue(
+          first.todos.map(_.status) == List(Todos.Pending, Todos.InProgress),
+          next.todos.map(_.status) == List(Todos.Completed, Todos.InProgress),
+          ended.todos.size == 2,
+          gone.todos.isEmpty,
+          home.todos.isEmpty,
+        )
+      },
       test("changes summary and diff preview fold into the model") {
         val withFiles = ChatModel.applyMsg(
           ChatModel.empty,

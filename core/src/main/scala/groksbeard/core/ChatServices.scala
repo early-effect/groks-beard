@@ -15,6 +15,7 @@ trait SessionRepo:
   def rename(id: String, op: RenameOp): BeardError.Result[Option[SessionRow]]
   def delete(id: String): BeardError.Result[Boolean]
   def scheduleEmptyDelete(id: String): UIO[Unit]
+  def plan(id: String): BeardError.Result[List[TodoEntry]]
 
 object SessionRepo:
   def of(fs: SessionFs, home: String, cwd: String): ULayer[SessionRepo] =
@@ -31,20 +32,25 @@ object SessionRepo:
       def scheduleEmptyDelete(id: String): UIO[Unit] =
         val path = SessionIndex.sessionPath(home, cwd, id)
         (ZIO.sleep(SessionIndex.EmptyGraceMs.millis) *>
-          fs.deleteTree(path).tapError(e => ZIO.logWarning(e.message)).ignore).forkDaemon.unit)
+          fs.deleteTree(path).tapError(e => ZIO.logWarning(e.message)).ignore).forkDaemon.unit
+
+      def plan(id: String): BeardError.Result[List[TodoEntry]] =
+        SessionIndex.readPlan(fs, home, cwd, id))
 
   def test(
       listRows: () => List[SessionRow] = () => Nil,
       onRename: (String, RenameOp) => Option[SessionRow] = (_, _) => None,
       onDelete: String => Boolean = _ => false,
       onEmptyDelete: String => Unit = _ => (),
+      onPlan: String => List[TodoEntry] = _ => Nil,
   ): ULayer[SessionRepo] =
     ZLayer.succeed(new SessionRepo:
       def list: BeardError.Result[List[SessionRow]]                               = ZIO.succeed(listRows())
       def rename(id: String, op: RenameOp): BeardError.Result[Option[SessionRow]] =
         ZIO.succeed(onRename(id, op))
-      def delete(id: String): BeardError.Result[Boolean] = ZIO.succeed(onDelete(id))
-      def scheduleEmptyDelete(id: String): UIO[Unit]     = ZIO.succeed(onEmptyDelete(id)))
+      def delete(id: String): BeardError.Result[Boolean]       = ZIO.succeed(onDelete(id))
+      def scheduleEmptyDelete(id: String): UIO[Unit]           = ZIO.succeed(onEmptyDelete(id))
+      def plan(id: String): BeardError.Result[List[TodoEntry]] = ZIO.succeed(onPlan(id)))
 end SessionRepo
 
 trait Mentions:
@@ -157,6 +163,7 @@ object ChatEnv:
       scheduleEmptyDelete: String => Unit = _ => (),
       renameOnDisk: (String, RenameOp) => Option[SessionRow] = (_, _) => None,
       deleteOnDisk: String => Boolean = _ => false,
+      planOnDisk: String => List[TodoEntry] = _ => Nil,
       persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
       readDisk: String => Option[String] = _ => None,
       openNativeDiffs: (String, List[DiffPair]) => Unit = (_, _) => (),
@@ -168,7 +175,7 @@ object ChatEnv:
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
   ): ULayer[Env] =
     HostOut.layer(post) ++
-      SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete) ++
+      SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete, planOnDisk) ++
       Mentions.layer(q => ZIO.succeed(searchFiles(q))) ++
       ChangesPersist.layer(sets => persistChanges(sets)) ++
       ReviewOps.layer(

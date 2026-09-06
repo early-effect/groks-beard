@@ -716,9 +716,12 @@ final class ChatRuntime private (
           case None =>
             val clear = if !loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
             val snap  = ChatModel.snapshotTurns(loadModel.turns)
+            val todos = loadModel.todos
+            val sid   = wanted.getOrElse("")
             loadModel = ChatModel.empty
             clear *>
               post(HostMsg.Transcript(snap)) *>
+              postLoadedTodos(sid, todos) *>
               ZIO.succeed(result.foreach(applySession)) *>
               ZIO.succeed {
                 wanted.foreach { loadId =>
@@ -847,6 +850,16 @@ final class ChatRuntime private (
       case Some(d) => post(HostMsg.DiffPreview(d.path, d.oldText, d.newText, d.wholeFile))
     val pairs = diffs.map(d => DiffPair(d.path, d.oldText, d.newText, d.wholeFile))
     preview *> (if pairs.isEmpty then ZIO.unit else review.openNativeDiffs(heading, pairs))
+
+  private def postLoadedTodos(sessionId: String, fromAcp: List[TodoEntry]): UIO[Unit] =
+    if fromAcp.nonEmpty then post(HostMsg.Todos(fromAcp))
+    else
+      sessions
+        .plan(sessionId)
+        .catchAll(_ => ZIO.succeed(Nil))
+        .flatMap { disk =>
+          if disk.isEmpty then ZIO.unit else post(HostMsg.Todos(disk))
+        }
 
   private def postMeta: UIO[Unit] =
     val sid = sessionId.getOrElse("")

@@ -2,6 +2,8 @@ package groksbeard.core
 
 import java.nio.charset.StandardCharsets
 import zio.*
+import zio.json.*
+import zio.json.ast.Json
 
 final case class SessionActivity(
     id: String,
@@ -60,6 +62,15 @@ object SessionIndex:
 
   def sessionPath(home: String, cwd: String, sessionId: String): String =
     join(join(sessionsRoot(home), encodeCwd(cwd)), sessionId)
+
+  def readPlan(fs: SessionFs, home: String, cwd: String, sessionId: String): BeardError.Result[List[TodoEntry]] =
+    if sessionId.isEmpty then ZIO.succeed(Nil)
+    else
+      fs.readText(join(sessionPath(home, cwd, sessionId), "plan.json")).map {
+        case None       => Nil
+        case Some(text) =>
+          text.fromJson[Json].toOption.map(Todos.fromPlanJson).getOrElse(Nil)
+      }
 
   def activityMs(stat: SessionActivity): Long =
     stat.updatesMtimeMs.orElse(stat.eventsMtimeMs).orElse(stat.summaryMtimeMs).getOrElse(0L)

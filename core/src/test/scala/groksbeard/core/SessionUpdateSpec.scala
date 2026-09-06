@@ -53,6 +53,39 @@ object SessionUpdateSpec extends ZIOSpecDefault:
         )
         assertTrue(msgs.isEmpty)
       },
+      test("plan sessionUpdate becomes todos") {
+        val msgs = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("plan"),
+              "entries"       -> Json.Arr(
+                Json.Obj(
+                  "content"  -> Json.Str("Checkout branch"),
+                  "priority" -> Json.Str("medium"),
+                  "status"   -> Json.Str("in_progress"),
+                ),
+                Json.Obj(
+                  "content"  -> Json.Str("Write tests"),
+                  "priority" -> Json.Str("high"),
+                  "status"   -> Json.Str("pending"),
+                ),
+              ),
+            ),
+          ),
+          "t1",
+        )
+        assertTrue(
+          msgs == List(
+            HostMsg.Todos(
+              List(
+                TodoEntry("Checkout branch", Todos.InProgress, "medium"),
+                TodoEntry("Write tests", Todos.Pending, "high"),
+              )
+            )
+          )
+        )
+      },
     )
 
   private def chunk(kind: String, text: String): Json =

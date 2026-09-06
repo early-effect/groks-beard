@@ -133,6 +133,16 @@ object PreviewScenes:
             )
           ),
         )
+      case Scene.Todos =>
+        ChatModel.empty.copy(
+          inSession = true,
+          title = "Todos",
+          todos = List(
+            TodoEntry("Checkout the branch", Todos.Completed, "medium", Some("1")),
+            TodoEntry("Wire ACP plan updates", Todos.InProgress, "high", Some("2")),
+            TodoEntry("Match the TUI pane", Todos.Pending, "medium", Some("3")),
+          ),
+        )
       case Scene.Resume =>
         ChatModel.empty.copy(
           sessionId = "preview",

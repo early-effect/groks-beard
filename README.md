@@ -53,7 +53,7 @@ sbt --no-server ~uiJS/ascentPreview
 # if Metals is not the build server: sbt --server ~uiJS/ascentPreview
 ```
 
-Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`.
+Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
@@ -66,7 +66,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): todos, terminal handlers, rewind.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): terminal handlers, rewind.
 
 ## Shortcuts
 
@@ -74,6 +74,7 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): todos,
 | --- | --- |
 | Open Grok's Beard | `Ctrl+;` / `Cmd+;` |
 | Add selection to chat | `Ctrl+Shift+;` / `Cmd+Shift+;` |
+| Toggle todos | `Ctrl+T` (chat focused) |
 | Stop the running turn | `Escape` (chat focused) |
 
 ## Modules

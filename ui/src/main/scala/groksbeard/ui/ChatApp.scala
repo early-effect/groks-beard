@@ -21,7 +21,7 @@ enum OpenMenu:
 final case class SessionLeave(id: String, fromPicker: Boolean)
 
 enum Scene:
-  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume
+  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos
 
 object Scene:
   def from(name: String): Scene =
@@ -36,6 +36,7 @@ object Scene:
       case "elicit"     => Scene.Elicit
       case "changes"    => Scene.Changes
       case "resume"     => Scene.Resume
+      case "todos"      => Scene.Todos
       case _            => Scene.Empty
 end Scene
 
@@ -772,6 +773,24 @@ object ChatApp:
         fontSize.px(12),
       )
 
+  object TodoMark
+      extends CssClass(
+        flexShrink(0),
+        color(muted),
+        fontSize.px(12),
+      )
+
+  object TodoDoing
+      extends CssClass(
+        color(orange)
+      )
+
+  object TodoDone
+      extends CssClass(
+        color(muted),
+        textDecoration.lineThrough,
+      )
+
   object StatAdd extends CssClass(color(addFg), fontWeight(600))
 
   object StatDel extends CssClass(color(delFg), fontWeight(600))
@@ -859,6 +878,7 @@ object ChatApp:
       menuIdx        <- sq(if initialMenu.isDefined then Some(0) else None)
       pickerQuery    <- sq("")
       changesOpen    <- sq(false)
+      todosOpen      <- sq(scene == Scene.Todos)
       leaving        <- sq(Option.empty[SessionLeave])
       pendingDelete  <- sq(Option.empty[String])
       questionDraft  <- sq(QuestionDraft.empty)
@@ -898,8 +918,13 @@ object ChatApp:
           wallMs.flatMap { now =>
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
+              case HostMsg.ToggleTodos           => todosOpen.update(!_)
               case _                             => ZIO.unit
-            } *> chat.update(c => batch.foldLeft(c)((m, msg) => ChatModel.applyMsg(m, msg, now)))
+            } *> chat.get.flatMap { before =>
+              val next = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
+              val auto = before.todos.isEmpty && next.todos.nonEmpty
+              chat.update(_ => next) *> ZIO.when(auto)(todosOpen.set(true)).unit
+            }
           }
         }
         .runDrain
@@ -1050,7 +1075,12 @@ object ChatApp:
         val key        = e.key
         val ctrlOrMeta = e.ctrlKey || e.metaKey
         chat.get.flatMap { c =>
-          if key == "Escape" then
+          if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
+            if typingInField(e) then ZIO.unit
+            else
+              e.preventDefault()
+              toggleTodos
+          else if key == "Escape" then
             e.preventDefault()
             openMenu.get.flatMap {
               case Some(_) => hideMenu
@@ -1071,8 +1101,13 @@ object ChatApp:
                                 if c.pickerOpen then closePicker
                                 else if c.permission.isDefined then parkPermission
                                 else if c.question.isDefined then ZIO.unit
-                                else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                else ZIO.unit
+                                else
+                                  todosOpen.get.flatMap {
+                                    case true  => todosOpen.set(false)
+                                    case false =>
+                                      if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                      else ZIO.unit
+                                  }
                             }
                         }
                     }
@@ -1192,6 +1227,9 @@ object ChatApp:
             menuIdx.set(Some(menuStart(c, menu))) *>
             (if menu == OpenMenu.Settings then ZIO.succeed(bridge.post(WebviewMsg.OpenSettings)) else ZIO.unit)
         }
+
+      def toggleTodos: UIO[Unit] =
+        todosOpen.update(!_)
 
       def toggleMenu(menu: OpenMenu): UIO[Unit] =
         openMenu.get.flatMap {
@@ -1533,6 +1571,7 @@ object ChatApp:
           )
         ),
         renderDiff(bridge, chat),
+        renderTodos(chat, todosOpen, toggleTodos),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
         when(chat.map(_.error.nonEmpty))(
           E.div(
@@ -1623,6 +1662,7 @@ object ChatApp:
           pickSlash,
           pickHistory,
           onMenuKey,
+          toggleTodos,
         ),
       )
     end for
@@ -1820,6 +1860,7 @@ object ChatApp:
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      toggleTodos: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -1842,6 +1883,7 @@ object ChatApp:
         pickSlash,
         pickHistory,
         onMenuKey,
+        toggleTodos,
       ),
       renderComposerBar(bridge, chat, sendDraft),
     )
@@ -1894,6 +1936,7 @@ object ChatApp:
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      toggleTodos: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -1925,6 +1968,7 @@ object ChatApp:
           pickSlash,
           pickHistory,
           onMenuKey,
+          toggleTodos,
         )
       ),
     )
@@ -1970,6 +2014,7 @@ object ChatApp:
       pickSlash: String => UIO[Unit],
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      toggleTodos: UIO[Unit],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
@@ -2021,6 +2066,8 @@ object ChatApp:
           PromptHistory.newer(browse.get) match
             case None    => go(historyBrowse.set(None) *> draft.set(""))
             case Some(n) => go(historyBrowse.set(Some(n)) *> draft.set(list(n)))
+        else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
+          go(toggleTodos)
         else
           ComposerQuery.sendOnKey(key, e.shiftKey, ctrlOrMeta, s.useCtrlEnterToSend) match
             case ComposerQuery.SendKey.Send    => go(sendDraft)
@@ -2340,6 +2387,62 @@ object ChatApp:
       ),
     )
   end renderQuestionCard
+
+  private def renderTodos(
+      chat: ascent.Source[ChatModel],
+      todosOpen: ascent.Source[Boolean],
+      toggleTodos: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(Squawk.zipWith(chat, todosOpen)((c, open) => open || c.todos.nonEmpty))(
+      E.div(
+        ChangesPane,
+        TestId("todos"),
+        E.button(
+          ChangesHead,
+          TestId("todos-toggle"),
+          A.`type`("button"),
+          A.title("Toggle todos (Ctrl+T)"),
+          Ev.onClick(_ => toggleTodos),
+          E.strong(chat.map(c => Todos.headline(c.todos))),
+          E.span(
+            SessionMetaLine,
+            chat.map { c =>
+              if c.todos.isEmpty then ""
+              else
+                val doing = c.todos.find(t => Todos.kind(t.status) == Todos.InProgress).map(_.content)
+                doing.getOrElse("")
+            },
+          ),
+          E.span(todosOpen.map(open => if open then "Hide" else "Show")),
+        ),
+        when(todosOpen)(
+          E.div(
+            ChangesList,
+            TestId("todos-list"),
+            when(chat.map(_.todos.isEmpty))(
+              E.p(Copy, TestId("todos-empty"), "No todos")
+            ),
+            forEach(chat.map(_.todos.zipWithIndex))(p => s"${p._2}-${p._1.content}") { pair =>
+              val (entry, i) = pair
+              val key        = Todos.rowKey(entry, i)
+              val kind       = Todos.kind(entry.status)
+              val body       =
+                kind match
+                  case Todos.Completed  => E.span(TodoDone, entry.content)
+                  case Todos.InProgress => E.span(TodoDoing, entry.content)
+                  case _                => E.span(entry.content)
+              E.div(
+                FileRow,
+                TestId(s"todo-$key"),
+                E.span(TodoMark, Todos.mark(entry.status)),
+                body,
+              )
+            },
+          )
+        ),
+      )
+    )
+  end renderTodos
 
   private def renderChanges(
       bridge: HostBridge,

@@ -99,6 +99,8 @@ enum HostMsg derives JsonCodec:
   @jsonHint("clearDiff") case ClearDiff
   @jsonHint("error") case Error(message: String, code: Option[String] = None)
   @jsonHint("copied") case Copied(message: String, clipboard: Option[String] = None)
+  @jsonHint("todos") case Todos(entries: List[TodoEntry] = Nil)
+  @jsonHint("toggleTodos") case ToggleTodos
   @jsonHint("clearTranscript") case ClearTranscript
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
 end HostMsg

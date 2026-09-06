@@ -504,6 +504,67 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("todos scene lists entries and Hide collapses them") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Todos)
+          result <- withMounted(ui) { root =>
+            for
+              head <- waitPresent(root, "todos") *> root.getByTestId("todos").innerText
+              row  <- waitPresent(root, "todo-2") *> root.getByTestId("todo-2").innerText
+              done <- waitPresent(root, "todo-1") *> root.getByTestId("todo-1").innerText
+              _    <- root.button("todos-toggle").click
+              _    <- waitGone(root, "todos-list")
+            yield assertTrue(
+              head.contains("Todos 1/3"),
+              head.contains("Wire ACP plan updates"),
+              row.contains("Wire ACP plan updates"),
+              done.contains("Checkout the branch"),
+            )
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+T toggles the todos pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Todos)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "todos-list")
+              _ <- ZIO.succeed(fireCtrlT(root, "draft"))
+              _ <- waitGone(root, "todos-list")
+              _ <- ZIO.succeed(fireCtrlT(root, "draft"))
+              _ <- waitPresent(root, "todos-list")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("a live plan update opens the todos pane") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitGone(root, "todos")
+              _ <- ZIO.succeed {
+                bridge.push(
+                  HostMsg.Todos(
+                    List(
+                      TodoEntry("Checkout branch", Todos.InProgress, "medium"),
+                      TodoEntry("Write tests", Todos.Pending, "high"),
+                    )
+                  )
+                )
+              }
+              head <- waitPresent(root, "todos") *> root.getByTestId("todos").innerText
+              row  <- waitPresent(root, "todo-1") *> root.getByTestId("todo-1").innerText
+            yield assertTrue(head.contains("Todos 0/2"), row.contains("Checkout branch"))
+          }
+        yield result
+        end for
+      },
       test("changes list stays collapsed until Show") {
         val bridge = PreviewBridge()
         for
@@ -977,6 +1038,14 @@ object ChatChromeSpec extends ZIOSpecDefault:
   private def fireScroll(el: ascent.dom.HTMLElement): Unit =
     val ev = js.Dynamic.newInstance(js.Dynamic.global.Event)("scroll")
     val _  = el.dispatchEvent(ev.asInstanceOf[ascent.dom.Event])
+
+  private def fireCtrlT(root: AscentRoot, testId: String): Unit =
+    val el = root.element.querySelector(s"""[data-testid="$testId"]""")
+    val ev = js.Dynamic.newInstance(js.Dynamic.global.KeyboardEvent)(
+      "keydown",
+      js.Dynamic.literal(key = "t", code = "KeyT", ctrlKey = true, bubbles = true, cancelable = true),
+    )
+    val _ = el.asInstanceOf[ascent.dom.HTMLElement].dispatchEvent(ev.asInstanceOf[ascent.dom.Event])
 end ChatChromeSpec
 
 /** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */

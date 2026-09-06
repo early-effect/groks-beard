@@ -849,6 +849,7 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
+      scope          <- ZIO.scope
       chat           <- sq(PreviewScenes.seed(scene))
       draft          <- sq(initialDraft)
       dismissed      <- sq(false)
@@ -1144,7 +1145,7 @@ object ChatApp:
             chat.update(adoptView(_, id, waiting)) *>
             commit(hist, lastHref, BeardPath.sessionHref(id), WebviewMsg.ResumeSession(id), bridge) *>
             (ZIO.sleep(LeaveMs.millis) *>
-              ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkDaemon.unit
+              ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkIn(scope).unit
         }
 
       def showPicker(c: ChatModel, leave: Option[SessionLeave]): Boolean =

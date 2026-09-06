@@ -351,6 +351,38 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("up on an empty composer recalls the last prompt") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "user-t1")
+              _     <- root.textarea("draft").press("ArrowUp")
+              draft <- waitValue(root, "Summarize Main.scala")
+              _     <- root.textarea("draft").press("ArrowDown")
+              empty <- waitValue(root, "")
+            yield assertTrue(draft == "Summarize Main.scala", empty.isEmpty)
+          }
+        yield result
+        end for
+      },
+      test("slash history lists this session's prompts") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "user-t1")
+              _     <- root.textarea("draft").fill("/history")
+              _     <- waitPresent(root, "history")
+              _     <- root.button("history-0").click
+              draft <- waitValue(root, "Summarize Main.scala")
+            yield assertTrue(draft == "Summarize Main.scala")
+          }
+        yield result
+        end for
+      },
       test("transcript follows the tail until the user scrolls up") {
         val bridge = PushBridge()
         for

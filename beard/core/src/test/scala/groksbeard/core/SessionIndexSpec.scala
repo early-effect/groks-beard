@@ -228,8 +228,10 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionCommands.intercept("/rename Plan").contains(ClientCommand("rename", "Plan")),
           SessionCommands.intercept("/title").contains(ClientCommand("title")),
           SessionCommands.intercept("/delete").contains(ClientCommand("delete")),
+          SessionCommands.intercept("/history foo").contains(ClientCommand("history", "foo")),
           merged.exists(_.name == "rename"),
           merged.exists(_.name == "delete"),
+          merged.exists(_.name == "history"),
           SessionCommands.intercept("hello").isEmpty,
         )
       },

@@ -292,6 +292,8 @@ final class ChatRuntime private (
             case Right(op)     => doRename(sessionId.getOrElse(""), op)
         case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
           ZIO.unit
+        case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
+          ZIO.unit
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit

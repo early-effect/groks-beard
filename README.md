@@ -60,12 +60,12 @@ Do not serve `target/` with a static file server. Preview restages on change and
 ## What you get
 
 - Grok Build CLI only.
-- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/rename`, `/delete`.
+- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/rename`, `/delete`, `/history`.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): prompt history, `/copy` `/export`, `/effort`, todos, terminal handlers, rewind.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/copy` `/export`, `/effort`, todos, terminal handlers, rewind.
 
 ## Shortcuts
 

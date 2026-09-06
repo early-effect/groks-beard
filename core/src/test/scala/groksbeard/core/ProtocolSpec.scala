@@ -195,6 +195,23 @@ object ProtocolSpec extends ZIOSpecDefault:
           commands.toJson.fromJson[HostMsg] == Right(commands),
         )
       },
+      test("todos and toggleTodos round-trip") {
+        val todos: HostMsg = HostMsg.Todos(
+          List(
+            TodoEntry("Checkout branch", Todos.InProgress, "medium"),
+            TodoEntry("Write tests", Todos.Pending, "high"),
+          )
+        )
+        val toggle: HostMsg = HostMsg.ToggleTodos
+        val plan: AcpUpdate = AcpUpdate.Plan(
+          List(TodoEntry("Checkout branch", "in_progress", "medium"))
+        )
+        assertTrue(
+          todos.toJson.fromJson[HostMsg] == Right(todos),
+          toggle.toJson.fromJson[HostMsg] == Right(toggle),
+          plan.toJson.fromJson[AcpUpdate] == Right(plan),
+        )
+      },
       test("slash commands with ACP extra input still decode") {
         val json =
           """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"Compact context","input":{"hint":"optional"}}]}"""

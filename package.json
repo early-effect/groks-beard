@@ -104,6 +104,10 @@
         "title": "Grok's Beard: Cycle Mode"
       },
       {
+        "command": "groksBeard.toggleTodos",
+        "title": "Grok's Beard: Toggle Todos"
+      },
+      {
         "command": "groksBeard.addSelection",
         "title": "Grok's Beard: Add Selection to Chat"
       },
@@ -244,6 +248,11 @@
         "command": "groksBeard.cancel",
         "key": "escape",
         "when": "groksBeard.turnRunning && (focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary)"
+      },
+      {
+        "command": "groksBeard.toggleTodos",
+        "key": "ctrl+t",
+        "when": "focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary"
       }
     ]
   }

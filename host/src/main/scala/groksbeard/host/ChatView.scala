@@ -18,8 +18,11 @@ final class ChatView(
 
   private var runtime: Option[ChatRuntime] = None
   private var missingCli: Option[String]   = None
+  private var toHost: HostMsg => UIO[Unit] = _ => ZIO.unit
 
   def current: Option[ChatRuntime] = runtime
+
+  def toggleTodos(): Unit = HostRuntime.runUIO(toHost(HostMsg.ToggleTodos))
 
   def dispose(): Unit =
     runtime.foreach(rt => HostRuntime.runUIO(rt.close))
@@ -62,6 +65,7 @@ final class ChatView(
         end match
         ()
       }
+    toHost = post
     bindAgent(post)
     webview.onDidReceiveMessage { raw =>
       js.JSON.stringify(raw).fromJson[WebviewMsg].foreach { msg =>

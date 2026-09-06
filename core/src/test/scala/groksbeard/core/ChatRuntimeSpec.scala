@@ -645,7 +645,64 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             },
             snap.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
             model.turns.exists(t => t.user.exists(_.text == "hello from disk") && t.agent.contains("welcome back")),
+            model.todos.map(_.content) == List("Replay the disk snapshot", "Continue the work"),
+            model.todos.map(_.status) == List(Todos.Completed, Todos.InProgress),
           )
+        }
+      },
+      test("a live plan update replaces todos") {
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify(
+                      "sess_test",
+                      AcpUpdate.Plan(
+                        List(
+                          TodoEntry("Checkout branch", Todos.InProgress, "medium"),
+                          TodoEntry("Write tests", Todos.Pending, "high"),
+                        )
+                      ),
+                    ),
+                  )
+                )
+              )
+            )
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.contains(
+              HostMsg.Todos(
+                List(
+                  TodoEntry("Checkout branch", Todos.InProgress, "medium"),
+                  TodoEntry("Write tests", Todos.Pending, "high"),
+                )
+              )
+            ),
+            model.todos.map(_.content) == List("Checkout branch", "Write tests"),
+          )
+        }
+      },
+      test("session/load falls back to plan.json when ACP sent no plan") {
+        delayedLoad().flatMap { case (transport, held) =>
+          chat(
+            transport = transport,
+            planOnDisk = id => if id == "sess_disk" then List(TodoEntry("From disk", Todos.Pending, "medium")) else Nil,
+          ) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.resumeSession("sess_disk")
+              _    <- rt.ingestData(held.disk)
+              msgs <- posted.get
+              model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+            yield assertTrue(model.todos.map(_.content) == List("From disk"))
+          }
         }
       },
       test("locked session/load posts SessionLocked and leaves the current session") {
@@ -1136,6 +1193,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
       readDisk: String => Option[String] = _ => None,
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
+      planOnDisk: String => List[TodoEntry] = _ => Nil,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
       for
@@ -1153,6 +1211,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               persistChanges = persistChanges,
               readDisk = readDisk,
               followFile = followFile,
+              planOnDisk = planOnDisk,
             )
           )
         result <- body(rt, posted)

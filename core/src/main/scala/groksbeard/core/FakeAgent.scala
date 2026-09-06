@@ -68,6 +68,15 @@ final class FakeAgent(
           List(
             chunk(AcpUpdate.User(AcpContent.Text("hello from disk")), sid),
             chunk(AcpUpdate.Agent(AcpContent.Text("welcome back")), sid),
+            chunk(
+              AcpUpdate.Plan(
+                List(
+                  TodoEntry("Replay the disk snapshot", Todos.Completed, "medium"),
+                  TodoEntry("Continue the work", Todos.InProgress, "high"),
+                )
+              ),
+              sid,
+            ),
             Rpc.ok(id, SessionLoadResult(sid).asJson),
           )
       case "session/set_model" =>

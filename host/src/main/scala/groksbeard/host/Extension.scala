@@ -191,6 +191,9 @@ object Extension:
       )
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.toggleTodos", () => chat.toggleTodos())
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.addSelection", () => chat.addSelection())
     )
     context.subscriptions.push(

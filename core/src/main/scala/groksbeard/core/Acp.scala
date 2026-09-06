@@ -106,6 +106,7 @@ enum AcpUpdate derives JsonCodec:
       currentModeId: Option[String] = None,
   )
   @jsonHint("usage_update") case Usage(used: Option[Int] = None, size: Option[Int] = None)
+  @jsonHint("plan") case Plan(entries: List[TodoEntry] = Nil)
 end AcpUpdate
 
 final case class AcpSessionNotify(sessionId: String = "", update: AcpUpdate) derives JsonCodec

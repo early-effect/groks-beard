@@ -24,6 +24,8 @@ object SessionUpdate:
         occupancyMsg(used, size).orElse(Occupancy.fromJson(params)).toList.map { occ =>
           HostMsg.SessionMeta("", "", "", occupancy = Some(occ))
         }
+      case Some(AcpUpdate.Plan(entries)) =>
+        List(HostMsg.Todos(Todos.fromEntries(entries)))
       case None => Nil
 
   private def occupancyMsg(used: Option[Int], size: Option[Int]): Option[Occupancy] =

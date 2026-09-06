@@ -152,7 +152,7 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("permissionPark") case PermissionPark(requestId: String)
   @jsonHint("openDiff") case OpenDiff(requestId: String)
   @jsonHint("planVerdict") case PlanVerdict(requestId: String, verdict: String)
-  @jsonHint("questionChoice") case QuestionChoice(requestId: String, questionId: String, optionId: String)
+  @jsonHint("questionSubmit") case QuestionSubmit(requestId: String, answers: List[QuestionAnswer])
   @jsonHint("questionDismiss") case QuestionDismiss(requestId: String)
   @jsonHint("elicitAccept") case ElicitAccept(requestId: String)
   @jsonHint("elicitDecline") case ElicitDecline(requestId: String)

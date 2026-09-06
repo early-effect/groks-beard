@@ -72,7 +72,19 @@ object PreviewScenes:
                   "style",
                   "How should the transcript look?",
                   List(QuestionOption("dense", "Dense"), QuestionOption("roomy", "Roomy")),
-                )
+                ),
+                AgentQuestion(
+                  "extras",
+                  "Which extras?",
+                  List(QuestionOption("wrap", "Wrap"), QuestionOption("pin", "Pin"), QuestionOption("copy", "Copy")),
+                  allowMultiple = true,
+                ),
+                AgentQuestion(
+                  "note",
+                  "Anything else?",
+                  List(QuestionOption("skip", "Nothing")),
+                  allowFreeText = true,
+                ),
               ),
             )
           )

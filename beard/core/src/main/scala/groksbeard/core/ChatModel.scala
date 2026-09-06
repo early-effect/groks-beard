@@ -49,8 +49,8 @@ final case class AgentQuestion(
     id: String,
     prompt: String,
     options: List[QuestionOption],
-    @jsonExclude allowMultiple: Boolean = false,
-    @jsonExclude allowFreeText: Boolean = false,
+    allowMultiple: Boolean = false,
+    allowFreeText: Boolean = false,
 ) derives JsonCodec
 
 final case class QuestionCard(requestId: String, questions: List[AgentQuestion]) derives JsonCodec

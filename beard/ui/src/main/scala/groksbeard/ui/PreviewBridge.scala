@@ -136,7 +136,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.TurnEnd("preview-turn", "end_turn"))
       case WebviewMsg.Queue(text) =>
         emit(HostMsg.Queued(List(QueuedPrompt("preview-q", text))))
-      case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionChoice(_, _, _) |
+      case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionSubmit(_, _) |
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
         emit(HostMsg.TurnEnd("t2", "end_turn"))

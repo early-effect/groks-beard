@@ -84,6 +84,27 @@ object ProtocolSpec extends ZIOSpecDefault:
         val got = """{"_tag":"not-a-real-tag"}""".fromJson[HostMsg]
         assertTrue(got.isLeft)
       },
+      test("question submit round-trips option ids and free text") {
+        val card: HostMsg = HostMsg.question(
+          QuestionCard(
+            "q-1",
+            List(
+              AgentQuestion(
+                "style",
+                "How?",
+                List(QuestionOption("dense", "Dense")),
+                allowMultiple = true,
+                allowFreeText = true,
+              )
+            ),
+          )
+        )
+        val submit: WebviewMsg = WebviewMsg.QuestionSubmit(
+          "q-1",
+          List(QuestionAnswer("style", List("dense"), Some("notes"))),
+        )
+        assertTrue(card.toJson.fromJson[HostMsg] == Right(card), submit.toJson.fromJson[WebviewMsg] == Right(submit))
+      },
       test("permission card and plan verdict round-trip") {
         val perm: HostMsg = HostMsg.permission(
           PermissionCard(

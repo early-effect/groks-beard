@@ -83,15 +83,8 @@ object ComposerQuery:
   def permissionOption(key: String, options: List[PermissionOption]): Option[PermissionOption] =
     digitIndex(key).flatMap(options.lift)
 
-  def questionOption(key: String, questions: List[AgentQuestion]): Option[(String, String)] =
-    questions.headOption.flatMap { q =>
-      val idx =
-        digitIndex(key).orElse {
-          if key.length == 1 && key(0) >= 'a' && key(0) <= 'f' then Some(9 + (key(0) - 'a'))
-          else None
-        }
-      idx.flatMap(q.options.lift).map(opt => (q.id, opt.id))
-    }
+  def questionOption(key: String, question: AgentQuestion): Option[String] =
+    QuestionDraft.optionKey(key, question)
 
   private def digitIndex(key: String): Option[Int] =
     if key.length == 1 && key(0) >= '1' && key(0) <= '9' then Some(key(0) - '1') else None

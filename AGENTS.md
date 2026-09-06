@@ -15,6 +15,41 @@ Priorities, in order:
 
 Not a priority: API stability, UI snapshot stability, "we already shipped this shape." A breaking change inside `beard/` is cheap. A muddled runtime is expensive. "We'll tidy the UI later" is not a reason to open the PR.
 
+## ZIO 2: this repo is the example
+
+Beard should be a project people can point at for effect-oriented Scala. Write idiomatic **ZIO 2**: services and layers. A service is a trait in `R`; you assemble them with `ZLayer` and `provide`.
+
+### Layers and services
+
+- A service is a trait (`HostOut`, `SessionRepo`, `Mentions`, `ChangesPersist`, `ReviewOps`). Methods return `UIO`, `Task`, or `BeardError.Result`, never `Unit` with hidden side effects.
+- Provide with `ZLayer.succeed` / `ZLayer.scoped` / `ZLayer.fromFunction`. Bundle the chat process as `ChatEnv.Env` and `provide` it at the host edge (`LiveSession`, `ChatView`, tests).
+- Tests construct `ChatEnv.test(...)`. Do not new up collaborators inside the SUT when a layer exists.
+- `ChatRuntime.make` is `ZIO[Scope & ChatEnv.Env, Nothing, ChatRuntime]`. Constructors that need a Scope (FiberRef, Hub, acquireRelease) take `ZIO[Scope, ...]`, not `Scope.global`.
+
+### Errors
+
+- `BeardError` is the app error enum (`SystemError`, `DecodeError`, `Missing`, …). Enrich it when a new failure is real, do not invent a parallel ADT.
+- `BeardError.Result[+A] = IO[BeardError, A]`. I/O is `ZIO.attempt` / `attemptBlocking` then `.orSystem`.
+- `ZIO.succeed` is for values that cannot fail. JSON, fs, process, and VS Code promises are not that.
+- Public `ChatRuntime` methods stay `UIO` and catch to `HostMsg.Error`. Do not leak `BeardError` through the webview. Do not `.orDie` at a boundary that can report.
+
+### Scope
+
+- Resources (child process, EventSource, MutationObserver, queues that must drain) are `ZIO.acquireRelease` or `forkScoped` inside the caller's Scope.
+- Preview / host lifetime is one Scope from activate (or `LiveSession.start`) to deactivate / shutdown. Do not leak `forkDaemon` except for work that must outlive the caller (empty-session delete after grace).
+- `ZStream.unwrapScoped` / `asyncScoped` when the stream owns the resource. Interrupt must release.
+
+### Streams, not bags of callbacks
+
+- Inbound HostMsg is a `ZStream`. Coalesce with a scoped `Queue` and one pull per paint (`FrameBurst`), not `ConcurrentLinkedQueue` + `AtomicBoolean`.
+- `ZStream.async` / `asyncZIO` at impure callback edges. No `Unsafe` / `runtime.unsafe` in application code.
+- Fold events into a projection (`Markdown.streamParts`, `QuestionDraft`). Do not rebuild `List`s from concatenated strings every token.
+- `Chunk` is the batch type. `groupedWithin` on a wall clock is a test flake; prefer pull + `requestAnimationFrame` with a short `timeout`.
+
+### Extract, do not pile on
+
+`ChatRuntime` is still a synchronized bag in places because it grew that way. New behavior is a small pure module plus a service method, not another `private var` if a `Ref` or a fold will do. Closed protocol unions change in the same PR on both sides.
+
 ## Preview stays up until the human approves
 
 `sbt --no-server ~uiJS/ascentPreview` (or `--server` when Metals is not the BSP) is the review surface. Do not stop LiveMain, do not commit, and do not open or update a PR until the human has looked at the running UI and said to commit or PR.

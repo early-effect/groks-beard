@@ -264,11 +264,68 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Question)
           result <- withMounted(ui) { root =>
             for
-              _ <- root.button("question-style-dense").click
+              _   <- waitPresent(root, "question")
+              _   <- root.button("question-style-dense").click
+              pos <- waitText(root, "question-pos", "Question 2 of 3")
+              _   <- root.button("question-extras-wrap").click
+              _   <- root.button("question-next").click
+              _   <- waitText(root, "question-pos", "Question 3 of 3")
+              _   <- root.button("question-note-skip").click
+              _   <- waitGone(root, "question")
+            yield assertTrue(pos.contains("2 of 3"))
+          }
+        yield result
+        end for
+      },
+      test("question Dismiss skips the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Question)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "question")
+              _ <- root.button("question-dismiss").click
               _ <- waitGone(root, "question")
             yield assertTrue(true)
           }
         yield result
+        end for
+      },
+      test("question Back returns to the previous item") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Question)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "question")
+              _   <- root.button("question-style-dense").click
+              _   <- waitText(root, "question-pos", "Question 2 of 3")
+              _   <- root.button("question-prev").click
+              pos <- waitText(root, "question-pos", "Question 1 of 3")
+            yield assertTrue(pos.contains("1 of 3"))
+          }
+        yield result
+        end for
+      },
+      test("question Send answers submits free text") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Question)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "question")
+              _   <- root.button("question-next").click
+              _   <- root.button("question-next").click
+              _   <- waitText(root, "question-pos", "Question 3 of 3")
+              _   <- root.textarea("question-freetext").press("h")
+              pos <- waitText(root, "question-pos", "Question 3 of 3")
+              _   <- root.textarea("question-freetext").fill("hello")
+              _   <- root.button("question-submit").click
+              _   <- waitGone(root, "question")
+            yield assertTrue(pos.contains("3 of 3"))
+          }
+        yield result
+        end for
       },
       test("parked follow-up is readable in the transcript") {
         val bridge = PushBridge()

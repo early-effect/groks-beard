@@ -309,6 +309,49 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("tool_call locations follow the current file once per tool") {
+        var followed = List.empty[(String, Option[Int])]
+        chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("hello")
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify(
+                      "sess_test",
+                      AcpUpdate.ToolCallUpdate(
+                        toolCallId = "call_1",
+                        locations = List(ToolLocation("/tmp/Main.scala", Some(1))),
+                      ),
+                    ),
+                  )
+                )
+              )
+            )
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify(
+                      "sess_test",
+                      AcpUpdate.ToolCallUpdate(
+                        toolCallId = "call_1",
+                        locations = List(ToolLocation("/tmp/Main.scala", Some(4))),
+                      ),
+                    ),
+                  )
+                )
+              )
+            )
+          yield assertTrue(
+            followed == List("/tmp/Main.scala" -> Some(1), "/tmp/Main.scala" -> Some(4))
+          )
+        }
+      },
       test("openDiff posts a sidebar preview of the pending file") {
         chat() { (rt, posted) =>
           for
@@ -975,6 +1018,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       deleteOnDisk: String => Boolean = _ => false,
       persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
       readDisk: String => Option[String] = _ => None,
+      followFile: (String, Option[Int]) => Unit = (_, _) => (),
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
       for
@@ -991,6 +1035,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               deleteOnDisk = deleteOnDisk,
               persistChanges = persistChanges,
               readDisk = readDisk,
+              followFile = followFile,
             )
           )
         result <- body(rt, posted)

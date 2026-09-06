@@ -62,6 +62,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Grok Build CLI only.
 - TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/rename`, `/delete`, `/history`, `/copy`, `/export`.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
+- Follow-along: the editor reveals the file (and line) the agent is in, without stealing focus from a Beard diff.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 

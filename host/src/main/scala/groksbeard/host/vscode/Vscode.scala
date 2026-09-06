@@ -80,8 +80,19 @@ trait WebviewViewProvider extends js.Object:
       token: CancellationToken,
   ): Unit
 
+class TextDocumentShowOptions(
+    val preserveFocus: Boolean,
+    val preview: Boolean = true,
+    val viewColumn: js.UndefOr[Int] = js.undefined,
+    val selection: js.UndefOr[Range] = js.undefined,
+) extends js.Object
+
 @js.native
 trait WindowNs extends js.Object:
+  def showTextDocument(
+      document: Uri,
+      options: js.UndefOr[TextDocumentShowOptions] = js.undefined,
+  ): js.Promise[TextEditor] = js.native
   def registerWebviewViewProvider(
       viewId: String,
       provider: WebviewViewProvider,
@@ -108,6 +119,10 @@ trait Position extends js.Object:
 trait Range extends js.Object:
   def start: Position = js.native
   def end: Position   = js.native
+
+@js.native
+@JSImport("vscode", "Range")
+class VsCodeRange(val startLine: Int, val startCharacter: Int, val endLine: Int, val endCharacter: Int) extends Range
 
 @js.native
 trait Selection extends Range:

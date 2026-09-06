@@ -79,6 +79,7 @@ trait ReviewOps:
   def applyUndo(mutations: List[UndoMutation]): BeardError.Result[Unit]
   def confirmDirty(path: String): UIO[Boolean]
   def onStoreChange: UIO[Unit]
+  def follow(path: String, line: Option[Int]): UIO[Unit]
 
 object ReviewOps:
   def layer(
@@ -87,13 +88,15 @@ object ReviewOps:
       undo: List[UndoMutation] => BeardError.Result[Unit] = _ => ZIO.unit,
       dirty: String => UIO[Boolean] = _ => ZIO.succeed(true),
       storeChanged: UIO[Unit] = ZIO.unit,
+      onFollow: (String, Option[Int]) => UIO[Unit] = (_, _) => ZIO.unit,
   ): ULayer[ReviewOps] =
     ZLayer.succeed(new ReviewOps:
       def readDisk(path: String): BeardError.Result[Option[String]]          = read(path)
       def openNativeDiffs(heading: String, diffs: List[DiffPair]): UIO[Unit] = openDiffs(heading, diffs)
       def applyUndo(mutations: List[UndoMutation]): BeardError.Result[Unit]  = undo(mutations)
       def confirmDirty(path: String): UIO[Boolean]                           = dirty(path)
-      def onStoreChange: UIO[Unit]                                           = storeChanged)
+      def onStoreChange: UIO[Unit]                                           = storeChanged
+      def follow(path: String, line: Option[Int]): UIO[Unit]                 = onFollow(path, line))
 
   val ignore: ULayer[ReviewOps] = layer()
 end ReviewOps
@@ -160,6 +163,7 @@ object ChatEnv:
       applyUndo: List[UndoMutation] => Unit = _ => (),
       confirmDirty: String => Boolean = _ => true,
       onStoreChange: () => Unit = () => (),
+      followFile: (String, Option[Int]) => Unit = (_, _) => (),
       onCopy: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
   ): ULayer[Env] =
@@ -173,6 +177,7 @@ object ChatEnv:
         undo = m => ZIO.succeed(applyUndo(m)),
         dirty = p => ZIO.succeed(confirmDirty(p)),
         storeChanged = ZIO.succeed(onStoreChange()),
+        onFollow = (p, l) => ZIO.succeed(followFile(p, l)),
       ) ++
       TranscriptOut.test(onCopy)
 end ChatEnv

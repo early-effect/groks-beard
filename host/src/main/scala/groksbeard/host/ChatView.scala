@@ -132,6 +132,7 @@ final class ChatView(
                       openDiffs = (heading, diffs) => ZIO.succeed(review.open(heading, diffs)),
                       undo = review.applyUndo,
                       storeChanged = ZIO.succeed(tree.refresh()),
+                      onFollow = (path, line) => ZIO.succeed(review.follow(path, line)),
                     )
                 )
                 .flatMap { rt =>

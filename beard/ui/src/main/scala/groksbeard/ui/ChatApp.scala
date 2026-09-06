@@ -816,19 +816,21 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
-      chat          <- sq(PreviewScenes.seed(scene))
-      draft         <- sq(initialDraft)
-      dismissed     <- sq(false)
-      mentionIdx    <- sq(Option.empty[Int])
-      openMenu      <- sq(initialMenu)
-      pickerQuery   <- sq("")
-      changesOpen   <- sq(false)
-      leaving       <- sq(Option.empty[SessionLeave])
-      pendingDelete <- sq(Option.empty[String])
-      questionDraft <- sq(QuestionDraft.empty)
-      nowMs         <- wallMs.flatMap(sq(_))
-      lastHref      <- Ref.make("")
-      bound         <- Promise.make[Nothing, Unit]
+      chat           <- sq(PreviewScenes.seed(scene))
+      draft          <- sq(initialDraft)
+      dismissed      <- sq(false)
+      mentionIdx     <- sq(Option.empty[Int])
+      openMenu       <- sq(initialMenu)
+      pickerQuery    <- sq("")
+      changesOpen    <- sq(false)
+      leaving        <- sq(Option.empty[SessionLeave])
+      pendingDelete  <- sq(Option.empty[String])
+      questionDraft  <- sq(QuestionDraft.empty)
+      historyBrowse  <- sq(Option.empty[Int])
+      historyPickIdx <- sq(Option.empty[Int])
+      nowMs          <- wallMs.flatMap(sq(_))
+      lastHref       <- Ref.make("")
+      bound          <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[String])
       leaveGen = new AtomicInteger(0)
       _ <- ZStream
@@ -891,7 +893,11 @@ object ChatApp:
     yield
 
       val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
-        ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(c.commands, q)).getOrElse(Nil)
+        if PromptHistory.query(d).isDefined then Nil
+        else ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(c.commands, q)).getOrElse(Nil)
+      }
+      val historyShown = Squawk.zipWith(draft, chat) { (d, c) =>
+        PromptHistory.query(d).map(q => PromptHistory.filter(PromptHistory.entries(c), q)).getOrElse(Nil)
       }
       val mentionShown = Squawk.zipWith(draft, Squawk.zipWith(chat, dismissed)(Tuple2.apply)) { (d, pack) =>
         val (c, disc) = pack
@@ -934,12 +940,19 @@ object ChatApp:
                     draft.set("") *> applyRename(c.sessionId, op)
               case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
                 draft.set("") *> armDelete(c.sessionId)
+              case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
+                val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
+                historyPickIdx.get.flatMap { idx =>
+                  val pick = idx.flatMap(list.lift).orElse(list.headOption)
+                  historyBrowse.set(None) *> historyPickIdx.set(None) *> pick.fold(draft.set(""))(draft.set)
+                }
               case _ if trimmed.isEmpty && c.chips.isEmpty =>
                 ZIO.unit
               case _ =>
                 val msg =
                   if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed) else WebviewMsg.Send(trimmed)
-                ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false)
+                ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false) *>
+                  historyBrowse.set(None) *> historyPickIdx.set(None)
             end match
           }
         }
@@ -990,11 +1003,21 @@ object ChatApp:
                   case None    =>
                     mentionShown.get.flatMap { mentions =>
                       if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                      else if c.pickerOpen then closePicker
-                      else if c.permission.isDefined then parkPermission
-                      else if c.question.isDefined then ZIO.unit
-                      else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                      else ZIO.unit
+                      else
+                        draft.get.flatMap { text =>
+                          if PromptHistory.query(text).isDefined then
+                            draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                          else
+                            historyBrowse.get.flatMap {
+                              case Some(_) => historyBrowse.set(None)
+                              case None    =>
+                                if c.pickerOpen then closePicker
+                                else if c.permission.isDefined then parkPermission
+                                else if c.question.isDefined then ZIO.unit
+                                else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                else ZIO.unit
+                            }
+                        }
                     }
                 }
             }
@@ -1046,6 +1069,8 @@ object ChatApp:
 
       def startNew: UIO[Unit] =
         leaving.set(None) *>
+          historyBrowse.set(None) *>
+          historyPickIdx.set(None) *>
           chat.update(adoptView(_, "", waiting)) *>
           commit(hist, lastHref, BeardPath.Welcome, WebviewMsg.NewSession, bridge)
 
@@ -1071,12 +1096,16 @@ object ChatApp:
       def stageIdle(leave: Option[SessionLeave]): Boolean =
         leave.isEmpty
 
+      def pickHistory(text: String): UIO[Unit] =
+        historyBrowse.set(None) *> historyPickIdx.set(None) *> draft.set(text)
+
       def pickSlash(name: String): UIO[Unit] =
         if SessionCommands.isNew(name) then draft.set("") *> startNew
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then draft.set("") *> openPicker
         else if SessionCommands.isModel(name) then draft.set("") *> openMenu.set(Some(OpenMenu.Model))
         else if SessionCommands.isRename(name) then draft.set("/rename ")
         else if SessionCommands.isDelete(name) then draft.set("") *> chat.get.flatMap(c => armDelete(c.sessionId))
+        else if SessionCommands.isHistory(name) then draft.set("/history ") *> historyPickIdx.set(Some(0))
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1157,6 +1186,8 @@ object ChatApp:
       def onDraft(text: String): UIO[Unit] =
         draft.set(text) *>
           openMenu.set(None) *>
+          (if PromptHistory.query(text).isDefined then historyPickIdx.set(Some(0))
+           else historyPickIdx.set(None)) *>
           (ComposerQuery.mentionQuery(text) match
             case None =>
               dismissed.set(false) *> mentionIdx.set(None) *>
@@ -1371,6 +1402,28 @@ object ChatApp:
             ),
           )
         ),
+        when(historyShown.map(_.nonEmpty))(
+          E.ul(
+            ComposerMenu,
+            TestId("history"),
+            A.role("listbox"),
+            forEach(
+              Squawk.zipWith(historyShown, historyPickIdx) { (rows, idx) =>
+                rows.zipWithIndex.map { (text, i) => (text, i, idx.contains(i)) }
+              }
+            )(t => s"${t._2}-${t._1}") { t =>
+              val (text, i, on) = t
+              E.li(
+                E.button(
+                  if on then Send else MenuItem,
+                  TestId(s"history-$i"),
+                  Ev.onClick(_ => pickHistory(text)),
+                  PromptHistory.label(text),
+                )
+              )
+            },
+          )
+        ),
         when(slashShown.map(_.nonEmpty))(
           E.ul(
             ComposerMenu,
@@ -1413,11 +1466,15 @@ object ChatApp:
           mentionIdx,
           slashShown,
           mentionShown,
+          historyShown,
+          historyBrowse,
+          historyPickIdx,
           onDraft,
           sendDraft,
           dropChip,
           pickMention,
           pickSlash,
+          pickHistory,
         ),
       )
     end for
@@ -1496,17 +1553,35 @@ object ChatApp:
       mentionIdx: ascent.Source[Option[Int]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
+      historyShown: Squawk[List[String]],
+      historyBrowse: ascent.Source[Option[Int]],
+      historyPickIdx: ascent.Source[Option[Int]],
       onDraft: String => UIO[Unit],
       sendDraft: UIO[Unit],
       dropChip: PromptChip => UIO[Unit],
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
+      pickHistory: String => UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
       renderActivityStrip(chat, nowMs),
       renderChipRow(chat, dropChip),
-      renderDraft(chat, draft, mentionIdx, slashShown, mentionShown, onDraft, sendDraft, pickMention, pickSlash),
+      renderDraft(
+        chat,
+        draft,
+        mentionIdx,
+        slashShown,
+        mentionShown,
+        historyShown,
+        historyBrowse,
+        historyPickIdx,
+        onDraft,
+        sendDraft,
+        pickMention,
+        pickSlash,
+        pickHistory,
+      ),
       renderComposerBar(bridge, chat, sendDraft),
     )
 
@@ -1547,10 +1622,14 @@ object ChatApp:
       mentionIdx: ascent.Source[Option[Int]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
+      historyShown: Squawk[List[String]],
+      historyBrowse: ascent.Source[Option[Int]],
+      historyPickIdx: ascent.Source[Option[Int]],
       onDraft: String => UIO[Unit],
       sendDraft: UIO[Unit],
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
+      pickHistory: String => UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -1564,7 +1643,23 @@ object ChatApp:
         }
       ),
       Events.onInput(e => onDraft(e.targetValue.getOrElse(""))),
-      Ev.onKeyDown(e => onDraftKey(e, chat, mentionIdx, slashShown, mentionShown, sendDraft, pickMention, pickSlash)),
+      Ev.onKeyDown(e =>
+        onDraftKey(
+          e,
+          chat,
+          draft,
+          mentionIdx,
+          slashShown,
+          mentionShown,
+          historyShown,
+          historyBrowse,
+          historyPickIdx,
+          sendDraft,
+          pickMention,
+          pickSlash,
+          pickHistory,
+        )
+      ),
     )
 
   private def renderComposerBar(
@@ -1594,12 +1689,17 @@ object ChatApp:
   private def onDraftKey(
       e: ascent.dom.KeyboardEvent,
       chat: ascent.Source[ChatModel],
+      draft: ascent.Source[String],
       mentionIdx: ascent.Source[Option[Int]],
       slashShown: Squawk[List[SlashCommand]],
       mentionShown: Squawk[List[MentionFile]],
+      historyShown: Squawk[List[String]],
+      historyBrowse: ascent.Source[Option[Int]],
+      historyPickIdx: ascent.Source[Option[Int]],
       sendDraft: UIO[Unit],
       pickMention: MentionFile => UIO[Unit],
       pickSlash: String => UIO[Unit],
+      pickHistory: String => UIO[Unit],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
@@ -1609,19 +1709,45 @@ object ChatApp:
     for
       slash    <- slashShown.get
       mentions <- mentionShown.get
+      history  <- historyShown.get
       idx      <- mentionIdx.get
-      s        <- chat.get.map(_.settings)
-      out      <-
+      pick     <- historyPickIdx.get
+      browse   <- historyBrowse.get
+      text     <- draft.get
+      c        <- chat.get
+      s    = c.settings
+      list = PromptHistory.entries(c)
+      out <-
         if mentions.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
           go(mentionIdx.set(ComposerQuery.moveMentionIndex(idx, key, mentions.size)))
         else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
           mentions.lift(idx.getOrElse(0)) match
             case Some(file) => go(pickMention(file))
             case None       => ZIO.unit
+        else if history.nonEmpty && (key == "ArrowDown" || key == "ArrowUp") then
+          go(historyPickIdx.set(ComposerQuery.moveMentionIndex(pick, key, history.size)))
+        else if history.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
+          history.lift(pick.getOrElse(0)) match
+            case Some(row) => go(pickHistory(row))
+            case None      => ZIO.unit
         else if slash.nonEmpty && key == "Enter" && !e.shiftKey && !ctrlOrMeta then
           slash.headOption match
             case Some(cmd) => go(pickSlash(cmd.name))
             case None      => ZIO.unit
+        else if key == "ArrowUp" && mentions.isEmpty && slash.isEmpty && history.isEmpty then
+          if list.isEmpty then ZIO.unit
+          else
+            browse match
+              case Some(i) =>
+                val n = PromptHistory.older(i, list.size)
+                go(historyBrowse.set(Some(n)) *> draft.set(list(n)))
+              case None if text.isEmpty && c.chips.isEmpty =>
+                go(historyBrowse.set(Some(0)) *> draft.set(list.head))
+              case None => ZIO.unit
+        else if key == "ArrowDown" && browse.isDefined then
+          PromptHistory.newer(browse.get) match
+            case None    => go(historyBrowse.set(None) *> draft.set(""))
+            case Some(n) => go(historyBrowse.set(Some(n)) *> draft.set(list(n)))
         else
           ComposerQuery.sendOnKey(key, e.shiftKey, ctrlOrMeta, s.useCtrlEnterToSend) match
             case ComposerQuery.SendKey.Send    => go(sendDraft)

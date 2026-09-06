@@ -1541,98 +1541,7 @@ object ChatApp:
             chat.map(_.error.getOrElse("")),
           )
         ),
-        when(openMenu.map(_.contains(OpenMenu.Mode)))(
-          E.div(
-            Popover,
-            TestId("mode-menu"),
-            forEach(
-              Squawk.zipWith(chat, menuIdx) { (c, idx) =>
-                c.modes.zipWithIndex.map { (mode, i) => (mode, idx.contains(i)) }
-              }
-            )(t => s"${t._1.id}-${t._2}") { t =>
-              val (mode, on) = t
-              E.button(
-                if on then Send else MenuItem,
-                TestId(s"mode-${mode.id}"),
-                A.title(ModeLabel.modeTip(mode.id)),
-                Ev.onClick(_ => chooseMode(mode.id)),
-                mode.name,
-              )
-            },
-          )
-        ),
-        when(openMenu.map(_.contains(OpenMenu.Model)))(
-          E.div(
-            Popover,
-            TestId("model-menu"),
-            forEach(
-              Squawk.zipWith(chat, menuIdx) { (c, idx) =>
-                c.models.zipWithIndex.map { (model, i) => (model, idx.contains(i)) }
-              }
-            )(t => s"${t._1.modelId}-${t._2}") { t =>
-              val (model, on) = t
-              E.button(
-                if on then Send else MenuItem,
-                TestId(s"model-${model.modelId}"),
-                A.title(model.description.getOrElse(model.modelId)),
-                Ev.onClick(_ => chooseModel(model)),
-                model.name,
-              )
-            },
-          )
-        ),
-        when(openMenu.map(_.contains(OpenMenu.Effort)))(
-          E.div(
-            Popover,
-            TestId("effort-menu"),
-            forEach(
-              Squawk.zipWith(chat, menuIdx) { (c, idx) =>
-                levelsOf(c).zipWithIndex.map { (level, i) => (level, idx.contains(i)) }
-              }
-            )(t => s"${t._1.value}-${t._2}") { t =>
-              val (level, on) = t
-              E.button(
-                if on then Send else MenuItem,
-                TestId(s"effort-${level.value}"),
-                Ev.onClick(_ => chooseEffort(level)),
-                level.label.getOrElse(level.value),
-              )
-            },
-          )
-        ),
-        when(openMenu.map(_.contains(OpenMenu.Settings)))(
-          E.div(
-            PopoverEnd,
-            TestId("settings-panel"),
-            forEach(
-              Squawk.zipWith(chat, menuIdx) { (c, idx) =>
-                List(
-                  (
-                    "ctrl-enter",
-                    "useCtrlEnterToSend",
-                    if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off",
-                    idx.contains(0),
-                  ),
-                  (
-                    "active-file",
-                    "includeActiveFileByDefault",
-                    if c.settings.includeActiveFileByDefault then "Include active file: on"
-                    else "Include active file: off",
-                    idx.contains(1),
-                  ),
-                )
-              }
-            )(t => s"${t._1}-${t._3}-${t._4}") { t =>
-              val (testId, id, label, on) = t
-              E.button(
-                if on then Send else MenuItem,
-                TestId(s"setting-$testId"),
-                Ev.onClick(_ => chooseSetting(id)),
-                label,
-              )
-            },
-          )
-        ),
+        renderChromeMenus(chat, openMenu, menuIdx, chooseMode, chooseModel, chooseEffort, chooseSetting),
         when(historyShown.map(_.nonEmpty))(
           E.ul(
             ComposerMenu,
@@ -1718,6 +1627,112 @@ object ChatApp:
       )
     end for
   end component
+
+  private def renderChromeMenus(
+      chat: ascent.Source[ChatModel],
+      openMenu: ascent.Source[Option[OpenMenu]],
+      menuIdx: ascent.Source[Option[Int]],
+      chooseMode: String => UIO[Unit],
+      chooseModel: ModelOption => UIO[Unit],
+      chooseEffort: EffortLevel => UIO[Unit],
+      chooseSetting: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    E.div(
+      when(openMenu.map(_.contains(OpenMenu.Mode)))(
+        E.div(
+          Popover,
+          TestId("mode-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              c.modes.zipWithIndex.map { (mode, i) => (mode, idx.contains(i)) }
+            }
+          )(t => s"${t._1.id}-${t._2}") { t =>
+            val (mode, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"mode-${mode.id}"),
+              A.title(ModeLabel.modeTip(mode.id)),
+              Ev.onClick(_ => chooseMode(mode.id)),
+              mode.name,
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Model)))(
+        E.div(
+          Popover,
+          TestId("model-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              c.models.zipWithIndex.map { (model, i) => (model, idx.contains(i)) }
+            }
+          )(t => s"${t._1.modelId}-${t._2}") { t =>
+            val (model, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"model-${model.modelId}"),
+              A.title(model.description.getOrElse(model.modelId)),
+              Ev.onClick(_ => chooseModel(model)),
+              model.name,
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Effort)))(
+        E.div(
+          Popover,
+          TestId("effort-menu"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              Effort.of(c.models.find(_.modelId == c.modelId)).zipWithIndex.map { (level, i) =>
+                (level, idx.contains(i))
+              }
+            }
+          )(t => s"${t._1.value}-${t._2}") { t =>
+            val (level, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"effort-${level.value}"),
+              Ev.onClick(_ => chooseEffort(level)),
+              level.label.getOrElse(level.value),
+            )
+          },
+        )
+      ),
+      when(openMenu.map(_.contains(OpenMenu.Settings)))(
+        E.div(
+          PopoverEnd,
+          TestId("settings-panel"),
+          forEach(
+            Squawk.zipWith(chat, menuIdx) { (c, idx) =>
+              List(
+                (
+                  "ctrl-enter",
+                  "useCtrlEnterToSend",
+                  if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off",
+                  idx.contains(0),
+                ),
+                (
+                  "active-file",
+                  "includeActiveFileByDefault",
+                  if c.settings.includeActiveFileByDefault then "Include active file: on"
+                  else "Include active file: off",
+                  idx.contains(1),
+                ),
+              )
+            }
+          )(t => s"${t._1}-${t._3}-${t._4}") { t =>
+            val (testId, id, label, on) = t
+            E.button(
+              if on then Send else MenuItem,
+              TestId(s"setting-$testId"),
+              Ev.onClick(_ => chooseSetting(id)),
+              label,
+            )
+          },
+        )
+      ),
+    )
 
   private def renderToolbar(
       chat: ascent.Source[ChatModel],

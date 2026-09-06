@@ -9,7 +9,6 @@ out/
 beard/LICENSE
 .vscode-test/
 coverage/
-*.tsbuildinfo
 
 # sbt
 target/

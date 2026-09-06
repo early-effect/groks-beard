@@ -158,15 +158,8 @@ final class ChatRuntime private (
     respond(requestId, Json.Obj("outcome" -> Json.Str(verdict)))
   }
 
-  def questionChoice(requestId: String, questionId: String, optionId: String): UIO[Unit] = exclusive {
-    respond(
-      requestId,
-      Json.Obj(
-        "answers" -> Json.Arr(
-          Json.Obj("questionId" -> Json.Str(questionId), "optionId" -> Json.Str(optionId))
-        )
-      ),
-    )
+  def questionSubmit(requestId: String, answers: List[QuestionAnswer]): UIO[Unit] = exclusive {
+    respond(requestId, Json.Obj("answers" -> answers.asJson))
   }
 
   def questionDismiss(requestId: String): UIO[Unit] = exclusive {

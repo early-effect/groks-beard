@@ -38,7 +38,7 @@ object HostDispatch:
       case WebviewMsg.PermissionChoice(requestId, opt) => runtime.permissionChoice(requestId, opt)
       case WebviewMsg.PermissionPark(_)                => ZIO.unit
       case WebviewMsg.PlanVerdict(requestId, verdict)  => runtime.planVerdict(requestId, verdict)
-      case WebviewMsg.QuestionChoice(id, qid, oid)     => runtime.questionChoice(id, qid, oid)
+      case WebviewMsg.QuestionSubmit(id, answers)      => runtime.questionSubmit(id, answers)
       case WebviewMsg.QuestionDismiss(id)              => runtime.questionDismiss(id)
       case WebviewMsg.ElicitAccept(id)                 => runtime.elicitAccept(id)
       case WebviewMsg.ElicitDecline(id)                => runtime.elicitDecline(id)

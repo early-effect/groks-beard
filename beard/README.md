@@ -1,6 +1,6 @@
 # beard
 
-Greenfield Scala.js / Ascent rewrite of Grok's Beard. The TypeScript tree under `packages/` is frozen spec.
+Scala.js / Ascent product for Grok's Beard. This tree is the extension, the webview, and the preview server.
 
 ## Preview (agent design loop)
 

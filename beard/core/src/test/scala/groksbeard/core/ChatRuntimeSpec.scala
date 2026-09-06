@@ -785,6 +785,80 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("questionSubmit replies with option ids and free text") {
+        val written = scala.collection.mutable.ListBuffer.empty[String]
+        chat(transport =
+          AcpTransport.tap(
+            AcpTransport.fake(),
+            s =>
+              written += s; (),
+          )
+        ) { (rt, posted) =>
+          val ask = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.request(
+                RpcId.Str("q-1"),
+                "_x.ai/ask_user_question",
+                AskUserQuestionParams(
+                  List(
+                    AgentQuestion(
+                      "style",
+                      "How?",
+                      List(QuestionOption("dense", "Dense")),
+                      allowMultiple = true,
+                      allowFreeText = true,
+                    )
+                  )
+                ),
+              )
+            )
+          )
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(ask)
+            card <- posted.get
+            _    <- rt.questionSubmit("q-1", List(QuestionAnswer("style", List("dense"), Some("notes"))))
+            blob = written.mkString
+          yield assertTrue(
+            card.exists {
+              case HostMsg.Question("q-1", qs) =>
+                qs.headOption.exists(q => q.allowMultiple && q.allowFreeText)
+              case _ => false
+            },
+            blob.contains("\"answers\""),
+            blob.contains("dense"),
+            blob.contains("notes"),
+          )
+          end for
+        }
+      },
+      test("questionDismiss replies with empty answers") {
+        val written = scala.collection.mutable.ListBuffer.empty[String]
+        chat(transport =
+          AcpTransport.tap(
+            AcpTransport.fake(),
+            s =>
+              written += s; (),
+          )
+        ) { (rt, _) =>
+          val ask = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.request(
+                RpcId.Str("q-2"),
+                "_x.ai/ask_user_question",
+                AskUserQuestionParams(List(AgentQuestion("style", "How?", List(QuestionOption("dense", "Dense"))))),
+              )
+            )
+          )
+          for
+            _ <- rt.ready
+            _ <- rt.ingestData(ask)
+            _ <- rt.questionDismiss("q-2")
+            blob = written.mkString
+          yield assertTrue(blob.contains("q-2"), blob.contains("\"answers\""), blob.contains("[]"))
+        }
+      },
       test("deleteSession of another id refreshes the open picker") {
         var rows = List(SessionRow("keep", "Keep", activityMs = 2), SessionRow("gone", "Gone", activityMs = 1))
         chat(

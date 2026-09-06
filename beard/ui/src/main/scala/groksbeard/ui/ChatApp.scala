@@ -825,6 +825,7 @@ object ChatApp:
       changesOpen   <- sq(false)
       leaving       <- sq(Option.empty[SessionLeave])
       pendingDelete <- sq(Option.empty[String])
+      questionDraft <- sq(QuestionDraft.empty)
       nowMs         <- wallMs.flatMap(sq(_))
       lastHref      <- Ref.make("")
       bound         <- Promise.make[Nothing, Unit]
@@ -956,6 +957,25 @@ object ChatApp:
                 ZIO.succeed(bridge.post(WebviewMsg.PermissionPark(card.requestId)))
         }
 
+      def applyQuestionPick(card: QuestionCard, optionId: String): UIO[Unit] =
+        questionDraft.get.flatMap { held =>
+          val d    = QuestionDraft.pick(card, held, optionId)
+          val q    = QuestionDraft.current(card, d)
+          val last = QuestionDraft.isLast(card, d)
+          if q.exists(_.allowMultiple) then questionDraft.set(d)
+          else if last then
+            questionDraft.set(d) *>
+              ZIO.succeed(bridge.post(WebviewMsg.QuestionSubmit(card.requestId, QuestionDraft.answers(card, d))))
+          else questionDraft.set(QuestionDraft.next(card, d))
+        }
+
+      def typingInField(e: ascent.dom.KeyboardEvent): Boolean =
+        e.target match
+          case el: ascent.dom.Element =>
+            val tag = el.tagName.toLowerCase
+            tag == "textarea" || tag == "input"
+          case _ => false
+
       def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
         val key        = e.key
         val ctrlOrMeta = e.ctrlKey || e.metaKey
@@ -972,6 +992,7 @@ object ChatApp:
                       if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
                       else if c.pickerOpen then closePicker
                       else if c.permission.isDefined then parkPermission
+                      else if c.question.isDefined then ZIO.unit
                       else if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
                       else ZIO.unit
                     }
@@ -979,7 +1000,11 @@ object ChatApp:
             }
           else if e.shiftKey && key == "Tab" && !ctrlOrMeta then
             e.preventDefault()
-            openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+            if c.question.isDefined || c.permission.isDefined then ZIO.unit
+            else openMenu.set(None) *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+          else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
+            e.preventDefault()
+            ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId)))
           else
             pendingDelete.get.flatMap {
               case Some(_) if key == "y" || key == "Y" =>
@@ -994,10 +1019,26 @@ object ChatApp:
                     e.preventDefault()
                     ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId)))
                   case None =>
-                    c.question.flatMap(q => ComposerQuery.questionOption(key, q.questions)) match
-                      case Some((qid, oid)) =>
-                        e.preventDefault()
-                        ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(c.question.get.requestId, qid, oid)))
+                    c.question match
+                      case Some(_) if typingInField(e) => ZIO.unit
+                      case Some(card)                  =>
+                        questionDraft.get.flatMap { held =>
+                          val d = QuestionDraft.align(card, held)
+                          QuestionDraft.navKey(key) match
+                            case Some("prev") =>
+                              e.preventDefault()
+                              questionDraft.set(QuestionDraft.prev(card, d))
+                            case Some("next") =>
+                              e.preventDefault()
+                              questionDraft.set(QuestionDraft.next(card, d))
+                            case _ =>
+                              QuestionDraft.current(card, d).flatMap(q => QuestionDraft.optionKey(key, q)) match
+                                case Some(oid) =>
+                                  e.preventDefault()
+                                  applyQuestionPick(card, oid)
+                                case None => ZIO.unit
+                          end match
+                        }
                       case None => ZIO.unit
             }
         }
@@ -1217,7 +1258,7 @@ object ChatApp:
             )
           ),
         ),
-        renderCards(bridge, chat),
+        renderCards(bridge, chat, questionDraft, applyQuestionPick),
         when(pendingDelete.map(_.nonEmpty))(
           E.div(
             Cards,
@@ -1720,7 +1761,12 @@ object ChatApp:
     end match
   end renderTool
 
-  private def renderCards(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+  private def renderCards(
+      bridge: HostBridge,
+      chat: ascent.Source[ChatModel],
+      questionDraft: ascent.Source[QuestionDraft],
+      onQuestionPick: (QuestionCard, String) => UIO[Unit],
+  ): ascent.ast.UI[Any] =
     E.div(
       Cards,
       TestId("cards"),
@@ -1778,31 +1824,8 @@ object ChatApp:
           ),
         )
       },
-      forEach(chat.map(_.question.toList))(_.requestId) { card =>
-        val body = card.questions.map { q =>
-          E.div(
-            E.p(q.prompt),
-            Arg.ArgsArg(
-              q.options.zipWithIndex.map { (opt, idx) =>
-                Arg.ChildArg(
-                  E.button(
-                    MenuItem,
-                    TestId(s"question-${q.id}-${opt.id}"),
-                    Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionChoice(card.requestId, q.id, opt.id)))),
-                    s"${idx + 1} ${opt.label}",
-                  )
-                )
-              }
-            ),
-          )
-        }
-        val dismiss = E.button(
-          MenuItem,
-          TestId("question-dismiss"),
-          Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId)))),
-          "Dismiss",
-        )
-        E.div(Card, TestId("question"), Arg.ArgsArg((body :+ dismiss).map(Arg.ChildArg(_))))
+      forEachSignal(chat.map(_.question.toList))(_.requestId) { (_, card, _) =>
+        renderQuestionCard(bridge, card, questionDraft, onQuestionPick)
       },
       forEach(chat.map(_.elicit.toList))(_.requestId) { card =>
         E.div(
@@ -1824,6 +1847,91 @@ object ChatApp:
         )
       },
     )
+
+  private def renderQuestionCard(
+      bridge: HostBridge,
+      card: QuestionCard,
+      questionDraft: ascent.Source[QuestionDraft],
+      onQuestionPick: (QuestionCard, String) => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    val d    = questionDraft.map(QuestionDraft.align(card, _))
+    val q    = d.map(QuestionDraft.current(card, _))
+    val n    = card.questions.size
+    val pos  = d.map(held => s"Question ${held.index + 1} of $n")
+    val last = d.map(QuestionDraft.isLast(card, _))
+    val opts = d.map { held =>
+      QuestionDraft.current(card, held).toList.flatMap { qq =>
+        qq.options.zipWithIndex.map { (opt, idx) =>
+          val on = held.selected.getOrElse(qq.id, Nil).contains(opt.id)
+          (qq.id, opt, idx, on)
+        }
+      }
+    }
+    E.div(
+      Card,
+      TestId("question"),
+      E.p(SessionMetaLine, TestId("question-pos"), pos),
+      E.p(q.map(_.map(_.prompt).getOrElse(""))),
+      forEach(opts)(t => s"${t._1}-${t._2.id}-${t._4}") { t =>
+        val (qid, opt, idx, on) = t
+        E.button(
+          if on then Send else MenuItem,
+          TestId(s"question-$qid-${opt.id}"),
+          Ev.onClick(_ => onQuestionPick(card, opt.id)),
+          s"${idx + 1} ${opt.label}",
+        )
+      },
+      when(q.map(_.exists(_.allowFreeText)))(
+        E.textarea(
+          TestId("question-freetext"),
+          A.placeholder("Or type an answer"),
+          A.value(
+            d.map { held =>
+              QuestionDraft.current(card, held).flatMap(qq => held.freeText.get(qq.id)).getOrElse("")
+            }
+          ),
+          Events.onInput(e => questionDraft.update(QuestionDraft.setFreeText(card, _, e.targetValue.getOrElse("")))),
+        )
+      ),
+      when(d.map(_.index > 0))(
+        E.button(
+          CardBtn,
+          TestId("question-prev"),
+          Ev.onClick(_ => questionDraft.update(QuestionDraft.prev(card, _))),
+          "Back",
+        )
+      ),
+      when(last.map(isLast => !isLast))(
+        E.button(
+          CardBtn,
+          TestId("question-next"),
+          Ev.onClick(_ => questionDraft.update(QuestionDraft.next(card, _))),
+          "Next",
+        )
+      ),
+      when(last)(
+        E.button(
+          Send,
+          TestId("question-submit"),
+          Ev.onClick(_ =>
+            questionDraft.get.flatMap { held =>
+              val now = QuestionDraft.align(card, held)
+              ZIO.succeed(
+                bridge.post(WebviewMsg.QuestionSubmit(card.requestId, QuestionDraft.answers(card, now)))
+              )
+            }
+          ),
+          "Send answers",
+        )
+      ),
+      E.button(
+        MenuItem,
+        TestId("question-dismiss"),
+        Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId)))),
+        "Dismiss",
+      ),
+    )
+  end renderQuestionCard
 
   private def renderChanges(
       bridge: HostBridge,

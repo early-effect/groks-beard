@@ -88,18 +88,16 @@ object ComposerQuerySpec extends ZIOSpecDefault:
           ComposerQuery.permissionOption("a", opts).isEmpty,
         )
       },
-      test("maps 1-9 and a-f onto the first question") {
-        val questions = List(
-          AgentQuestion(
-            "style",
-            "How?",
-            List(QuestionOption("dense", "Dense"), QuestionOption("roomy", "Roomy")),
-          )
+      test("maps 1-9 onto the current question") {
+        val q = AgentQuestion(
+          "style",
+          "How?",
+          List(QuestionOption("dense", "Dense"), QuestionOption("roomy", "Roomy")),
         )
         assertTrue(
-          ComposerQuery.questionOption("1", questions).contains(("style", "dense")),
-          ComposerQuery.questionOption("2", questions).contains(("style", "roomy")),
-          ComposerQuery.questionOption("a", questions).isEmpty,
+          ComposerQuery.questionOption("1", q).contains("dense"),
+          ComposerQuery.questionOption("2", q).contains("roomy"),
+          ComposerQuery.questionOption("a", q).isEmpty,
         )
       },
       test("Enter sends unless ctrlEnterToSend, Shift+Enter inserts a newline, Ctrl/Cmd+Enter always sends") {

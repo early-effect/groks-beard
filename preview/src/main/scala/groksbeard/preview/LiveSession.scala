@@ -51,6 +51,7 @@ object LiveSession:
               SessionRepo.of(NioSessionFs, home, cwd) ++
               Mentions.layer(q => ZIO.attemptBlocking(MentionWalk.fromDisk(cwd, q)).orSystem) ++
               ChangesPersist.noop ++
+              TranscriptOut.of(NioSessionFs, home, cwd, env) ++
               ReviewOps.ignore
           ProcessTransport
             .spawn(cmd, args, cwd, onErr = line => note.get()(line))

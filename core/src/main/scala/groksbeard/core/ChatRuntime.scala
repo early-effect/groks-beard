@@ -11,6 +11,7 @@ final class ChatRuntime private (
     sessions: SessionRepo,
     mentions: Mentions,
     persist: ChangesPersist,
+    copies: TranscriptOut,
     cwd: String,
     capabilities: ClientCapabilities,
     fallbackSessionId: String,
@@ -267,6 +268,15 @@ final class ChatRuntime private (
 
   def closePicker: UIO[Unit] = exclusive(doPostList(open = false))
 
+  def copyOut(text: String, path: Option[String], backup: Boolean, conversation: Boolean): UIO[Unit] =
+    exclusive {
+      absorb {
+        copies.deliver(text, path, backup, conversation).flatMap { result =>
+          post(HostMsg.Copied(result.message, result.clipboard))
+        }
+      }
+    }
+
   private def doSend(text: String): UIO[Unit] =
     ZIO.suspendSucceed {
       val trimmed = text.trim
@@ -293,6 +303,8 @@ final class ChatRuntime private (
         case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
           ZIO.unit
         case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
+          ZIO.unit
+        case Some(cmd) if SessionCommands.isCopy(cmd.name) || SessionCommands.isExport(cmd.name) =>
           ZIO.unit
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
@@ -834,6 +846,7 @@ object ChatRuntime:
       sessions  <- ZIO.service[SessionRepo]
       mentions  <- ZIO.service[Mentions]
       persist   <- ZIO.service[ChangesPersist]
+      copies    <- ZIO.service[TranscriptOut]
       review    <- ZIO.service[ReviewOps]
       gate      <- Semaphore.make(1)
       reentrant <- FiberRef.make(false)
@@ -844,6 +857,7 @@ object ChatRuntime:
         sessions,
         mentions,
         persist,
+        copies,
         cwd,
         capabilities,
         fallbackSessionId,

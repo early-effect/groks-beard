@@ -12,8 +12,10 @@ object SessionCommands:
   val Title: SlashCommand   = SlashCommand("title", "Rename this session")
   val Delete: SlashCommand  = SlashCommand("delete", "Delete this session")
   val History: SlashCommand = SlashCommand("history", "Search this session's prompts")
+  val Copy: SlashCommand    = SlashCommand("copy", "Copy the last reply")
+  val Export: SlashCommand  = SlashCommand("export", "Export this conversation")
 
-  val All: List[SlashCommand] = List(New, Clear, Resume, Home, Model, Rename, Title, Delete, History)
+  val All: List[SlashCommand] = List(New, Clear, Resume, Home, Model, Rename, Title, Delete, History, Copy, Export)
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
     val names = advertised.map(_.name.toLowerCase).toSet
@@ -44,6 +46,12 @@ object SessionCommands:
   def isHistory(name: String): Boolean =
     name.stripPrefix("/").toLowerCase == "history"
 
+  def isCopy(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "copy"
+
+  def isExport(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "export"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -55,7 +63,7 @@ object SessionCommands:
         else (rest.take(i), rest.drop(i).trim)
       val name = raw.toLowerCase
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isRename(name) || isDelete(name) ||
-        isHistory(name)
+        isHistory(name) || isCopy(name) || isExport(name)
       then Some(ClientCommand(name, args))
       else None
     end if

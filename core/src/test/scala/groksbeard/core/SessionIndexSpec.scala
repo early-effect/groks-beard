@@ -229,9 +229,13 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionCommands.intercept("/title").contains(ClientCommand("title")),
           SessionCommands.intercept("/delete").contains(ClientCommand("delete")),
           SessionCommands.intercept("/history foo").contains(ClientCommand("history", "foo")),
+          SessionCommands.intercept("/copy 2 out.md").contains(ClientCommand("copy", "2 out.md")),
+          SessionCommands.intercept("/export notes.md").contains(ClientCommand("export", "notes.md")),
           merged.exists(_.name == "rename"),
           merged.exists(_.name == "delete"),
           merged.exists(_.name == "history"),
+          merged.exists(_.name == "copy"),
+          merged.exists(_.name == "export"),
           SessionCommands.intercept("hello").isEmpty,
         )
       },

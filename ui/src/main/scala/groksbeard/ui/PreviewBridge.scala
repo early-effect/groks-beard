@@ -224,6 +224,8 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.ClearDiff)
       case WebviewMsg.CloseDiff =>
         emit(HostMsg.ClearDiff)
+      case WebviewMsg.CopyOut(_, path, _, conversation) =>
+        emit(HostMsg.Copied(TranscriptCopy.toast(path, conversation)))
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f

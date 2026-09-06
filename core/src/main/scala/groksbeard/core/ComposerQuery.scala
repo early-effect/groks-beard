@@ -31,11 +31,8 @@ end ModelOption
 object ComposerQuery:
 
   def slashQuery(draft: String): Option[String] =
-    if !draft.startsWith("/") then None
-    else
-      val first = draft.split("\\s", 2).headOption.getOrElse(draft)
-      if first.contains('\n') then None
-      else Some(first.drop(1))
+    if !draft.startsWith("/") || draft.exists(_.isWhitespace) then None
+    else Some(draft.drop(1))
 
   def filterSlash(commands: List[SlashCommand], query: String): List[SlashCommand] =
     val q = query.stripPrefix("/").toLowerCase

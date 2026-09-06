@@ -785,6 +785,41 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("send /copy does not prompt") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/copy")
+            msgs <- posted.get
+          yield assertTrue(!msgs.exists {
+            case _: HostMsg.UserMessage => true
+            case _                      => false
+          })
+        }
+      },
+      test("copyOut posts Copied with clipboard text") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.copyOut("**hi**", None, backup = true, conversation = false)
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Copied("Copied!", Some("**hi**")) => true
+            case _                                         => false
+          })
+        }
+      },
+      test("copyOut to a path toasts the file") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.copyOut("# chat\n", Some("out.md"), backup = false, conversation = true)
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Copied("Conversation exported to out.md", None) => true
+            case _                                                       => false
+          })
+        }
+      },
       test("questionSubmit replies with option ids and free text") {
         val written = scala.collection.mutable.ListBuffer.empty[String]
         chat(transport =

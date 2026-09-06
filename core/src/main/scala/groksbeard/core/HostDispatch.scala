@@ -19,7 +19,9 @@ object HostDispatch:
       case WebviewMsg.CloseSessionPicker             => runtime.closePicker
       case WebviewMsg.RenameSession(id, title, auto) =>
         runtime.renameSession(id, if auto then RenameOp.Auto else RenameOp.Manual(title))
-      case WebviewMsg.DeleteSession(id)                => runtime.deleteSession(id)
+      case WebviewMsg.DeleteSession(id)                 => runtime.deleteSession(id)
+      case WebviewMsg.CopyOut(text, path, backup, conv) =>
+        runtime.copyOut(text, path, backup, conv)
       case WebviewMsg.MentionQuery(q)                  => runtime.mentionQuery(q)
       case WebviewMsg.MentionPick(path, absPath)       => runtime.mentionPick(path, absPath)
       case WebviewMsg.AddSelection                     => ZIO.unit

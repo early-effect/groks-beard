@@ -367,6 +367,65 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("slash copy toasts the last reply") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "user-t1")
+              _      <- root.textarea("draft").fill("/copy")
+              _      <- root.button("send").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status == "Copied!")
+          }
+        yield result
+        end for
+      },
+      test("slash export toasts the conversation copy") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "user-t1")
+              _      <- root.textarea("draft").fill("/export")
+              _      <- root.button("send").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status == "Conversation copied to clipboard")
+          }
+        yield result
+        end for
+      },
+      test("copy to a path toasts the file") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "user-t1")
+              _      <- root.textarea("draft").fill("/copy notes.md")
+              _      <- root.button("send").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status == "Copied to notes.md")
+          }
+        yield result
+        end for
+      },
+      test("copy with no replies toasts no assistant messages") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "slash-copy")
+              _      <- root.button("slash-copy").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status == "No assistant messages to copy")
+          }
+        yield result
+        end for
+      },
       test("slash history lists this session's prompts") {
         val bridge = PreviewBridge()
         for

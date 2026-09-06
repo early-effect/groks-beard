@@ -120,6 +120,13 @@ final class ChatView(
                     SessionRepo.of(NodeSessionFs, home, cwd) ++
                     Mentions.none ++
                     ChangesPersist.layer(disk.save, disk.load) ++
+                    TranscriptOut.of(
+                      NodeSessionFs,
+                      home,
+                      cwd,
+                      env,
+                      text => ZIO.succeed { val _ = vscode.env.clipboard.writeText(text) },
+                    ) ++
                     ReviewOps.layer(
                       read = _ => ZIO.none,
                       openDiffs = (heading, diffs) => ZIO.succeed(review.open(heading, diffs)),

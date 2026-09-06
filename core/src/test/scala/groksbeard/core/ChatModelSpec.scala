@@ -81,6 +81,10 @@ object ChatModelSpec extends ZIOSpecDefault:
           next.turns.head.stopReason.contains("end_turn"),
         )
       },
+      test("copied toast uses the status slot") {
+        val next = ChatModel.applyMsg(ChatModel.empty, HostMsg.Copied("Copied!"))
+        assertTrue(next.error.contains("Copied!"))
+      },
       test("changes summary and diff preview fold into the model") {
         val withFiles = ChatModel.applyMsg(
           ChatModel.empty,

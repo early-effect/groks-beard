@@ -97,6 +97,7 @@ enum HostMsg derives JsonCodec:
   @jsonHint("diffPreview") case DiffPreview(path: String, oldText: String, newText: String, wholeFile: Boolean = true)
   @jsonHint("clearDiff") case ClearDiff
   @jsonHint("error") case Error(message: String, code: Option[String] = None)
+  @jsonHint("copied") case Copied(message: String, clipboard: Option[String] = None)
   @jsonHint("clearTranscript") case ClearTranscript
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
 end HostMsg
@@ -170,4 +171,10 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("closeSessionPicker") case CloseSessionPicker
   @jsonHint("renameSession") case RenameSession(sessionId: String, title: String, auto: Boolean = false)
   @jsonHint("deleteSession") case DeleteSession(sessionId: String)
+  @jsonHint("copyOut") case CopyOut(
+      text: String,
+      path: Option[String] = None,
+      backup: Boolean = false,
+      conversation: Boolean = false,
+  )
 end WebviewMsg

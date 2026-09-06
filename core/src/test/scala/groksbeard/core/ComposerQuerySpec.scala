@@ -39,6 +39,8 @@ object ComposerQuerySpec extends ZIOSpecDefault:
       test("reads a slash query from the composer draft") {
         assertTrue(
           ComposerQuery.slashQuery("/comp") == Some("comp"),
+          ComposerQuery.slashQuery("/copy") == Some("copy"),
+          ComposerQuery.slashQuery("/copy 2").isEmpty,
           ComposerQuery.slashQuery("hello").isEmpty,
         )
       },

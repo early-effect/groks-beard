@@ -181,7 +181,7 @@ object ChatModel:
       case None       => false
       case Some(want) =>
         msg match
-          case HostMsg.Ready | HostMsg.ClearTranscript | _: HostMsg.Transcript | _: HostMsg.Error |
+          case HostMsg.Ready | HostMsg.ClearTranscript | _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied |
               _: HostMsg.AvailableCommands | _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList =>
             false
           case m: HostMsg.SessionMeta =>
@@ -284,6 +284,8 @@ object ChatModel:
       case HostMsg.ClearDiff =>
         model.copy(diff = None)
       case HostMsg.Error(message, _) =>
+        model.copy(error = Some(message))
+      case HostMsg.Copied(message, _) =>
         model.copy(error = Some(message))
       case HostMsg.ClearTranscript =>
         model.copy(

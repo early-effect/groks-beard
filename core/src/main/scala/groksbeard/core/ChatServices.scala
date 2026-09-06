@@ -98,8 +98,54 @@ object ReviewOps:
   val ignore: ULayer[ReviewOps] = layer()
 end ReviewOps
 
+trait TranscriptOut:
+  def deliver(
+      text: String,
+      path: Option[String],
+      backup: Boolean,
+      conversation: Boolean,
+  ): BeardError.Result[CopyResult]
+
+object TranscriptOut:
+  def of(
+      fs: SessionFs,
+      home: String,
+      cwd: String,
+      env: String => Option[String],
+      clipboard: String => UIO[Unit] = _ => ZIO.unit,
+  ): ULayer[TranscriptOut] =
+    ZLayer.succeed(new TranscriptOut:
+      def deliver(
+          text: String,
+          path: Option[String],
+          backup: Boolean,
+          conversation: Boolean,
+      ): BeardError.Result[CopyResult] =
+        val dest =
+          path.map(_.trim).filter(_.nonEmpty).map(p => TranscriptCopy.expandPath(p, TranscriptCopy.userHome(env), cwd))
+        val bak   = if backup then Some(TranscriptCopy.backupPath(env, home, cwd)) else None
+        val files = List(dest, bak).flatten.distinct
+        ZIO.foreachDiscard(files)(p => fs.writeText(p, text)) *>
+          (if dest.isEmpty then clipboard(text) else ZIO.unit).as(
+            CopyResult(TranscriptCopy.toast(dest, conversation), if dest.isEmpty then Some(text) else None)
+          ))
+
+  def test(
+      onDeliver: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
+        CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None)
+  ): ULayer[TranscriptOut] =
+    ZLayer.succeed(new TranscriptOut:
+      def deliver(
+          text: String,
+          path: Option[String],
+          backup: Boolean,
+          conversation: Boolean,
+      ): BeardError.Result[CopyResult] =
+        ZIO.succeed(onDeliver(text, path, backup, conversation)))
+end TranscriptOut
+
 object ChatEnv:
-  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps
+  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut
 
   def test(
       post: HostMsg => UIO[Unit] = _ => ZIO.unit,
@@ -114,6 +160,8 @@ object ChatEnv:
       applyUndo: List[UndoMutation] => Unit = _ => (),
       confirmDirty: String => Boolean = _ => true,
       onStoreChange: () => Unit = () => (),
+      onCopy: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
+        CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
   ): ULayer[Env] =
     HostOut.layer(post) ++
       SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete) ++
@@ -125,5 +173,6 @@ object ChatEnv:
         undo = m => ZIO.succeed(applyUndo(m)),
         dirty = p => ZIO.succeed(confirmDirty(p)),
         storeChanged = ZIO.succeed(onStoreChange()),
-      )
+      ) ++
+      TranscriptOut.test(onCopy)
 end ChatEnv

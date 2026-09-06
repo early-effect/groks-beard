@@ -55,6 +55,14 @@ object ProtocolSpec extends ZIOSpecDefault:
           del.toJson.fromJson[WebviewMsg] == Right(del),
         )
       },
+      test("copyOut and copied round-trip") {
+        val out: WebviewMsg = WebviewMsg.CopyOut("**hi**", Some("out.md"), backup = true, conversation = false)
+        val copied: HostMsg = HostMsg.Copied("Copied!", Some("**hi**"))
+        assertTrue(
+          out.toJson.fromJson[WebviewMsg] == Right(out),
+          copied.toJson.fromJson[HostMsg] == Right(copied),
+        )
+      },
       test("WebviewMsg send round-trips") {
         val msg = WebviewMsg.Send("hello")
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))

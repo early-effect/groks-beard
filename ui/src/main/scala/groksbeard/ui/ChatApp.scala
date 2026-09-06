@@ -9,6 +9,7 @@ import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
 import java.util.concurrent.TimeUnit
+import scala.scalajs.js
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import zio.*
@@ -860,7 +861,10 @@ object ChatApp:
       )
         .mapZIO { batch =>
           wallMs.flatMap { now =>
-            chat.update(c => batch.foldLeft(c)((m, msg) => ChatModel.applyMsg(m, msg, now)))
+            ZIO.foreachDiscard(batch) {
+              case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
+              case _                             => ZIO.unit
+            } *> chat.update(c => batch.foldLeft(c)((m, msg) => ChatModel.applyMsg(m, msg, now)))
           }
         }
         .runDrain
@@ -904,11 +908,31 @@ object ChatApp:
         ComposerQuery.mentionChoices(d, c.mentionQuery, c.mentionFiles, disc)
       }
 
+      def runCopyExport(cmd: ClientCommand): UIO[Unit] =
+        chat.get.flatMap { c =>
+          val job =
+            if SessionCommands.isCopy(cmd.name) then TranscriptCopy.copy(c.turns, cmd.args)
+            else TranscriptCopy.conversationJob(c.turns, c.inSession, cmd.args)
+          job match
+            case Left(err) =>
+              draft.set("") *> chat.update(_.copy(error = Some(err)))
+            case Right(out) =>
+              val conv = SessionCommands.isExport(cmd.name)
+              draft.set("") *>
+                (if out.path.isEmpty then writeClipboard(out.text) else ZIO.unit) *>
+                ZIO.succeed(
+                  bridge.post(WebviewMsg.CopyOut(out.text, out.path, backup = SessionCommands.isCopy(cmd.name), conv))
+                )
+          end match
+        }
+
       def sendDraft: UIO[Unit] =
         draft.get.flatMap { text =>
           chat.get.flatMap { c =>
             val trimmed = text.trim
             SessionCommands.intercept(trimmed) match
+              case Some(cmd) if SessionCommands.isCopy(cmd.name) || SessionCommands.isExport(cmd.name) =>
+                runCopyExport(cmd)
               case Some(cmd) if SessionCommands.isNew(cmd.name) =>
                 draft.set("") *>
                   leaving.set(None) *>
@@ -1106,6 +1130,8 @@ object ChatApp:
         else if SessionCommands.isRename(name) then draft.set("/rename ")
         else if SessionCommands.isDelete(name) then draft.set("") *> chat.get.flatMap(c => armDelete(c.sessionId))
         else if SessionCommands.isHistory(name) then draft.set("/history ") *> historyPickIdx.set(Some(0))
+        else if SessionCommands.isCopy(name) then runCopyExport(ClientCommand("copy"))
+        else if SessionCommands.isExport(name) then runCopyExport(ClientCommand("export"))
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1784,6 +1810,15 @@ object ChatApp:
       TurnActivity.timerLabel(a.elapsedMs).fold(E.span())(t => E.span(TestId("activity-timer"), t)),
     )
   end renderActivity
+
+  private def writeClipboard(text: String): UIO[Unit] =
+    ZIO.succeed {
+      try
+        val clip = js.Dynamic.global.navigator.clipboard
+        if !js.isUndefined(clip) && clip != null then
+          val _ = clip.writeText(text)
+      catch case _: Throwable => ()
+    }
 
   private def heroLogo(logoSrc: Option[String]): ascent.ast.UI[Any] =
     val src = logoSrc.filter(_.nonEmpty).getOrElse("/logo.png")

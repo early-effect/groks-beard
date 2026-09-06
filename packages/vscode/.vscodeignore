@@ -1,6 +1,0 @@
-*
-!package.json
-!media/**
-!dist/extension.js
-!dist/mcp-proxy.js
-!dist/webview/chat.js

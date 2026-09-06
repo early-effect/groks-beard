@@ -53,7 +53,7 @@ final class FakeAgent(
                 SessionModelState(
                   "grok-4.6",
                   List(
-                    ModelOption("grok-4.6", "Grok 4.6"),
+                    ModelOption("grok-4.6", "Grok 4.6", _meta = Some(Effort.grokMeta())),
                     ModelOption("grok-code-fast-1", "Grok Code Fast"),
                   ),
                 )

@@ -44,8 +44,14 @@ final case class SessionNewResult(
     sessionId: String,
     modes: Option[SessionModeState] = None,
     models: Option[SessionModelState] = None,
+    _meta: Option[Json] = None,
 ) derives JsonCodec
-final case class SessionSetModelParams(sessionId: String, modelId: String) derives JsonCodec
+final case class SetModelMeta(reasoningEffort: Option[String] = None) derives JsonCodec
+final case class SessionSetModelParams(
+    sessionId: String,
+    modelId: String,
+    _meta: Option[SetModelMeta] = None,
+) derives JsonCodec
 final case class SessionLoadParams(sessionId: String, cwd: String = ".", mcpServers: List[Json] = Nil) derives JsonCodec
 final case class SessionLoadResult(sessionId: String) derives JsonCodec
 final case class SessionSetModeParams(sessionId: String, modeId: String) derives JsonCodec

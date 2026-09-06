@@ -33,6 +33,7 @@ final class ChatRuntime private (
   private var modes: List[ModeOption]   = ChatRuntime.DefaultModes
   private var modelId                   = ""
   private var models: List[ModelOption] = Nil
+  private var effort                    = ""
   private val title                     = "Grok's Beard"
   private var running                   = false
   private var chips                     = List.empty[PromptChip]
@@ -180,16 +181,11 @@ final class ChatRuntime private (
 
   def cycleMode: UIO[Unit] = exclusive(doSetMode(ModeLabel.nextMode(modeId, modes)))
 
-  def setModel(id: String): UIO[Unit] = exclusive {
-    if id.isEmpty then ZIO.unit
-    else
-      ZIO.suspendSucceed {
-        val sid = sessionId.getOrElse(fallbackSessionId)
-        rpc("session/set_model", SessionSetModelParams(sid, id).asJson) *>
-          ZIO.succeed { modelId = id } *>
-          postMeta
-      }
+  def setModel(id: String, requested: Option[String] = None): UIO[Unit] = exclusive {
+    if id.isEmpty then ZIO.unit else doSetModel(id, requested)
   }
+
+  def setEffort(level: String): UIO[Unit] = exclusive(doSetEffort(level))
 
   def openDiff(requestId: String): UIO[Unit] = exclusive {
     pendingPerm.get(requestId) match
@@ -289,13 +285,11 @@ final class ChatRuntime private (
         case Some(cmd) if SessionCommands.isModel(cmd.name) =>
           if cmd.args.isEmpty then ZIO.unit
           else
-            ModelOption.pick(cmd.args, models) match
-              case Some(m) =>
-                val sid = sessionId.getOrElse(fallbackSessionId)
-                rpc("session/set_model", SessionSetModelParams(sid, m.modelId).asJson) *>
-                  ZIO.succeed { modelId = m.modelId } *>
-                  postMeta
-              case None => post(HostMsg.Error(s"Unknown model: ${cmd.args}"))
+            Effort.splitModelArgs(cmd.args, models) match
+              case Right((m, e)) => doSetModel(m.modelId, e)
+              case Left(err)     => post(HostMsg.Error(err))
+        case Some(cmd) if SessionCommands.isEffort(cmd.name) =>
+          if cmd.args.isEmpty then ZIO.unit else doSetEffort(cmd.args)
         case Some(cmd) if SessionCommands.isRename(cmd.name) =>
           SessionEdit.parseRename(cmd.args) match
             case Left("empty") => ZIO.unit
@@ -344,6 +338,54 @@ final class ChatRuntime private (
           framed.state.commitMode(id)
         } *> postMeta
     }
+
+  private def currentModel: Option[ModelOption] =
+    models.find(_.modelId == modelId)
+
+  private def doSetModel(id: String, requested: Option[String]): UIO[Unit] =
+    val target  = models.find(_.modelId == id)
+    val allowed = Effort.of(target)
+    requested match
+      case Some(raw) =>
+        Effort.pick(raw, allowed) match
+          case None        => post(HostMsg.Error(Effort.unknown(raw, allowed)))
+          case Some(level) => writeModel(id, Some(level.value), level.value)
+      case None =>
+        val carried = Option(effort).filter(_.nonEmpty).filter(e => allowed.exists(_.value == e))
+        writeModel(id, carried, carried.getOrElse(Effort.defaultOf(target)))
+  end doSetModel
+
+  private def doSetEffort(raw: String): UIO[Unit] =
+    val allowed = Effort.of(currentModel)
+    if modelId.isEmpty then post(HostMsg.Error(Effort.NoModel))
+    else
+      Effort.pick(raw, allowed) match
+        case None        => post(HostMsg.Error(Effort.unknown(raw, allowed)))
+        case Some(level) => writeModel(modelId, Some(level.value), level.value)
+
+  private def writeModel(id: String, sendEffort: Option[String], display: String): UIO[Unit] =
+    rpc("session/set_model", setModelJson(id, sendEffort)) *>
+      ZIO.succeed {
+        modelId = id
+        effort = display
+      } *> postMeta
+
+  private def setModelJson(id: String, sendEffort: Option[String]): Json =
+    val sid = sessionId.getOrElse(fallbackSessionId)
+    sendEffort.filter(_.nonEmpty) match
+      case Some(e) =>
+        Json.Obj(
+          "sessionId" -> Json.Str(sid),
+          "modelId"   -> Json.Str(id),
+          "_meta"     -> Json.Obj("reasoningEffort" -> Json.Str(e)),
+        )
+      case None =>
+        Json.Obj(
+          "sessionId" -> Json.Str(sid),
+          "modelId"   -> Json.Str(id),
+        )
+    end match
+  end setModelJson
 
   private def doRename(id: String, op: RenameOp): UIO[Unit] =
     val target = if id.nonEmpty then id else sessionId.getOrElse("")
@@ -699,6 +741,7 @@ final class ChatRuntime private (
       decoded.models.foreach { state =>
         modelId = state.currentModelId
         if state.availableModels.nonEmpty then models = state.availableModels
+        effort = Effort.activeOf(models.find(_.modelId == modelId))
       }
     }
 
@@ -816,7 +859,7 @@ final class ChatRuntime private (
             .map(SessionIndex.displayTitle)
             .filter(_.nonEmpty)
             .getOrElse(title)
-        post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models))
+        post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models, effort))
       }
   end postMeta
 

@@ -95,6 +95,7 @@ final case class ChatModel(
     modes: List[ModeOption] = Nil,
     modelId: String = "",
     models: List[ModelOption] = Nil,
+    effort: String = "",
     commands: List[SlashCommand] = Nil,
     mentionQuery: String = "",
     mentionFiles: List[MentionFile] = Nil,
@@ -211,7 +212,7 @@ object ChatModel:
     msg match
       case HostMsg.Ready =>
         model
-      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models) =>
+      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort) =>
         model.copy(
           sessionId = if sessionId.nonEmpty then sessionId else model.sessionId,
           title = if title.nonEmpty then title else model.title,
@@ -220,6 +221,7 @@ object ChatModel:
           occupancy = occupancy.orElse(model.occupancy),
           modelId = if modelId.nonEmpty then modelId else model.modelId,
           models = if models.nonEmpty then models else model.models,
+          effort = if modelId.nonEmpty then effort else if effort.nonEmpty then effort else model.effort,
         )
       case HostMsg.SessionList(sessions, currentId, openPicker) =>
         val keepCurrent =

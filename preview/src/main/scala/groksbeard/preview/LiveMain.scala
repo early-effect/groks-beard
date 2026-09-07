@@ -42,8 +42,8 @@ object LiveMain extends ZIOAppDefault:
       ZIO.logInfo("beard sidecar up") *> hold(holder, clients)
     }
 
-  def hold(holder: Ref[Option[LiveClients]], clients: LiveClients): ZIO[Scope, Nothing, Nothing] =
-    holder.set(Some(clients)) *> ZIO.addFinalizer(holder.set(None)) *> ZIO.never
+  def hold(holder: Ref[Option[LiveClients]], clients: LiveClients): ZIO[Scope, Nothing, Unit] =
+    ZIO.acquireRelease(holder.set(Some(clients)))(_ => holder.set(None))
 
   def apiRoutes(clients: LiveClients): Routes[Any, Response] =
     apiRoutes(ZIO.succeed(Some(clients)))

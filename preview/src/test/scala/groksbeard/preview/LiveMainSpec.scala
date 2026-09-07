@@ -24,15 +24,13 @@ object LiveMainSpec extends ZIOSpecDefault:
           c.root.endsWith(JPath.of("ui", "target", "preview")),
         )
       },
-      test("hold publishes clients and clears them on interrupt") {
-        ZIO.scoped {
-          for
-            holder  <- Ref.make(Option.empty[LiveClients])
-            clients <- LiveClients.fake()
-            up      <- ZIO.scoped(LiveMain.hold(holder, clients).forkScoped *> holder.get)
-            down    <- holder.get
-          yield assertTrue(up.isDefined, down.isEmpty)
-        }
+      test("hold publishes clients and clears them when the scope closes") {
+        for
+          holder  <- Ref.make(Option.empty[LiveClients])
+          clients <- LiveClients.fake()
+          up      <- ZIO.scoped(LiveMain.hold(holder, clients) *> holder.get)
+          down    <- holder.get
+        yield assertTrue(up.isDefined, down.isEmpty)
       },
-    )
+    ) @@ TestAspect.sequential
 end LiveMainSpec

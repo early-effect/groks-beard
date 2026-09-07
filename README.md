@@ -53,15 +53,15 @@ sbt --no-server ~uiJS/ascentPreview
 # if Metals is not the build server: sbt --server ~uiJS/ascentPreview
 ```
 
-Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `palette`, `mcps`, `queue`.
+Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `palette`, `mcps`, `queue`, `session-info`, `context`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
 ## What you get
 
 - Grok Build CLI only.
-- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`), `/mcps`.
-- Command palette (`Ctrl+P` / `?` in chat): session actions plus MCP servers.
+- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`), `/mcps`, `/session-info` (`/status`, `/info`), `/context`.
+- Command palette (`Ctrl+P` / `?` in chat): session actions plus MCP servers. Occupancy meter click opens `/context`.
 - Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Follow-along: the editor reveals the file (and line) the agent is in, without stealing focus from a Beard diff.

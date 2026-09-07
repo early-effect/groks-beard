@@ -209,6 +209,28 @@ object PreviewScenes:
         )
       case Scene.Palette =>
         ChatModel.empty.copy(commands = SessionCommands.merge(List(SlashCommand("compact", "Compact context"))))
+      case Scene.SessionInfo | Scene.Context =>
+        ChatModel.empty.copy(
+          inSession = true,
+          sessionId = SessionId("01a04ead-8d8e-7e92-9824-3e8580203167"),
+          title = "Grok's Beard",
+          cwd = "/Users/russ/projects/fun/groks-beard",
+          modelId = ModelId("grok-4.6"),
+          models = List(ModelOption(ModelId("grok-4.6"), "Grok 4.6")),
+          effort = "high",
+          modeId = ModeId.Plan,
+          occupancy = Some(Occupancy(12_000, 500_000)),
+          commands = SessionCommands.merge(Nil),
+          mcps = PreviewScenes.mcps,
+          turns = List(
+            TurnView(
+              id = TurnId("t1"),
+              user = Some(TurnUser("Summarize occupancy")),
+              agent = "Here is the context window.",
+              stopReason = Some(StopReason.EndTurn),
+            )
+          ),
+        )
       case Scene.Resume =>
         ChatModel.empty.copy(
           sessionId = SessionId("preview"),

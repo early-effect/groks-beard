@@ -20,6 +20,8 @@ object OccupancySpec extends ZIOSpecDefault:
           Occupancy.compact(1_500) == "1.5k",
           Occupancy.compact(1_000_000) == "1M",
           Occupancy.label(80, 500) == "80 / 500 · 16%",
+          Occupancy.free(80, 100) == 20,
+          Occupancy.free(120, 100) == 0,
           Occupancy.tone(80, 100) == "warn",
           Occupancy.tone(90, 100) == "hot",
         )

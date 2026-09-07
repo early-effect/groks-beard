@@ -117,6 +117,7 @@ final case class ChatModel(
     question: Option[QuestionCard] = None,
     elicit: Option[ElicitCard] = None,
     occupancy: Option[Occupancy] = None,
+    cwd: String = "",
     sessions: List[SessionRow] = Nil,
     pickerOpen: Boolean = false,
     locked: Option[String] = None,
@@ -235,7 +236,7 @@ object ChatModel:
     msg match
       case HostMsg.Ready =>
         model
-      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort) =>
+      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort, cwd) =>
         model.copy(
           sessionId = if sessionId.nonEmpty then sessionId else model.sessionId,
           title = if title.nonEmpty then title else model.title,
@@ -245,6 +246,7 @@ object ChatModel:
           modelId = if modelId.nonEmpty then modelId else model.modelId,
           models = if models.nonEmpty then models else model.models,
           effort = if modelId.nonEmpty then effort else if effort.nonEmpty then effort else model.effort,
+          cwd = if cwd.nonEmpty then cwd else model.cwd,
         )
       case HostMsg.SessionList(sessions, currentId, openPicker) =>
         val keepCurrent =

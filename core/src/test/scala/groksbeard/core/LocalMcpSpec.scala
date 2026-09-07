@@ -39,16 +39,13 @@ object LocalMcpSpec extends ZIOSpecDefault:
           n     <- Ref.make(0)
           notes <- Ref.make(Vector.empty[String])
           logs  <- Ref.make(Vector.empty[String])
-          fiber <- LocalMcp
-            .awaitLocalHttp(
-              read = ZIO.some("""{"mcpServers":{"metals":{"url":"http://localhost:56126/mcp"}}}"""),
-              open = _ => n.updateAndGet(_ + 1).map(_ >= 3),
-              notify = s => notes.update(_ :+ s),
-              log = s => logs.update(_ :+ s),
-            )
-            .fork
-          _    <- TestClock.adjust(5.seconds)
-          _    <- fiber.join
+          _     <- LocalMcp.awaitLocalHttp(
+            read = ZIO.some("""{"mcpServers":{"metals":{"url":"http://localhost:56126/mcp"}}}"""),
+            open = _ => n.updateAndGet(_ + 1).map(_ >= 3),
+            notify = s => notes.update(_ :+ s),
+            log = s => logs.update(_ :+ s),
+            retry = Schedule.recurs(5),
+          )
           seen <- notes.get
           out  <- logs.get
         yield assertTrue(
@@ -64,16 +61,13 @@ object LocalMcpSpec extends ZIOSpecDefault:
         for
           notes <- Ref.make(Vector.empty[String])
           logs  <- Ref.make(Vector.empty[String])
-          fiber <- LocalMcp
-            .awaitLocalHttp(
-              read = ZIO.some("""{"mcpServers":{"metals":{"url":"http://localhost:56126/mcp"}}}"""),
-              open = _ => ZIO.succeed(false),
-              notify = s => notes.update(_ :+ s),
-              log = s => logs.update(_ :+ s),
-            )
-            .fork
-          _    <- TestClock.adjust(LocalMcp.Limit + 10.seconds)
-          _    <- fiber.join
+          _     <- LocalMcp.awaitLocalHttp(
+            read = ZIO.some("""{"mcpServers":{"metals":{"url":"http://localhost:56126/mcp"}}}"""),
+            open = _ => ZIO.succeed(false),
+            notify = s => notes.update(_ :+ s),
+            log = s => logs.update(_ :+ s),
+            retry = Schedule.recurs(2),
+          )
           seen <- notes.get
           out  <- logs.get
         yield assertTrue(

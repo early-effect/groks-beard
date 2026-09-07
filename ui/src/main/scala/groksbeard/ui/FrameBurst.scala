@@ -23,13 +23,21 @@ object FrameBurst:
 
   private def paint: UIO[Unit] =
     ZIO
-      .async[Any, Nothing, Unit] { cb =>
+      .asyncInterrupt[Any, Nothing, Unit] { cb =>
         try
           val w = js.Dynamic.global.window
           if js.typeOf(w.requestAnimationFrame) == "function" then
-            val _ = w.requestAnimationFrame((_: Double) => cb(ZIO.unit))
-          else cb(ZIO.unit)
-        catch case _: Throwable => cb(ZIO.unit)
+            val id = w.requestAnimationFrame((_: Double) => cb(ZIO.unit))
+            Left(ZIO.succeed {
+              val _ = w.cancelAnimationFrame(id)
+            })
+          else
+            cb(ZIO.unit)
+            Right(())
+        catch
+          case _: Throwable =>
+            cb(ZIO.unit)
+            Right(())
       }
       .timeout(Window)
       .unit

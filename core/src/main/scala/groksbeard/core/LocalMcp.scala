@@ -50,26 +50,28 @@ object LocalMcp:
       h == "localhost" || h == "127.0.0.1" || h == "::1"
     }
 
+  val backoff: Schedule[Any, Any, (Duration, Duration)] =
+    Schedule.exponential(Attempt).delayed(d => d.min(Cap)) &&
+      Schedule.elapsed.whileOutput(_ < Limit)
+
   def awaitLocalHttp(
       read: UIO[Option[String]],
       open: String => UIO[Boolean],
       notify: String => UIO[Unit],
       log: String => UIO[Unit] = _ => ZIO.unit,
+      retry: Schedule[Any, Any, Any] = backoff,
   ): UIO[Unit] =
     read.map(_.toList.flatMap(localHttpUrls)).flatMap { urls =>
       if urls.isEmpty then ZIO.unit
-      else ZIO.foreachParDiscard(urls)(url => waitOne(url, open, notify, log))
+      else ZIO.foreachParDiscard(urls)(url => waitOne(url, open, notify, log, retry))
     }
-
-  private val backoff: Schedule[Any, Any, (Duration, Duration)] =
-    Schedule.exponential(Attempt).delayed(d => d.min(Cap)) &&
-      Schedule.elapsed.whileOutput(_ < Limit)
 
   private def waitOne(
       url: String,
       open: String => UIO[Boolean],
       notify: String => UIO[Unit],
       log: String => UIO[Unit],
+      retry: Schedule[Any, Any, Any],
   ): UIO[Unit] =
     open(url).flatMap {
       case true  => ZIO.unit
@@ -85,7 +87,7 @@ object LocalMcp:
                 }
               }
             probe
-              .retry(backoff)
+              .retry(retry)
               .foldZIO(
                 _ => notify(timeoutNotice(Some(url))),
                 _ => notify(""),

@@ -65,7 +65,18 @@ object LiveSession:
             )
             .flatMap { transport =>
               ChatRuntime
-                .make(transport, cwd, caps, includeActiveFile = () => true)
+                .make(
+                  transport,
+                  cwd,
+                  caps,
+                  includeActiveFile = () => true,
+                  beforeInitialize = LocalMcp.awaitLocalHttp(
+                    read = ZIO.attempt(Files.readString(JPath.of(cwd, ".mcp.json"))).option,
+                    open = LiveSession.tcpOpen,
+                    notify = msg => emit(HostMsg.Error(msg)),
+                    log = line => ZIO.succeed(log(line)),
+                  ),
+                )
                 .provideSome[Scope](envLayer)
                 .flatMap { rt =>
                   note.set(rt.noteAgentLine)
@@ -95,4 +106,18 @@ object LiveSession:
       rt <- ChatRuntime.make().provideSome[Scope](ChatEnv.test(post = emit))
       _  <- handle.set(msg => HostDispatch(rt, msg, emit))
     yield LiveSession(events, handle, rt.close)
+
+  private def tcpOpen(url: String): UIO[Boolean] =
+    LocalMcp.hostPort(url) match
+      case None               => ZIO.succeed(false)
+      case Some((host, port)) =>
+        ZIO
+          .attemptBlocking {
+            val s = new java.net.Socket()
+            try
+              s.connect(new java.net.InetSocketAddress(host, port), LocalMcp.Attempt.toMillis.toInt)
+              true
+            finally s.close()
+          }
+          .orElseSucceed(false)
 end LiveSession

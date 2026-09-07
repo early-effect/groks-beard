@@ -36,13 +36,20 @@ object HostRuntime extends ZIOAppDefault:
     if emit ne unset then drain(emit)
 
   def runScoped[A](zio: ZIO[Scope, Nothing, A]): Unit =
-    scopeRef.get() match
-      case Some(scope) => runUIO(scope.extend(zio))
-      case None        => runUIO(ZIO.dieMessage("HostRuntime not started"))
+    // `start` forks ZIOApp.main; activate keeps going. Look up the Scope when
+    // this job runs, after `run` has set scopeRef, not at enqueue time.
+    runUIO(
+      ZIO.suspendSucceed {
+        scopeRef.get() match
+          case Some(scope) => scope.extend(zio)
+          case None        => ZIO.dieMessage("HostRuntime not started")
+      }
+    )
 
   def run =
     Scope.make.flatMap { scope =>
       ZIO.succeed { scopeRef.set(Some(scope)) } *>
+        ZIO.log("HostRuntime ready") *>
         ZStream
           .asyncZIO[Any, Nothing, UIO[Any]] { cb =>
             val emit: UIO[Any] => Unit = task => cb(ZIO.succeed(Chunk.single(task)))
@@ -51,7 +58,7 @@ object HostRuntime extends ZIOAppDefault:
               drain(emit)
             }
           }
-          .mapZIO(identity)
+          .mapZIO(job => job.catchAllCause(c => ZIO.logErrorCause("HostRuntime job failed", c)))
           .runDrain
           .ensuring(ZIO.succeed { scopeRef.set(None) } *> scope.close(Exit.unit))
     }

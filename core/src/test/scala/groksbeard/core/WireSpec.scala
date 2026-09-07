@@ -57,5 +57,20 @@ object WireSpec extends ZIOSpecDefault:
       test("a bad webview payload is Left, never skipped") {
         assertTrue(Wire.webview("nope").isLeft, Wire.webview("""{"_tag":"ready"}""") == Right(WebviewMsg.Ready))
       },
+      test("a JSON string that is not an object is not unwrapped") {
+        val err = Wire.hostMsgs("\"sessionMeta\"")
+        assertTrue(
+          err match
+            case Left(e)  => e.contains("expected object") && !e.contains("unexpected")
+            case Right(_) => false
+        )
+      },
+      test("an apostrophe in a JSON string is not a decode storm") {
+        assertTrue(Wire.hostMsgs("\"Grok's Beard\"").isLeft)
+      },
+      test("a double-encoded object still decodes") {
+        val wrapped = HostMsg.Ready.toJson.toJson
+        assertTrue(Wire.hostMsgs(wrapped) == Right(List(HostMsg.Ready)))
+      },
     )
 end WireSpec

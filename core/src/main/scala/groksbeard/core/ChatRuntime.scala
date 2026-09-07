@@ -22,6 +22,7 @@ final class ChatRuntime private (
     scope: Scope,
     gate: Semaphore,
     reentrant: FiberRef[Boolean],
+    beforeInitialize: UIO[Unit],
 ):
   private val framed                       = Framed(SessionState())
   private val store                        = ChangeStore()
@@ -90,6 +91,7 @@ final class ChatRuntime private (
     ZIO.suspendSucceed {
       live = true
       post(HostMsg.Ready) *>
+        beforeInitialize *>
         rpc(
           "initialize",
           InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
@@ -1138,6 +1140,7 @@ object ChatRuntime:
       activeFile: () => Option[PromptChip] = () => None,
       includeActiveFile: () => Boolean = () => false,
       settings: () => SettingsState = () => SettingsState.defaults,
+      beforeInitialize: UIO[Unit] = ZIO.unit,
   ): ZIO[Scope & ChatEnv.Env, Nothing, ChatRuntime] =
     for
       host      <- ZIO.service[HostOut]
@@ -1168,6 +1171,7 @@ object ChatRuntime:
         scope,
         gate,
         reentrant,
+        beforeInitialize,
       )
       _ <- transport.attach(chunk => rt.exclusive(rt.ingestChunk(chunk)))
       _ <- ZIO.addFinalizer(rt.close)

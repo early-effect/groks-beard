@@ -68,8 +68,9 @@ object ProcessTransport:
         .via(ZPipeline.utf8Decode)
         .via(ZPipeline.splitLines)
         .foreach { line =>
-          ZIO.succeed(java.lang.System.err.println(line)) *>
-            (if line.nonEmpty then onErr(line) else ZIO.unit)
+          val clean = AgentLog.stripAnsi(line)
+          ZIO.succeed(java.lang.System.err.println(clean)) *>
+            (if clean.nonEmpty then onErr(clean) else ZIO.unit)
         }
         .forkScoped
       _ <- ZIO

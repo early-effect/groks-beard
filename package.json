@@ -57,7 +57,8 @@
         {
           "id": "groksBeard.changes",
           "name": "Grok Changes",
-          "when": "groksBeard.useActivityBar"
+          "when": "groksBeard.useActivityBar && groksBeard.hasChanges",
+          "visibility": "collapsed"
         }
       ],
       "groks-beard-secondary": [
@@ -70,7 +71,8 @@
         {
           "id": "groksBeard.changesSecondary",
           "name": "Grok Changes",
-          "when": "!groksBeard.useActivityBar"
+          "when": "!groksBeard.useActivityBar && groksBeard.hasChanges",
+          "visibility": "collapsed"
         }
       ]
     },

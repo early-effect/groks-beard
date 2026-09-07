@@ -16,6 +16,16 @@ object ChatHtmlSpec extends ZIOSpecDefault:
           html.contains("data-logo=\"/logo.png\""),
           html.contains("<html lang=\"en\" data-logo=\"/logo.png\">"),
         )
-      }
+      },
+      test("error page escapes markup and names the output channel") {
+        val html = ChatHtml.errorPage("""<script>alert("x")</script>""")
+        assertTrue(
+          !html.contains("<script>alert"),
+          html.contains("&lt;script&gt;"),
+          html.contains("alert(&quot;x&quot;)"),
+          html.contains("Grok's Beard failed to load this view"),
+          html.contains("Grok's Beard output channel"),
+        )
+      },
     )
 end ChatHtmlSpec

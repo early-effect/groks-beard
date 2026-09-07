@@ -18,7 +18,13 @@ object GlobalThis extends js.Object:
   val window: WebviewWindow = js.native
 
 object VsCodeApi:
-  def current: Option[VsCodeApi] =
+  /** VS Code throws if `acquireVsCodeApi` is called more than once. Cache the result. */
+  private lazy val acquired: Option[VsCodeApi] =
     val win = GlobalThis.window
     if !js.Object.hasProperty(win, "acquireVsCodeApi") then None
-    else Some(win.acquireVsCodeApi())
+    else
+      try Some(win.acquireVsCodeApi())
+      catch case _: Throwable => None
+
+  def current: Option[VsCodeApi] = acquired
+end VsCodeApi

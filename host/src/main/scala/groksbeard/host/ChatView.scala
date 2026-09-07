@@ -12,12 +12,13 @@ final class ChatView(
     review: Review,
     tree: ChangesTree,
     status: StatusBarItem,
-    log: String => Unit,
+    out: BeardOut,
     rememberSelection: PromptChip => Unit = _ => (),
 ) extends WebviewViewProvider:
 
   private var runtime: Option[ChatRuntime] = None
   private var missingCli: Option[String]   = None
+  private var pendingReady: Boolean        = false
   private var toHost: HostMsg => UIO[Unit] = _ => ZIO.unit
 
   def current: Option[ChatRuntime] = runtime
@@ -34,16 +35,26 @@ final class ChatView(
       token: CancellationToken,
   ): Unit =
     val webview = webviewView.webview
+    try resolve(webview)
+    catch
+      case e: Throwable =>
+        val text = out.error("resolveWebviewView", e)
+        try webview.html = ChatHtml.errorPage(text)
+        catch case _: Throwable => ()
+  end resolveWebviewView
+
+  private def resolve(webview: Webview): Unit =
     webview.options = WebviewOptions(
       enableScripts = true,
       localResourceRoots = js.Array(context.extensionUri),
     )
+    out.line("resolving chat webview")
     val scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, "dist", "webview", "chat.js"))
     val logoUri   = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, "media", "logo.png"))
     webview.html = ChatHtml.page(
       cspSource = webview.cspSource,
-      scriptUri = scriptUri.asString,
-      logoUri = Some(logoUri.asString),
+      scriptUri = scriptUri.asString(),
+      logoUri = Some(logoUri.asString()),
       ctrlEnterToSend = readSettings().useCtrlEnterToSend,
     )
     def post(msg: HostMsg): UIO[Unit] =
@@ -55,6 +66,7 @@ final class ChatView(
               if fileCount == 0 then "$(beard) Grok"
               else s"$$(diff) $fileCount  +$additions/-$deletions"
             if fileCount > 0 then status.show() else status.hide()
+            val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.hasChanges", fileCount > 0)
           case HostMsg.UserMessage(_, _, _, _) =>
             val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", true)
           case HostMsg.TurnEnd(_, _) =>
@@ -70,26 +82,43 @@ final class ChatView(
     webview.onDidReceiveMessage { raw =>
       Wire.webview(js.JSON.stringify(raw)) match
         case Left(err) =>
+          out.line(s"[error] webview decode: $err")
           HostRuntime.runUIO(ZIO.logError(err) *> post(HostMsg.Error(err, Some(Wire.Decode))))
         case Right(msg) =>
-          runtime match
-            case Some(rt) =>
-              msg match
-                case WebviewMsg.MentionQuery(q)        => searchMentions(q, post)
-                case WebviewMsg.AddSelection           => addSelection()
-                case WebviewMsg.SetSetting(key, value) =>
-                  writeSetting(key, value)
-                  HostRuntime.runUIO(HostDispatch(rt, msg, post))
-                case other => HostRuntime.runUIO(HostDispatch(rt, other, post))
-            case None =>
-              val err = missingCli.getOrElse("Grok CLI not found.")
-              msg match
-                case WebviewMsg.Ready =>
-                  HostRuntime.runUIO(post(HostMsg.Ready) *> post(HostMsg.Error(err)))
-                case _ => HostRuntime.runUIO(post(HostMsg.Error(err)))
+          handleWebview(msg, post)
     }
     ()
-  end resolveWebviewView
+  end resolve
+
+  private def handleWebview(msg: WebviewMsg, post: HostMsg => UIO[Unit]): Unit =
+    msg match
+      case WebviewMsg.Log(message, level) =>
+        out.line(s"[$level] $message")
+      case WebviewMsg.Ready =>
+        out.line("webview ready")
+      case _ => ()
+    runtime match
+      case Some(rt) =>
+        msg match
+          case WebviewMsg.Log(_, _)        => ()
+          case WebviewMsg.MentionQuery(q)  => searchMentions(q, post)
+          case WebviewMsg.AddSelection     => addSelection()
+          case WebviewMsg.SetSetting(k, v) =>
+            writeSetting(k, v)
+            HostRuntime.runUIO(HostDispatch(rt, msg, post))
+          case _ => HostRuntime.runUIO(HostDispatch(rt, msg, post))
+      case None =>
+        missingCli match
+          case Some(err) =>
+            msg match
+              case WebviewMsg.Ready =>
+                HostRuntime.runUIO(post(HostMsg.Ready) *> post(HostMsg.Error(err)))
+              case WebviewMsg.Log(_, _) => ()
+              case _                    => HostRuntime.runUIO(post(HostMsg.Error(err)))
+          case None =>
+            if msg == WebviewMsg.Ready then pendingReady = true
+    end match
+  end handleWebview
 
   private def bindAgent(post: HostMsg => UIO[Unit]): Unit =
     val cwd     = vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath).getOrElse(".")
@@ -100,10 +129,10 @@ final class ChatView(
       case Left(searched) =>
         val err = Onboarding.missingCliMessage(searched)
         missingCli = Some(err)
-        log(err)
+        out.line(err)
       case Right(cmd) =>
         val args = Spawn.grokAgentStdioArgs()
-        log(s"spawning $cmd ${args.mkString(" ")}")
+        out.line(s"spawning $cmd ${args.mkString(" ")}")
         val note = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
         val gone = new java.util.concurrent.atomic.AtomicReference[UIO[Unit]](ZIO.unit)
         val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = true)
@@ -115,7 +144,7 @@ final class ChatView(
               cmd,
               args,
               cwd,
-              log,
+              out.line,
               onErr = line => note.get()(line),
               onExit = _ => gone.get(),
               run = HostRuntime.runUIO,
@@ -129,6 +158,7 @@ final class ChatView(
                   activeFile = () => activeFileChip(),
                   includeActiveFile = () => readSettings().includeActiveFileByDefault,
                   settings = () => readSettings(),
+                  beforeInitialize = NodeMcp.awaitIn(cwd, post, out.line),
                 )
                 .provideSome[Scope](
                   HostOut.layer(post) ++
@@ -156,13 +186,16 @@ final class ChatView(
                     note.set(rt.noteAgentLine)
                     gone.set(rt.noteAgentGone)
                     runtime = Some(rt)
+                    if pendingReady then
+                      pendingReady = false
+                      HostRuntime.runUIO(HostDispatch(rt, WebviewMsg.Ready, post))
                   } *> disk.load.orElseSucceed(Nil).flatMap(rt.restoreChanges)
                 }
             }
             .catchAll { e =>
               ZIO.succeed {
                 missingCli = Some(e.message)
-                log(e.message)
+                out.line(e.message)
               }
             }
         }

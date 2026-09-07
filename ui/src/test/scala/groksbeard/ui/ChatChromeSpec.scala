@@ -103,6 +103,35 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("settings arrows from the composer move the highlight") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Settings)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "settings-panel")
+              _     <- root.textarea("draft").press("ArrowDown")
+              _     <- root.textarea("draft").press("Enter")
+              after <- waitContains(root, "setting-active-file", "off")
+            yield assertTrue(after.contains("off"))
+          }
+        yield result
+        end for
+      },
+      test("settings Esc closes the panel") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Settings)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "settings-panel")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "settings-panel")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("permission scene shows a live activity row") {
         val bridge = PreviewBridge()
         for
@@ -274,6 +303,34 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("plan Esc abandons the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "plan")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "plan")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("elicit Esc declines the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Elicit)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "elicit")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "elicit")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("question option dismisses the card") {
         val bridge = PreviewBridge()
         for
@@ -301,6 +358,20 @@ object ChatChromeSpec extends ZIOSpecDefault:
             for
               _ <- waitPresent(root, "question")
               _ <- root.button("question-dismiss").click
+              _ <- waitGone(root, "question")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("question Esc dismisses the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Question)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "question")
+              _ <- root.textarea("draft").press("Escape")
               _ <- waitGone(root, "question")
             yield assertTrue(true)
           }
@@ -343,17 +414,108 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
-      test("parked follow-up is readable in the transcript") {
+      test("parked follow-up is readable in the queue pane") {
         val bridge = PushBridge()
         for
           ui     <- ChatApp.component(bridge, None, Scene.Transcript)
           result <- withMounted(ui) { root =>
             for
               _ <- ZIO.succeed(
-                bridge.push(HostMsg.Queued(List(QueuedPrompt("q1", "the follow-up I typed"))))
+                bridge.push(HostMsg.Queued(List(QueuedPrompt(QueueId("q1"), "the follow-up I typed"))))
               )
               text <- waitPresent(root, "queue-q1") *> root.getByTestId("queue-q1").innerText
-            yield assertTrue(text.contains("Queued"), text.contains("the follow-up I typed"))
+            yield assertTrue(text.contains("the follow-up I typed"))
+          }
+        yield result
+        end for
+      },
+      test("queue scene lists parked follow-ups") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "queue")
+              one <- waitPresent(root, "queue-q1") *> root.getByTestId("queue-q1").innerText
+              two <- waitPresent(root, "queue-q2") *> root.getByTestId("queue-q2").innerText
+            yield assertTrue(one.contains("then run the tests"), two.contains("then open the PR"))
+          }
+        yield result
+        end for
+      },
+      test("queue Drop removes a row") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "queue-q1")
+              _ <- root.button("queue-drop-q1").click
+              _ <- waitGone(root, "queue-q1")
+              _ <- waitPresent(root, "queue-q2")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("queue Edit fills the composer") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "queue-q1")
+              _     <- root.button("queue-edit-q1").click
+              draft <- waitValue(root, "then run the tests")
+              _     <- waitGone(root, "queue-q1")
+            yield assertTrue(draft == "then run the tests")
+          }
+        yield result
+        end for
+      },
+      test("queue Esc hides the list") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "queue-list")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "queue-list")
+              _ <- waitPresent(root, "queue")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("queue arrows then Enter send the highlighted follow-up") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "queue-q1")
+              _ <- waitPresent(root, "queue-q2")
+              _ <- root.textarea("draft").press("ArrowDown")
+              _ <- root.textarea("draft").press("Enter")
+              _ <- waitGone(root, "queue-q2")
+              _ <- waitPresent(root, "queue-q1")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("empty Enter sends the top queued follow-up now") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Queue)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "queue-q1")
+              _ <- root.textarea("draft").press("Enter")
+              _ <- waitGone(root, "queue-q1")
+              _ <- waitPresent(root, "queue-q2")
+            yield assertTrue(true)
           }
         yield result
         end for

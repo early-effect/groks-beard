@@ -8,6 +8,8 @@ object HostDispatch:
       case WebviewMsg.Ready                          => runtime.ready
       case WebviewMsg.Send(text)                     => runtime.send(text)
       case WebviewMsg.Queue(text)                    => runtime.queue(text)
+      case WebviewMsg.QueueSendNow(id)               => runtime.sendNow(id)
+      case WebviewMsg.QueueDrop(id)                  => runtime.dropQueued(id)
       case WebviewMsg.Cancel                         => runtime.cancel
       case WebviewMsg.SetMode(id)                    => runtime.setMode(id)
       case WebviewMsg.SetModel(id, effort)           => runtime.setModel(id, Option(effort).filter(_.nonEmpty))

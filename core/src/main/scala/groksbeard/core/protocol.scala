@@ -107,6 +107,7 @@ enum HostMsg derives JsonCodec:
   @jsonHint("copied") case Copied(message: String, clipboard: Option[String] = None)
   @jsonHint("todos") case Todos(entries: List[TodoEntry] = Nil)
   @jsonHint("toggleTodos") case ToggleTodos
+  @jsonHint("toggleQueue") case ToggleQueue
   @jsonHint("openPalette") case OpenPalette
   @jsonHint("openMcps") case OpenMcps
   @jsonHint("mcpServers") case McpServers(servers: List[McpServerView] = Nil)
@@ -148,6 +149,8 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("ready") case Ready
   @jsonHint("send") case Send(text: String)
   @jsonHint("queue") case Queue(text: String)
+  @jsonHint("queueSendNow") case QueueSendNow(id: QueueId)
+  @jsonHint("queueDrop") case QueueDrop(id: QueueId)
   @jsonHint("cancel") case Cancel
   @jsonHint("slashPick") case SlashPick(name: String)
   @jsonHint("mentionQuery") case MentionQuery(query: String)

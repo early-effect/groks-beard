@@ -53,7 +53,7 @@ sbt --no-server ~uiJS/ascentPreview
 # if Metals is not the build server: sbt --server ~uiJS/ascentPreview
 ```
 
-Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `palette`, `mcps`.
+Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `palette`, `mcps`, `queue`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
@@ -62,6 +62,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Grok Build CLI only.
 - TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`), `/mcps`.
 - Command palette (`Ctrl+P` / `?` in chat): session actions plus MCP servers.
+- Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Follow-along: the editor reveals the file (and line) the agent is in, without stealing focus from a Beard diff.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
@@ -76,6 +77,7 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork
 | Open Grok's Beard | `Ctrl+;` / `Cmd+;` |
 | Add selection to chat | `Ctrl+Shift+;` / `Cmd+Shift+;` |
 | Toggle todos | `Ctrl+T` (chat focused) |
+| Toggle queue | `Ctrl+4` (chat focused, when something is queued) |
 | Command palette | `Ctrl+P` / `Cmd+P` (chat focused), or `?` on an empty prompt |
 | Stop the running turn | `Escape` (chat focused) |
 | Rewind (idle, empty prompt) | `Esc Esc` within 800ms |

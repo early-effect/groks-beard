@@ -118,6 +118,15 @@ final class ChatRuntime private (
     }
   }
 
+  def sendNow(id: QueueId): UIO[Unit] = exclusive(doSendNow(id))
+
+  def dropQueued(id: QueueId): UIO[Unit] = exclusive {
+    ZIO.suspendSucceed {
+      pendingQueue = pendingQueue.filterNot(_.id == id)
+      postQueue
+    }
+  }
+
   def cancel: UIO[Unit] = exclusive(doCancel)
 
   def addChip(chip: PromptChip): UIO[Unit] = exclusive(doAddChip(chip))
@@ -380,7 +389,18 @@ final class ChatRuntime private (
         post(HostMsg.Error("Grok agent stopped.")) *> load *> turn
     }
 
-  private def doCancel: UIO[Unit] =
+  private def doCancel: UIO[Unit] = stopTurn *> drainQueue
+
+  private def doSendNow(id: QueueId): UIO[Unit] =
+    ZIO.suspendSucceed {
+      pendingQueue.find(_.id == id) match
+        case None       => ZIO.unit
+        case Some(item) =>
+          pendingQueue = item +: pendingQueue.filterNot(_.id == id)
+          stopTurn *> drainQueue
+    }
+
+  private def stopTurn: UIO[Unit] =
     ZIO.foreachDiscard(pendingPerm.keys.toList) { id =>
       respond(id, Json.Obj("outcome" -> Json.Obj("outcome" -> Json.Str("cancelled"))))
     } *> ZIO.suspendSucceed {
@@ -389,7 +409,7 @@ final class ChatRuntime private (
         (if running then
            running = false
            post(HostMsg.TurnEnd(currentTurn, StopReason.Cancelled))
-         else ZIO.unit) *> drainQueue
+         else ZIO.unit)
     }
 
   private def doAddChip(chip: PromptChip): UIO[Unit] =

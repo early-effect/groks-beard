@@ -203,6 +203,9 @@ object Extension:
       vscode.commands.registerCommand("groksBeard.toggleTodos", () => chat.toggleTodos())
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.toggleQueue", () => chat.toggleQueue())
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.commandPalette", () => chat.openPalette())
     )
     context.subscriptions.push(

@@ -366,6 +366,52 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           })
         }
       },
+      test("sendNow of a later row cancels and runs that prompt next") {
+        chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            _    <- rt.queue("first")
+            _    <- rt.queue("second")
+            _    <- posted.set(Nil)
+            _    <- rt.sendNow("q2")
+            msgs <- posted.get
+            left = msgs.collect { case HostMsg.Queued(items) => items.map(_.text) }.lastOption.getOrElse(Nil)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.TurnEnd(_, StopReason.Cancelled) => true
+              case _                                        => false
+            },
+            msgs.exists {
+              case HostMsg.UserMessage(_, "second", _, _) => true
+              case _                                      => false
+            },
+            left == List("first"),
+          )
+        }
+      },
+      test("dropQueued removes a parked follow-up without sending it") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.queue("keep")
+            _    <- rt.queue("drop-me")
+            _    <- posted.set(Nil)
+            _    <- rt.dropQueued("q2")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Queued(items) => items.map(_.text) == List("keep")
+              case _                     => false
+            },
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "drop-me", _, _) => true
+              case _                                       => false
+            },
+          )
+        }
+      },
       test("send ingests the fake edit into Changes") {
         val disk = Map("/tmp/Main.scala" -> "aaa\nobject Main\nccc\n")
         chat(readDisk = disk.get) { (rt, posted) =>

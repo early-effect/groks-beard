@@ -25,6 +25,8 @@ final class ChatView(
 
   def toggleTodos(): Unit = HostRuntime.runUIO(toHost(HostMsg.ToggleTodos))
 
+  def toggleQueue(): Unit = HostRuntime.runUIO(toHost(HostMsg.ToggleQueue))
+
   def openPalette(): Unit = HostRuntime.runUIO(toHost(HostMsg.OpenPalette))
 
   def openMcps(): Unit =

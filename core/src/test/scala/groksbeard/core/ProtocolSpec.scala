@@ -35,8 +35,14 @@ object ProtocolSpec extends ZIOSpecDefault:
         )
       },
       test("queued follow-ups round-trip") {
-        val msg: HostMsg = HostMsg.Queued(List(QueuedPrompt("q1", "later")))
-        assertTrue(msg.toJson.fromJson[HostMsg] == Right(msg))
+        val msg: HostMsg        = HostMsg.Queued(List(QueuedPrompt("q1", "later")))
+        val sendNow: WebviewMsg = WebviewMsg.QueueSendNow("q1")
+        val drop: WebviewMsg    = WebviewMsg.QueueDrop("q1")
+        assertTrue(
+          msg.toJson.fromJson[HostMsg] == Right(msg),
+          sendNow.toJson.fromJson[WebviewMsg] == Right(sendNow),
+          drop.toJson.fromJson[WebviewMsg] == Right(drop),
+        )
       },
       test("sessionList and resumeSession round-trip") {
         val list: HostMsg =
@@ -224,17 +230,19 @@ object ProtocolSpec extends ZIOSpecDefault:
             TodoEntry("Write tests", Todos.Pending, "high"),
           )
         )
-        val toggle: HostMsg  = HostMsg.ToggleTodos
-        val palette: HostMsg = HostMsg.OpenPalette
-        val mcps: HostMsg    = HostMsg.McpServers(List(McpServerView("metals", "http", "http://localhost")))
-        val list: WebviewMsg = WebviewMsg.ListMcps
-        val en: WebviewMsg   = WebviewMsg.SetMcpEnabled("metals", enabled = false)
-        val plan: AcpUpdate  = AcpUpdate.Plan(
+        val toggle: HostMsg      = HostMsg.ToggleTodos
+        val queueToggle: HostMsg = HostMsg.ToggleQueue
+        val palette: HostMsg     = HostMsg.OpenPalette
+        val mcps: HostMsg        = HostMsg.McpServers(List(McpServerView("metals", "http", "http://localhost")))
+        val list: WebviewMsg     = WebviewMsg.ListMcps
+        val en: WebviewMsg       = WebviewMsg.SetMcpEnabled("metals", enabled = false)
+        val plan: AcpUpdate      = AcpUpdate.Plan(
           List(TodoEntry("Checkout branch", "in_progress", "medium"))
         )
         assertTrue(
           todos.toJson.fromJson[HostMsg] == Right(todos),
           toggle.toJson.fromJson[HostMsg] == Right(toggle),
+          queueToggle.toJson.fromJson[HostMsg] == Right(queueToggle),
           palette.toJson.fromJson[HostMsg] == Right(palette),
           mcps.toJson.fromJson[HostMsg] == Right(mcps),
           list.toJson.fromJson[WebviewMsg] == Right(list),

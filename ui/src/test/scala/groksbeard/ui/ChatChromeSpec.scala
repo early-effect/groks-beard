@@ -279,6 +279,65 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("occupancy click opens the context pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "occupancy")
+              _    <- root.button("occupancy").click
+              used <- waitPresent(root, "context") *> waitPresent(root, "fact-used") *>
+                root.getByTestId("fact-used").innerText
+            yield assertTrue(used.contains("12k"))
+          }
+        yield result
+        end for
+      },
+      test("session-info scene lists the session id and copies it with c") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.SessionInfo)
+          result <- withMounted(ui) { root =>
+            for
+              id <- waitPresent(root, "session-info") *> waitPresent(root, "fact-session") *>
+                root.getByTestId("fact-session").innerText
+              _     <- root.textarea("draft").press("c")
+              toast <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(id.contains("01a04ead-8d8e-7e92-9824-3e8580203167"), toast.contains("Copied"))
+          }
+        yield result
+        end for
+      },
+      test("context scene Esc closes the pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Context)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "context")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "session-pane")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("session-info Tab switches to context") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.SessionInfo)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "session-info")
+              _ <- root.textarea("draft").press("Tab")
+              _ <- waitPresent(root, "context")
+              _ <- waitGone(root, "session-info")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("permission Allow dismisses the card") {
         val bridge = PreviewBridge()
         for
@@ -1514,6 +1573,50 @@ object ChatChromeSpec extends ZIOSpecDefault:
               metals <- waitPresent(root, "mcp-metals") *>
                 root.getByTestId("mcp-metals").innerText
             yield assertTrue(metals.contains("metals"))
+          }
+        yield result
+        end for
+      },
+      test("slash /session-info opens the session pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "slash-session-info")
+              _ <- root.button("slash-session-info").click
+              _ <- waitPresent(root, "session-info")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("slash /context opens the context pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "slash-context")
+              _ <- root.button("slash-context").click
+              _ <- waitPresent(root, "context")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("palette lists Session info and Context") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Palette)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "palette-session-info")
+              _ <- waitPresent(root, "palette-context")
+              _ <- root.button("palette-context").click
+              _ <- waitPresent(root, "context")
+              _ <- waitGone(root, "palette")
+            yield assertTrue(true)
           }
         yield result
         end for

@@ -3,25 +3,46 @@ package groksbeard.core
 final case class ClientCommand(name: String, args: String = "")
 
 object SessionCommands:
-  val New: SlashCommand     = SlashCommand("new", "Start a new session")
-  val Clear: SlashCommand   = SlashCommand("clear", "Start a new session")
-  val Resume: SlashCommand  = SlashCommand("resume", "Resume a previous session")
-  val Home: SlashCommand    = SlashCommand("home", "Return to the session list")
-  val Model: SlashCommand   = SlashCommand("model", "Switch model")
-  val Effort: SlashCommand  = SlashCommand("effort", "Set reasoning effort")
-  val Rename: SlashCommand  = SlashCommand("rename", "Rename this session")
-  val Title: SlashCommand   = SlashCommand("title", "Rename this session")
-  val Delete: SlashCommand  = SlashCommand("delete", "Delete this session")
-  val History: SlashCommand = SlashCommand("history", "Search this session's prompts")
-  val Copy: SlashCommand    = SlashCommand("copy", "Copy the last reply")
-  val Export: SlashCommand  = SlashCommand("export", "Export this conversation")
-  val Rewind: SlashCommand  = SlashCommand("rewind", "Rewind to an earlier turn")
-  val Undo: SlashCommand    = SlashCommand("undo", "Rewind to an earlier turn")
-  val Mcps: SlashCommand    = SlashCommand("mcps", "View and toggle MCP servers")
-  val Mcp: SlashCommand     = SlashCommand("mcp", "View and toggle MCP servers")
+  val New: SlashCommand         = SlashCommand("new", "Start a new session")
+  val Clear: SlashCommand       = SlashCommand("clear", "Start a new session")
+  val Resume: SlashCommand      = SlashCommand("resume", "Resume a previous session")
+  val Home: SlashCommand        = SlashCommand("home", "Return to the session list")
+  val Model: SlashCommand       = SlashCommand("model", "Switch model")
+  val Effort: SlashCommand      = SlashCommand("effort", "Set reasoning effort")
+  val Rename: SlashCommand      = SlashCommand("rename", "Rename this session")
+  val Title: SlashCommand       = SlashCommand("title", "Rename this session")
+  val Delete: SlashCommand      = SlashCommand("delete", "Delete this session")
+  val History: SlashCommand     = SlashCommand("history", "Search this session's prompts")
+  val Copy: SlashCommand        = SlashCommand("copy", "Copy the last reply")
+  val Export: SlashCommand      = SlashCommand("export", "Export this conversation")
+  val Rewind: SlashCommand      = SlashCommand("rewind", "Rewind to an earlier turn")
+  val Undo: SlashCommand        = SlashCommand("undo", "Rewind to an earlier turn")
+  val Mcps: SlashCommand        = SlashCommand("mcps", "View and toggle MCP servers")
+  val Mcp: SlashCommand         = SlashCommand("mcp", "View and toggle MCP servers")
+  val SessionInfo: SlashCommand = SlashCommand("session-info", "Session id, model, turns, and context usage")
+  val Status: SlashCommand      = SlashCommand("status", "Session id, model, turns, and context usage")
+  val Info: SlashCommand        = SlashCommand("info", "Session id, model, turns, and context usage")
+  val Context: SlashCommand     = SlashCommand("context", "How the context window is being used")
 
   val All: List[SlashCommand] =
-    List(New, Clear, Resume, Home, Model, Effort, Rename, Title, Delete, History, Copy, Export, Rewind, Mcps)
+    List(
+      New,
+      Clear,
+      Resume,
+      Home,
+      Model,
+      Effort,
+      Rename,
+      Title,
+      Delete,
+      History,
+      Copy,
+      Export,
+      Rewind,
+      Mcps,
+      SessionInfo,
+      Context,
+    )
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
     val names = advertised.map(_.name.toLowerCase).toSet
@@ -69,6 +90,13 @@ object SessionCommands:
     val n = name.stripPrefix("/").toLowerCase
     n == "mcps" || n == "mcp"
 
+  def isSessionInfo(name: String): Boolean =
+    val n = name.stripPrefix("/").toLowerCase
+    n == "session-info" || n == "status" || n == "info"
+
+  def isContext(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "context"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -80,7 +108,8 @@ object SessionCommands:
         else (rest.take(i), rest.drop(i).trim)
       val name = raw.toLowerCase
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
-        isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name)
+        isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name) ||
+        isSessionInfo(name) || isContext(name)
       then Some(ClientCommand(name, args))
       else None
     end if

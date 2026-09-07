@@ -25,7 +25,9 @@ object PaletteSpec extends ZIOSpecDefault:
         assertTrue(
           Palette.filter(rows, "mcp").exists(_.kind == PaletteKind.Mcps),
           Palette.filter(rows, "todo").exists(_.kind == PaletteKind.Todos),
-          Palette.filter(rows, "context").map(_.id).contains("compact"),
+          Palette.filter(rows, "context").headOption.exists(_.kind == PaletteKind.Context),
+          Palette.filter(rows, "context").exists(_.id == "compact"),
+          Palette.filter(rows, "info").exists(_.kind == PaletteKind.SessionInfo),
         )
       },
       test("empty advertised still lists pager builtins and MCP") {
@@ -38,6 +40,25 @@ object PaletteSpec extends ZIOSpecDefault:
           SessionCommands.intercept("/mcp").contains(ClientCommand("mcp")),
           SessionCommands.isMcps("mcps"),
           SessionCommands.merge(Nil).exists(_.name == "mcps"),
+        )
+      },
+      test("/session-info and /context are client commands") {
+        val merged = SessionCommands.merge(Nil)
+        val rows   = Palette.rows(merged)
+        assertTrue(
+          SessionCommands.intercept("/session-info").contains(ClientCommand("session-info")),
+          SessionCommands.intercept("/status").contains(ClientCommand("status")),
+          SessionCommands.intercept("/info").contains(ClientCommand("info")),
+          SessionCommands.intercept("/context").contains(ClientCommand("context")),
+          SessionCommands.isSessionInfo("status"),
+          SessionCommands.isContext("context"),
+          merged.exists(_.name == "session-info"),
+          merged.exists(_.name == "context"),
+          !merged.exists(_.name == "status"),
+          rows.exists(_.kind == PaletteKind.SessionInfo),
+          rows.exists(_.kind == PaletteKind.Context),
+          !rows.exists(_.id == "status"),
+          !rows.exists(_.id == "info"),
         )
       },
     )

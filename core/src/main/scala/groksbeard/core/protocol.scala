@@ -39,6 +39,7 @@ enum HostMsg derives JsonCodec:
       modelId: ModelId = ModelId.empty,
       availableModels: List[ModelOption] = Nil,
       effort: String = "",
+      cwd: String = "",
   )
   @jsonHint("sessionList") case SessionList(
       sessions: List[SessionRow],

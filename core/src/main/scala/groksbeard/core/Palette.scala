@@ -5,6 +5,8 @@ enum PaletteKind:
   case Mcps
   case Todos
   case Settings
+  case SessionInfo
+  case Context
 
 final case class PaletteRow(
     id: String,
@@ -15,7 +17,7 @@ final case class PaletteRow(
 )
 
 object Palette:
-  private val Aliases = Set("clear", "title", "undo", "mcp")
+  private val Aliases = Set("clear", "title", "undo", "mcp", "status", "info")
 
   val TodosRow: PaletteRow =
     PaletteRow("todos", "Todos", "Ctrl+T", "Toggle the session todo list", PaletteKind.Todos)
@@ -30,6 +32,24 @@ object Palette:
       "/mcps",
       "View and toggle MCP servers",
       PaletteKind.Mcps,
+    )
+
+  val SessionInfoRow: PaletteRow =
+    PaletteRow(
+      "session-info",
+      "Session info",
+      "/session-info",
+      "Session id, model, turns, and context usage",
+      PaletteKind.SessionInfo,
+    )
+
+  val ContextRow: PaletteRow =
+    PaletteRow(
+      "context",
+      "Context",
+      "/context",
+      "How the context window is being used",
+      PaletteKind.Context,
     )
 
   def rows(commands: List[SlashCommand]): List[PaletteRow] =
@@ -66,9 +86,13 @@ object Palette:
   def slashRow(cmd: SlashCommand): PaletteRow =
     val kind =
       if SessionCommands.isMcps(cmd.name) then PaletteKind.Mcps
+      else if SessionCommands.isSessionInfo(cmd.name) then PaletteKind.SessionInfo
+      else if SessionCommands.isContext(cmd.name) then PaletteKind.Context
       else PaletteKind.Slash(cmd.name)
     val label =
       if SessionCommands.isMcps(cmd.name) then McpsRow.label
+      else if SessionCommands.isSessionInfo(cmd.name) then SessionInfoRow.label
+      else if SessionCommands.isContext(cmd.name) then ContextRow.label
       else cmd.name
     PaletteRow(
       id = cmd.name,

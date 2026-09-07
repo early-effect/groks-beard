@@ -20,6 +20,9 @@ object Occupancy:
       if n == n.floor then s"${n.toInt}k" else f"$n%.1fk"
     else value.toString
 
+  def free(used: Int, size: Int): Int =
+    math.max(0, size - used)
+
   def label(used: Int, size: Int): String =
     s"${compact(used)} / ${compact(size)} · ${percent(used, size)}%"
 

@@ -262,6 +262,7 @@ final class ChatRuntime private (
     else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then doPostList(open = true)
     else if SessionCommands.isRewind(name) then doOpenRewind
     else if SessionCommands.isMcps(name) then doListMcps
+    else if SessionCommands.isSessionInfo(name) || SessionCommands.isContext(name) then ZIO.unit
     else ZIO.unit
   }
 
@@ -342,6 +343,8 @@ final class ChatRuntime private (
               case None    => post(HostMsg.Error("Usage: /rewind"))
         case Some(cmd) if SessionCommands.isMcps(cmd.name) =>
           doListMcps
+        case Some(cmd) if SessionCommands.isSessionInfo(cmd.name) || SessionCommands.isContext(cmd.name) =>
+          ZIO.unit
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
@@ -1126,7 +1129,7 @@ final class ChatRuntime private (
             .map(SessionIndex.displayTitle)
             .filter(_.nonEmpty)
             .getOrElse(title)
-        post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models, effort))
+        post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models, effort, cwd))
       }
   end postMeta
 

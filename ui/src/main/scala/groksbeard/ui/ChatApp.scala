@@ -25,26 +25,28 @@ final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos,
-    Palette, Mcps, Queue
+    Palette, Mcps, Queue, SessionInfo, Context
 
 object Scene:
   def from(name: String): Scene =
     name match
-      case "slash"      => Scene.Slash
-      case "mentions"   => Scene.Mentions
-      case "settings"   => Scene.Settings
-      case "transcript" => Scene.Transcript
-      case "permission" => Scene.Permission
-      case "plan"       => Scene.Plan
-      case "question"   => Scene.Question
-      case "elicit"     => Scene.Elicit
-      case "changes"    => Scene.Changes
-      case "resume"     => Scene.Resume
-      case "todos"      => Scene.Todos
-      case "palette"    => Scene.Palette
-      case "mcps"       => Scene.Mcps
-      case "queue"      => Scene.Queue
-      case _            => Scene.Empty
+      case "slash"        => Scene.Slash
+      case "mentions"     => Scene.Mentions
+      case "settings"     => Scene.Settings
+      case "transcript"   => Scene.Transcript
+      case "permission"   => Scene.Permission
+      case "plan"         => Scene.Plan
+      case "question"     => Scene.Question
+      case "elicit"       => Scene.Elicit
+      case "changes"      => Scene.Changes
+      case "resume"       => Scene.Resume
+      case "todos"        => Scene.Todos
+      case "palette"      => Scene.Palette
+      case "mcps"         => Scene.Mcps
+      case "queue"        => Scene.Queue
+      case "session-info" => Scene.SessionInfo
+      case "context"      => Scene.Context
+      case _              => Scene.Empty
 end Scene
 
 object ChatApp:
@@ -183,6 +185,19 @@ object ChatApp:
         color(muted),
       )
 
+  object ChipSegOn
+      extends CssClass(
+        border.none,
+        borderRadius.px(0),
+        padding(2.px, 8.px),
+        backgroundColor(orange),
+        color(cream),
+        fontSize.px(12),
+        cursor.pointer,
+      )
+
+  object ChipSegRule extends CssClass(borderLeft(Border.solid(1.px, widgetBorder)))
+
   object ChipRow
       extends CssClass(
         display.flex,
@@ -210,6 +225,13 @@ object ChatApp:
         flexGrow(1.0),
         color(muted),
         fontSize.px(11),
+        border.none,
+        backgroundColor(Color.transparent),
+        padding.zero,
+        minHeight.px(32),
+        fontFamily.inherit,
+        textAlign.left,
+        cursor.pointer,
       )
 
   object OccupancyTrack
@@ -609,6 +631,51 @@ object ChatApp:
         color(muted),
       )
 
+  object FactRowEl
+      extends CssClass(
+        display.flex,
+        alignItems.baseline,
+        justifyContent.spaceBetween,
+        gap.px(12),
+        width.pct(100),
+        boxSizing.borderBox,
+        border.none,
+        backgroundColor(Color.transparent),
+        color(fg),
+        textAlign.left,
+        padding(8.px, 10.px),
+        cursor.pointer,
+        fontSize.px(13),
+        fontFamily.inherit,
+      )
+
+  object FactLabel
+      extends CssClass(
+        flexShrink(0),
+        fontSize.px(11),
+        color(muted),
+      )
+
+  object FactValue
+      extends CssClass(
+        minWidth.px(0),
+        textAlign.right,
+        overflowWrap.anywhere,
+        userSelect.text,
+      )
+
+  object ContextTrack
+      extends CssClass(
+        width.pct(100),
+        height.px(6),
+        borderRadius.px(3),
+        backgroundColor(widgetBorder),
+        overflow.hidden,
+        flexShrink(0),
+        margin(4.px, 10.px, 8.px, 10.px),
+        boxSizing.borderBox,
+      )
+
   object MenuItem
       extends CssClass(
         display.block,
@@ -977,23 +1044,28 @@ object ChatApp:
       case Scene.Settings => Some(OpenMenu.Settings)
       case _              => None
     for
-      scope          <- ZIO.scope
-      chat           <- sq(PreviewScenes.seed(scene))
-      draft          <- sq(initialDraft)
-      dismissed      <- sq(false)
-      mentionIdx     <- sq(Option.empty[Int])
-      slashIdx       <- sq(if ComposerQuery.slashQuery(initialDraft).isDefined then Some(0) else None)
-      openMenu       <- sq(initialMenu)
-      menuIdx        <- sq(if initialMenu.isDefined then Some(0) else None)
-      pickerQuery    <- sq("")
-      changesOpen    <- sq(false)
-      todosOpen      <- sq(scene == Scene.Todos)
-      queueOpen      <- sq(scene == Scene.Queue)
-      queueIdx       <- sq(if scene == Scene.Queue then Some(0) else None)
-      paletteOpen    <- sq(scene == Scene.Palette)
-      paletteQuery   <- sq("")
-      paletteIdx     <- sq(if scene == Scene.Palette then Some(0) else None)
-      mcpsOpen       <- sq(scene == Scene.Mcps)
+      scope        <- ZIO.scope
+      chat         <- sq(PreviewScenes.seed(scene))
+      draft        <- sq(initialDraft)
+      dismissed    <- sq(false)
+      mentionIdx   <- sq(Option.empty[Int])
+      slashIdx     <- sq(if ComposerQuery.slashQuery(initialDraft).isDefined then Some(0) else None)
+      openMenu     <- sq(initialMenu)
+      menuIdx      <- sq(if initialMenu.isDefined then Some(0) else None)
+      pickerQuery  <- sq("")
+      changesOpen  <- sq(false)
+      todosOpen    <- sq(scene == Scene.Todos)
+      queueOpen    <- sq(scene == Scene.Queue)
+      queueIdx     <- sq(if scene == Scene.Queue then Some(0) else None)
+      paletteOpen  <- sq(scene == Scene.Palette)
+      paletteQuery <- sq("")
+      paletteIdx   <- sq(if scene == Scene.Palette then Some(0) else None)
+      mcpsOpen     <- sq(scene == Scene.Mcps)
+      sessionPane  <- sq(
+        if scene == Scene.SessionInfo then Some(SessionPane.Info)
+        else if scene == Scene.Context then Some(SessionPane.Context)
+        else None
+      )
       leaving        <- sq(Option.empty[SessionLeave])
       pendingDelete  <- sq(Option.empty[SessionId])
       lastIdleEsc    <- Ref.make(Option.empty[Long])
@@ -1039,10 +1111,10 @@ object ChatApp:
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
               case HostMsg.ToggleQueue           => queueOpen.update(!_)
               case HostMsg.OpenPalette           =>
-                mcpsOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *> paletteOpen.set(true) *>
-                  ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
+                mcpsOpen.set(false) *> sessionPane.set(None) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *>
+                  paletteOpen.set(true) *> ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
               case HostMsg.OpenMcps =>
-                paletteOpen.set(false) *> mcpsOpen.set(true)
+                paletteOpen.set(false) *> sessionPane.set(None) *> mcpsOpen.set(true)
               case HostMsg.ToolCall(_, row) =>
                 toolOut.update { m =>
                   m.updated(row.id, m.getOrElse(row.id, row.output.getOrElse("")))
@@ -1175,6 +1247,10 @@ object ChatApp:
                        case None    => chat.update(_.copy(error = Some("Usage: /rewind"))))
               case Some(cmd) if SessionCommands.isMcps(cmd.name) =>
                 draft.set("") *> openMcps
+              case Some(cmd) if SessionCommands.isSessionInfo(cmd.name) =>
+                draft.set("") *> openSessionPane(SessionPane.Info)
+              case Some(cmd) if SessionCommands.isContext(cmd.name) =>
+                draft.set("") *> openSessionPane(SessionPane.Context)
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1263,13 +1339,34 @@ object ChatApp:
             end if
         }
 
+      def onSessionPaneKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
+        sessionPane.get.flatMap {
+          case None       => ZIO.succeed(false)
+          case Some(pane) =>
+            val key                            = e.key
+            val ctrlOrMeta                     = e.ctrlKey || e.metaKey
+            def go(z: UIO[Unit]): UIO[Boolean] =
+              e.preventDefault()
+              e.stopPropagation()
+              z.as(true)
+            if ctrlOrMeta || e.altKey then ZIO.succeed(false)
+            else if key == "c" || key == "C" then go(copySessionId)
+            else if key == "y" || key == "Y" then go(copySessionBlock(pane))
+            else if key == "Tab" && !e.shiftKey then go(sessionPane.set(Some(SessionPane.other(pane))))
+            else ZIO.succeed(false)
+        }
+
       def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
         onPaletteKey(e).flatMap {
           case true  => ZIO.unit
           case false =>
-            onQueueKey(e).flatMap {
+            onSessionPaneKey(e).flatMap {
               case true  => ZIO.unit
-              case false => handleShellKey(e)
+              case false =>
+                onQueueKey(e).flatMap {
+                  case true  => ZIO.unit
+                  case false => handleShellKey(e)
+                }
             }
         }
 
@@ -1301,57 +1398,64 @@ object ChatApp:
                       mcpsOpen.get.flatMap {
                         case true  => closeMcps
                         case false =>
-                          pendingDelete.get.flatMap {
-                            case Some(_) => cancelDelete
+                          sessionPane.get.flatMap {
+                            case Some(_) => closeSessionPane
                             case None    =>
-                              if c.rewindConfirm.nonEmpty then cancelRewind
-                              else if c.rewind.nonEmpty then closeRewindPicker
-                              else
-                                mentionShown.get.flatMap { mentions =>
-                                  if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                              pendingDelete.get.flatMap {
+                                case Some(_) => cancelDelete
+                                case None    =>
+                                  if c.rewindConfirm.nonEmpty then cancelRewind
+                                  else if c.rewind.nonEmpty then closeRewindPicker
                                   else
-                                    draft.get.flatMap { text =>
-                                      if PromptHistory.query(text).isDefined then
-                                        draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                                    mentionShown.get.flatMap { mentions =>
+                                      if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
                                       else
-                                        historyBrowse.get.flatMap {
-                                          case Some(_) => historyBrowse.set(None)
-                                          case None    =>
-                                            if c.pickerOpen then closePicker
-                                            else if c.permission.isDefined then parkPermission
-                                            else if c.question.isDefined then
-                                              ZIO.succeed(
-                                                bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))
-                                              )
-                                            else if c.plan.isDefined then
-                                              ZIO.succeed(
-                                                bridge.post(
-                                                  WebviewMsg.PlanVerdict(c.plan.get.requestId, PlanOutcome.Abandoned)
-                                                )
-                                              )
-                                            else if c.elicit.isDefined then
-                                              ZIO.succeed(
-                                                bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))
-                                              )
-                                            else
-                                              queueOpen.get.flatMap {
-                                                case true  => queueOpen.set(false)
-                                                case false =>
-                                                  todosOpen.get.flatMap {
-                                                    case true  => todosOpen.set(false)
+                                        draft.get.flatMap { text =>
+                                          if PromptHistory.query(text).isDefined then
+                                            draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                                          else
+                                            historyBrowse.get.flatMap {
+                                              case Some(_) => historyBrowse.set(None)
+                                              case None    =>
+                                                if c.pickerOpen then closePicker
+                                                else if c.permission.isDefined then parkPermission
+                                                else if c.question.isDefined then
+                                                  ZIO.succeed(
+                                                    bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))
+                                                  )
+                                                else if c.plan.isDefined then
+                                                  ZIO.succeed(
+                                                    bridge.post(
+                                                      WebviewMsg.PlanVerdict(
+                                                        c.plan.get.requestId,
+                                                        PlanOutcome.Abandoned,
+                                                      )
+                                                    )
+                                                  )
+                                                else if c.elicit.isDefined then
+                                                  ZIO.succeed(
+                                                    bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))
+                                                  )
+                                                else
+                                                  queueOpen.get.flatMap {
+                                                    case true  => queueOpen.set(false)
                                                     case false =>
-                                                      if ChatModel.turnIsRunning(c) then
-                                                        nowMs.get.flatMap { now =>
-                                                          lastCancelMs.set(Some(now)) *>
-                                                            lastIdleEsc.set(None) *>
-                                                            ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                                        }
-                                                      else idleRewindEsc(c, text)
+                                                      todosOpen.get.flatMap {
+                                                        case true  => todosOpen.set(false)
+                                                        case false =>
+                                                          if ChatModel.turnIsRunning(c) then
+                                                            nowMs.get.flatMap { now =>
+                                                              lastCancelMs.set(Some(now)) *>
+                                                                lastIdleEsc.set(None) *>
+                                                                ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                                            }
+                                                          else idleRewindEsc(c, text)
+                                                      }
                                                   }
-                                              }
+                                            }
                                         }
                                     }
-                                }
+                              }
                           }
                       }
                   }
@@ -1667,6 +1771,7 @@ object ChatApp:
       def openPalette: UIO[Unit] =
         hideMenu *>
           mcpsOpen.set(false) *>
+          sessionPane.set(None) *>
           paletteQuery.set("") *>
           paletteIdx.set(Some(0)) *>
           paletteOpen.set(true) *>
@@ -1683,8 +1788,29 @@ object ChatApp:
       def openMcps: UIO[Unit] =
         hideMenu *>
           closePalette *>
+          sessionPane.set(None) *>
           mcpsOpen.set(true) *>
           ZIO.succeed(bridge.post(WebviewMsg.ListMcps))
+
+      def closeSessionPane: UIO[Unit] = sessionPane.set(None)
+
+      def openSessionPane(pane: SessionPane): UIO[Unit] =
+        hideMenu *>
+          closePalette *>
+          closeMcps *>
+          sessionPane.set(Some(pane))
+
+      def copyFact(text: String): UIO[Unit] =
+        if text.isEmpty then ZIO.unit
+        else
+          writeClipboard(text) *>
+            ZIO.succeed(bridge.post(WebviewMsg.CopyOut(text, None, backup = false, conversation = false)))
+
+      def copySessionId: UIO[Unit] =
+        chat.get.flatMap(c => copyFact(SessionFacts.sessionId(c).getOrElse("")))
+
+      def copySessionBlock(pane: SessionPane): UIO[Unit] =
+        chat.get.flatMap(c => copyFact(SessionFacts.block(pane, c)))
 
       def pickPalette(row: PaletteRow): UIO[Unit] =
         closePalette *> (
@@ -1692,6 +1818,8 @@ object ChatApp:
             case PaletteKind.Mcps        => openMcps
             case PaletteKind.Todos       => toggleTodos
             case PaletteKind.Settings    => showMenu(OpenMenu.Settings)
+            case PaletteKind.SessionInfo => openSessionPane(SessionPane.Info)
+            case PaletteKind.Context     => openSessionPane(SessionPane.Context)
             case PaletteKind.Slash(name) => pickSlash(name)
         )
 
@@ -1710,6 +1838,8 @@ object ChatApp:
         else if SessionCommands.isExport(name) then runCopyExport(ClientCommand("export"))
         else if SessionCommands.isRewind(name) then draft.set("") *> openRewindPicker
         else if SessionCommands.isMcps(name) then draft.set("") *> openMcps
+        else if SessionCommands.isSessionInfo(name) then draft.set("") *> openSessionPane(SessionPane.Info)
+        else if SessionCommands.isContext(name) then draft.set("") *> openSessionPane(SessionPane.Context)
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1994,6 +2124,9 @@ object ChatApp:
           )
         ),
         when(mcpsOpen)(renderMcps(chat, closeMcps, toggleMcp)),
+        when(sessionPane.map(_.nonEmpty))(
+          renderSessionPane(chat, sessionPane, closeSessionPane, openSessionPane, copyFact)
+        ),
         when(historyShown.map(_.nonEmpty))(
           E.ul(
             ComposerMenu,
@@ -2079,7 +2212,9 @@ object ChatApp:
           togglePalette,
           openPalette,
           onPaletteKey,
+          onSessionPaneKey,
           onQueueKey,
+          openSessionPane(SessionPane.Context),
         ),
       )
     end for
@@ -2281,7 +2416,9 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onSessionPaneKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      openContext: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -2308,9 +2445,10 @@ object ChatApp:
         togglePalette,
         openPalette,
         onPaletteKey,
+        onSessionPaneKey,
         onQueueKey,
       ),
-      renderComposerBar(bridge, chat, sendDraft),
+      renderComposerBar(bridge, chat, sendDraft, openContext),
     )
 
   private def renderActivityStrip(chat: ascent.Source[ChatModel], nowMs: ascent.Source[Long]): ascent.ast.UI[Any] =
@@ -2364,6 +2502,7 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onSessionPaneKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.textarea(
@@ -2400,6 +2539,7 @@ object ChatApp:
           togglePalette,
           openPalette,
           onPaletteKey,
+          onSessionPaneKey,
           onQueueKey,
         )
       ),
@@ -2409,11 +2549,12 @@ object ChatApp:
       bridge: HostBridge,
       chat: ascent.Source[ChatModel],
       sendDraft: UIO[Unit],
+      openContext: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       ComposerBar,
       when(chat.map(_.occupancy.exists(_.size > 0)))(
-        occupancyEl(chat)
+        occupancyEl(chat, openContext)
       ),
       E.button(
         Send,
@@ -2450,6 +2591,7 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onSessionPaneKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): UIO[Unit] =
     val key                         = e.key
@@ -2460,6 +2602,7 @@ object ChatApp:
       z
     for
       stolen    <- onPaletteKey(e)
+      paneKey   <- onSessionPaneKey(e)
       queued    <- onQueueKey(e)
       slash     <- slashShown.get
       mentions  <- mentionShown.get
@@ -2475,7 +2618,7 @@ object ChatApp:
       list = PromptHistory.entries(c)
       step = key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End"
       out <-
-        if stolen || queued then ZIO.unit
+        if stolen || paneKey || queued then ZIO.unit
         else if menu.isDefined && isMenuNav(key, e.shiftKey) then onMenuKey(e).unit
         else if mentions.nonEmpty && step then go(mentionIdx.set(ComposerQuery.moveIndex(idx, key, mentions.size)))
         else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
@@ -3394,7 +3537,7 @@ object ChatApp:
     )
   end renderPicker
 
-  private def occupancyEl(chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+  private def occupancyEl(chat: ascent.Source[ChatModel], openContext: UIO[Unit]): ascent.ast.UI[Any] =
     forEach(chat.map(_.occupancy.toList))(o => s"${o.used}/${o.size}") { o =>
       val pct  = Occupancy.percent(o.used, o.size)
       val fill =
@@ -3402,10 +3545,12 @@ object ChatApp:
           case "hot"  => OccupancyFillHot
           case "warn" => OccupancyFillWarn
           case _      => OccupancyFill
-      E.span(
+      E.button(
         OccupancyMeter,
         TestId("occupancy"),
-        A.title(s"Context used this session: ${Occupancy.label(o.used, o.size)}"),
+        A.`type`("button"),
+        A.title(s"Context used this session: ${Occupancy.label(o.used, o.size)}. Click for details."),
+        Ev.onClick(_ => openContext),
         E.span(
           OccupancyTrack,
           E.span(fill, Attr.StaticAttr("style", AttrValue.Str(s"width:${pct}%;height:100%;display:block"))),
@@ -3413,4 +3558,90 @@ object ChatApp:
         E.span(OccupancyCopy, Occupancy.label(o.used, o.size)),
       )
     }
+
+  private def renderSessionPane(
+      chat: ascent.Source[ChatModel],
+      pane: ascent.Source[Option[SessionPane]],
+      close: UIO[Unit],
+      open: SessionPane => UIO[Unit],
+      copy: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    val kind = pane.map(_.getOrElse(SessionPane.Info))
+    E.div(
+      PaletteScrim,
+      TestId("session-pane"),
+      Ev.onClick(_ => close),
+      E.div(
+        PalettePanel,
+        TestId("session-panel"),
+        Ev.onClick { e =>
+          e.stopPropagation()
+          ZIO.unit
+        },
+        E.div(
+          PickerHead,
+          forEach(kind.map(List(_)))(k => k.toString) { k =>
+            E.div(
+              ChipGroup,
+              E.button(
+                if k == SessionPane.Info then ChipSegOn else ChipSeg,
+                TestId("session-tab-info"),
+                A.`type`("button"),
+                Ev.onClick(_ => open(SessionPane.Info)),
+                "Session",
+              ),
+              E.button(
+                if k == SessionPane.Context then ChipSegOn else ChipSeg,
+                ChipSegRule,
+                TestId("session-tab-context"),
+                A.`type`("button"),
+                Ev.onClick(_ => open(SessionPane.Context)),
+                "Context",
+              ),
+            )
+          },
+          E.button(Chip, TestId("session-close"), Ev.onClick(_ => close), "Close"),
+        ),
+        E.p(Copy, TestId("session-hint"), kind.map(SessionPane.hint)),
+        forEach(kind.map(List(_)))(k => k.toString) { k =>
+          val occ = chat.map(SessionFacts.occupancy)
+          E.div(
+            PaletteList,
+            TestId(if k == SessionPane.Context then "context" else "session-info"),
+            when(k == SessionPane.Context)(
+              forEach(occ.map(_.toList))(o => s"${o.used}/${o.size}") { o =>
+                val pct  = Occupancy.percent(o.used, o.size)
+                val fill =
+                  Occupancy.tone(o.used, o.size) match
+                    case "hot"  => OccupancyFillHot
+                    case "warn" => OccupancyFillWarn
+                    case _      => OccupancyFill
+                E.div(
+                  ContextTrack,
+                  TestId("context-bar"),
+                  E.span(fill, Attr.StaticAttr("style", AttrValue.Str(s"width:${pct}%;height:100%;display:block"))),
+                )
+              }
+            ),
+            when(k == SessionPane.Context)(
+              when(occ.map(_.exists(o => Occupancy.tone(o.used, o.size) != "ok")))(
+                E.p(Copy, TestId("context-compact"), "Approaching auto-compact (85%).")
+              )
+            ),
+            forEach(chat.map(c => SessionFacts.rows(k, c)))(r => s"${r.id}-${r.value}") { row =>
+              E.button(
+                FactRowEl,
+                TestId(s"fact-${row.id}"),
+                A.`type`("button"),
+                A.title(s"Copy ${row.label}"),
+                Ev.onClick(_ => copy(row.copy)),
+                E.span(FactLabel, row.label),
+                E.span(FactValue, row.value),
+              )
+            },
+          )
+        },
+      ),
+    )
+  end renderSessionPane
 end ChatApp

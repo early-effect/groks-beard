@@ -214,6 +214,12 @@ object ChatModelSpec extends ZIOSpecDefault:
           modeOnly.sessionId == "s1",
         )
       },
+      test("sessionMeta cwd sticks across a later mode-only meta") {
+        val withCwd =
+          ChatModel.applyMsg(ChatModel.empty, HostMsg.SessionMeta("s1", "Grok's Beard", "normal", cwd = "/repo"))
+        val modeOnly = ChatModel.applyMsg(withCwd, HostMsg.SessionMeta("", "", "plan"))
+        assertTrue(withCwd.cwd == "/repo", modeOnly.cwd == "/repo", modeOnly.modeId == "plan")
+      },
       test("sessionMeta models stick across a later mode-only meta") {
         val withModels = ChatModel.applyMsg(
           ChatModel.empty,

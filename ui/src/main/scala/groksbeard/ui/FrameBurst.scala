@@ -31,13 +31,8 @@ object FrameBurst:
             Left(ZIO.succeed {
               val _ = w.cancelAnimationFrame(id)
             })
-          else
-            cb(ZIO.unit)
-            Right(())
-        catch
-          case _: Throwable =>
-            cb(ZIO.unit)
-            Right(())
+          else Right(ZIO.unit)
+        catch case _: Throwable => Right(ZIO.unit)
       }
       .timeout(Window)
       .unit

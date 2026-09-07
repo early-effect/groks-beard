@@ -871,9 +871,9 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _     <- waitPresent(root, "rewind-confirm")
               _     <- root.button("rewind-yes").click
               _     <- waitGone(root, "rewind-confirm")
+              _     <- waitGone(root, "user-t2")
               first <- waitPresent(root, "user-t1") *> root.getByTestId("user-t1").innerText
-              gone  <- root.getByTestId("user-t2").innerText.either
-            yield assertTrue(first.contains("first prompt"), gone.isLeft)
+            yield assertTrue(first.contains("first prompt"))
           }
         yield result
         end for

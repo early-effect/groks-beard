@@ -6,7 +6,6 @@ import zio.*
 import zio.http.*
 import zio.json.*
 
-import java.io.File
 import java.nio.file.Path as JPath
 
 /** Same-origin preview + live `grok agent stdio`. One SSE + ChatRuntime + agent per browser client.
@@ -27,29 +26,9 @@ object LiveMain extends ZIOAppDefault:
       clients <- LiveClients.grok(log)
       _       <- ZIO.logInfo(s"Grok's Beard preview on http://localhost:${config.port} serving ${config.root}")
       _       <- Preview
-        .serve(config, extraRoutes = extraRoutes(clients, config.root))
+        .serve(config, extraRoutes = apiRoutes(clients))
         .provideSome[Scope](Server.defaultWith(_.port(config.port)))
     yield ()
-
-  def extraRoutes(clients: LiveClients, root: JPath): Routes[Any, Response] =
-    logoRoute(root) ++ apiRoutes(clients)
-
-  def logoFile(from: JPath): Option[File] =
-    Iterator
-      .iterate(from.toAbsolutePath.normalize.toFile)(_.getParentFile)
-      .takeWhile(_ != null)
-      .take(8)
-      .map(dir => File(dir, "media/logo.png"))
-      .find(_.isFile)
-
-  def logoRoute(root: JPath): Routes[Any, Response] =
-    logoFile(root) match
-      case None       => Routes.empty
-      case Some(file) =>
-        Routes(
-          Method.GET / "logo.png" ->
-            Handler.fromFile(file).catchAll(_ => Handler.notFound)
-        )
 
   def apiRoutes(clients: LiveClients): Routes[Any, Response] =
     Routes(

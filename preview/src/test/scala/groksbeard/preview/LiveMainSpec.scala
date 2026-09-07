@@ -8,9 +8,9 @@ object LiveMainSpec extends ZIOSpecDefault:
   def spec =
     suite("LiveMain")(
       test("configFromArgs reads port, root, and --open in PreviewMain order") {
-        val site = JPath.of("/tmp/site").toAbsolutePath.normalize
-        val a    = LiveMain.configFromArgs(Chunk("9000", "/tmp/site", "--open"))
-        val b    = LiveMain.configFromArgs(Chunk("--open", "9000", "/tmp/site"))
+        val site = JPath.of("site").toAbsolutePath.normalize
+        val a    = LiveMain.configFromArgs(Chunk("9000", "site", "--open"))
+        val b    = LiveMain.configFromArgs(Chunk("--open", "9000", "site"))
         val c    = LiveMain.configFromArgs(Chunk.empty)
         assertTrue(
           a.port == 9000,
@@ -23,16 +23,6 @@ object LiveMainSpec extends ZIOSpecDefault:
           !c.openBrowser,
           c.root.endsWith(JPath.of("ui", "target", "preview")),
         )
-      },
-      test("logoFile walks up to media/logo.png") {
-        val tmp     = java.nio.file.Files.createTempDirectory("beard-logo")
-        val media   = tmp.resolve("media")
-        val preview = tmp.resolve("ui").resolve("target").resolve("preview")
-        java.nio.file.Files.createDirectories(media)
-        java.nio.file.Files.createDirectories(preview)
-        java.nio.file.Files.write(media.resolve("logo.png"), Array[Byte](1, 2, 3))
-        val found = LiveMain.logoFile(preview)
-        assertTrue(found.contains(media.resolve("logo.png").toFile))
-      },
+      }
     )
 end LiveMainSpec

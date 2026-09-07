@@ -107,6 +107,9 @@ enum HostMsg derives JsonCodec:
   @jsonHint("copied") case Copied(message: String, clipboard: Option[String] = None)
   @jsonHint("todos") case Todos(entries: List[TodoEntry] = Nil)
   @jsonHint("toggleTodos") case ToggleTodos
+  @jsonHint("openPalette") case OpenPalette
+  @jsonHint("openMcps") case OpenMcps
+  @jsonHint("mcpServers") case McpServers(servers: List[McpServerView] = Nil)
   @jsonHint("clearTranscript") case ClearTranscript
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
   @jsonHint("rewindList") case RewindList(points: List[RewindPoint] = Nil)
@@ -192,5 +195,7 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("openRewind") case OpenRewind
   @jsonHint("closeRewind") case CloseRewind
   @jsonHint("rewindTo") case RewindTo(promptIndex: Int)
+  @jsonHint("listMcps") case ListMcps
+  @jsonHint("setMcpEnabled") case SetMcpEnabled(name: String, enabled: Boolean)
   @jsonHint("log") case Log(message: String, level: String = "error")
 end WebviewMsg

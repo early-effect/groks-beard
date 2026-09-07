@@ -1223,6 +1223,58 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("palette scene lists MCP Servers and picking it opens the MCP pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Palette)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "palette")
+              _   <- waitPresent(root, "palette-mcps")
+              _   <- root.button("palette-mcps").click
+              _   <- waitPresent(root, "mcps")
+              _   <- waitPresent(root, "mcp-metals")
+              _   <- waitGone(root, "palette")
+              off <- waitPresent(root, "mcp-toggle-atlassian") *>
+                root.button("mcp-toggle-atlassian").innerText
+              _  <- root.button("mcp-toggle-atlassian").click
+              on <- waitContains(root, "mcp-toggle-atlassian", "On")
+            yield assertTrue(off.contains("Off"), on.contains("On"))
+          }
+        yield result
+        end for
+      },
+      test("empty draft question-mark opens the command palette") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "draft")
+              _ <- root.textarea("draft").press("?")
+              _ <- waitPresent(root, "palette")
+              _ <- waitPresent(root, "palette-mcps")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("slash /mcps opens the MCP pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "slash-mcps")
+              _      <- root.button("slash-mcps").click
+              _      <- waitPresent(root, "mcps")
+              metals <- waitPresent(root, "mcp-metals") *>
+                root.getByTestId("mcp-metals").innerText
+            yield assertTrue(metals.contains("metals"))
+          }
+        yield result
+        end for
+      },
       test("slash rename prefills the composer") {
         val bridge = PreviewBridge()
         for

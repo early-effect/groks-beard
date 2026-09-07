@@ -3,6 +3,24 @@ package groksbeard.ui
 import groksbeard.core.*
 
 object PreviewScenes:
+  val mcps: List[McpServerView] = List(
+    McpServerView(
+      "metals",
+      "http",
+      "http://localhost:56126/mcp",
+      source = "/repo/.mcp.json",
+      enabled = true,
+    ),
+    McpServerView(
+      "atlassian",
+      "http",
+      "https://mcp.atlassian.com/v1/mcp",
+      source = "/Users/russ/.claude.json",
+      vendor = Some("claude"),
+      enabled = false,
+    ),
+  )
+
   private val allow =
     PermissionOption("allow", "Allow", PermissionKind.AllowOnce)
   private val reject =
@@ -166,6 +184,15 @@ object PreviewScenes:
             TodoEntry("Match the TUI pane", Todos.Pending, TodoPriority.Medium, Some("3")),
           ),
         )
+      case Scene.Mcps =>
+        ChatModel.empty.copy(
+          inSession = true,
+          title = "MCP",
+          commands = SessionCommands.merge(Nil),
+          mcps = PreviewScenes.mcps,
+        )
+      case Scene.Palette =>
+        ChatModel.empty.copy(commands = SessionCommands.merge(List(SlashCommand("compact", "Compact context"))))
       case Scene.Resume =>
         ChatModel.empty.copy(
           sessionId = SessionId("preview"),

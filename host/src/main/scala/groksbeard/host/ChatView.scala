@@ -25,6 +25,14 @@ final class ChatView(
 
   def toggleTodos(): Unit = HostRuntime.runUIO(toHost(HostMsg.ToggleTodos))
 
+  def openPalette(): Unit = HostRuntime.runUIO(toHost(HostMsg.OpenPalette))
+
+  def openMcps(): Unit =
+    HostRuntime.runUIO {
+      toHost(HostMsg.OpenMcps) *>
+        runtime.map(_.listMcps).getOrElse(ZIO.unit)
+    }
+
   def dispose(): Unit =
     runtime.foreach(rt => HostRuntime.runUIO(rt.close))
     runtime = None
@@ -179,7 +187,13 @@ final class ChatView(
                       storeChanged = ZIO.succeed(tree.refresh()),
                       onFollow = (path, line) => ZIO.succeed(review.follow(path, line)),
                     ) ++
-                    NodeTerminals.layer(cwd)
+                    NodeTerminals.layer(cwd) ++
+                    ZLayer.succeed(
+                      Mcps.cli(
+                        args => NodeCapture.run(cmd, args, cwd),
+                        ZIO.attempt(nodeFs.readFileSync(s"$home/config.toml", "utf8")).orElseSucceed(""),
+                      )
+                    )
                 )
                 .flatMap { rt =>
                   ZIO.succeed {

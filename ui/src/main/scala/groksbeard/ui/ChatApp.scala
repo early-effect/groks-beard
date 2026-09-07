@@ -24,7 +24,8 @@ object OpenMenu:
 final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
-  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos
+  case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos,
+    Palette, Mcps
 
 object Scene:
   def from(name: String): Scene =
@@ -40,6 +41,8 @@ object Scene:
       case "changes"    => Scene.Changes
       case "resume"     => Scene.Resume
       case "todos"      => Scene.Todos
+      case "palette"    => Scene.Palette
+      case "mcps"       => Scene.Mcps
       case _            => Scene.Empty
 end Scene
 
@@ -508,6 +511,95 @@ object ChatApp:
         zIndex(10),
       )
 
+  object PaletteScrim
+      extends CssClass(
+        position.absolute,
+        top.px(0),
+        right.px(0),
+        bottom.px(0),
+        left.px(0),
+        zIndex(30),
+        display.flex,
+        justifyContent.center,
+        alignItems.flexStart,
+        padding(48.px, 16.px, 16.px, 16.px),
+        boxSizing.borderBox,
+        backgroundColor(Color.Keyword("rgba(0, 0, 0, 0.45)")),
+      )
+
+  object PalettePanel
+      extends CssClass(
+        width.pct(100),
+        maxWidth.px(480),
+        maxHeight.pct(80),
+        display.flex,
+        flexDirection.column,
+        minHeight.px(0),
+        backgroundColor(menuBg),
+        border(Border.solid(1.px, widgetBorder)),
+        borderRadius.px(8),
+        overflow.hidden,
+        boxSizing.borderBox,
+      )
+
+  object PaletteList
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        flexGrow(1.0),
+        minHeight.px(0),
+        overflowY.auto,
+        padding.px(4),
+      )
+
+  object PaletteItem
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        justifyContent.spaceBetween,
+        gap.px(8),
+        width.pct(100),
+        boxSizing.borderBox,
+        border.none,
+        backgroundColor(Color.transparent),
+        color(fg),
+        textAlign.left,
+        padding(8.px, 10.px),
+        cursor.pointer,
+        fontSize.px(13),
+      )
+
+  object PaletteItemOn
+      extends CssClass(
+        display.flex,
+        alignItems.center,
+        justifyContent.spaceBetween,
+        gap.px(8),
+        width.pct(100),
+        boxSizing.borderBox,
+        border.none,
+        backgroundColor(orange),
+        color(cream),
+        textAlign.left,
+        padding(8.px, 10.px),
+        cursor.pointer,
+        fontSize.px(13),
+      )
+
+  object PaletteHint
+      extends CssClass(
+        flexShrink(0),
+        fontSize.px(11),
+        color(muted),
+      )
+
+  object PaletteDesc
+      extends CssClass(
+        display.block,
+        fontSize.px(11),
+        color(muted),
+      )
+
   object MenuItem
       extends CssClass(
         display.block,
@@ -887,6 +979,10 @@ object ChatApp:
       pickerQuery    <- sq("")
       changesOpen    <- sq(false)
       todosOpen      <- sq(scene == Scene.Todos)
+      paletteOpen    <- sq(scene == Scene.Palette)
+      paletteQuery   <- sq("")
+      paletteIdx     <- sq(if scene == Scene.Palette then Some(0) else None)
+      mcpsOpen       <- sq(scene == Scene.Mcps)
       leaving        <- sq(Option.empty[SessionLeave])
       pendingDelete  <- sq(Option.empty[SessionId])
       lastIdleEsc    <- Ref.make(Option.empty[Long])
@@ -930,7 +1026,11 @@ object ChatApp:
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
-              case HostMsg.ToolCall(_, row)      =>
+              case HostMsg.OpenPalette           =>
+                mcpsOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *> paletteOpen.set(true)
+              case HostMsg.OpenMcps =>
+                paletteOpen.set(false) *> mcpsOpen.set(true)
+              case HostMsg.ToolCall(_, row) =>
                 toolOut.update { m =>
                   m.updated(row.id, m.getOrElse(row.id, row.output.getOrElse("")))
                 }
@@ -989,6 +1089,9 @@ object ChatApp:
       val mentionShown = Squawk.zipWith(draft, Squawk.zipWith(chat, dismissed)(Tuple2.apply)) { (d, pack) =>
         val (c, disc) = pack
         ComposerQuery.mentionChoices(d, c.mentionQuery, c.mentionFiles, disc)
+      }
+      val paletteShown = Squawk.zipWith(chat, paletteQuery) { (c, q) =>
+        Palette.filter(Palette.rows(c.commands), q)
       }
 
       def runCopyExport(cmd: ClientCommand): UIO[Unit] =
@@ -1054,6 +1157,8 @@ object ChatApp:
                      cmd.args.trim.toIntOption match
                        case Some(i) => ZIO.succeed(bridge.post(WebviewMsg.RewindTo(i)))
                        case None    => chat.update(_.copy(error = Some("Usage: /rewind"))))
+              case Some(cmd) if SessionCommands.isMcps(cmd.name) =>
+                draft.set("") *> openMcps
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1107,7 +1212,12 @@ object ChatApp:
         val key        = e.key
         val ctrlOrMeta = e.ctrlKey || e.metaKey
         chat.get.flatMap { c =>
-          if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
+          if (e.ctrlKey || e.metaKey) && !e.shiftKey && (key == "p" || key == "P") then
+            if typingInField(e) then ZIO.unit
+            else
+              e.preventDefault()
+              togglePalette
+          else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
             else
               e.preventDefault()
@@ -1117,40 +1227,48 @@ object ChatApp:
             openMenu.get.flatMap {
               case Some(_) => hideMenu
               case None    =>
-                pendingDelete.get.flatMap {
-                  case Some(_) => cancelDelete
-                  case None    =>
-                    if c.rewindConfirm.nonEmpty then cancelRewind
-                    else if c.rewind.nonEmpty then closeRewindPicker
-                    else
-                      mentionShown.get.flatMap { mentions =>
-                        if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                        else
-                          draft.get.flatMap { text =>
-                            if PromptHistory.query(text).isDefined then
-                              draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                paletteOpen.get.flatMap {
+                  case true  => closePalette
+                  case false =>
+                    mcpsOpen.get.flatMap {
+                      case true  => closeMcps
+                      case false =>
+                        pendingDelete.get.flatMap {
+                          case Some(_) => cancelDelete
+                          case None    =>
+                            if c.rewindConfirm.nonEmpty then cancelRewind
+                            else if c.rewind.nonEmpty then closeRewindPicker
                             else
-                              historyBrowse.get.flatMap {
-                                case Some(_) => historyBrowse.set(None)
-                                case None    =>
-                                  if c.pickerOpen then closePicker
-                                  else if c.permission.isDefined then parkPermission
-                                  else if c.question.isDefined then ZIO.unit
-                                  else
-                                    todosOpen.get.flatMap {
-                                      case true  => todosOpen.set(false)
-                                      case false =>
-                                        if ChatModel.turnIsRunning(c) then
-                                          nowMs.get.flatMap { now =>
-                                            lastCancelMs.set(Some(now)) *>
-                                              lastIdleEsc.set(None) *>
-                                              ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                          }
-                                        else idleRewindEsc(c, text)
-                                    }
+                              mentionShown.get.flatMap { mentions =>
+                                if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                                else
+                                  draft.get.flatMap { text =>
+                                    if PromptHistory.query(text).isDefined then
+                                      draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                                    else
+                                      historyBrowse.get.flatMap {
+                                        case Some(_) => historyBrowse.set(None)
+                                        case None    =>
+                                          if c.pickerOpen then closePicker
+                                          else if c.permission.isDefined then parkPermission
+                                          else if c.question.isDefined then ZIO.unit
+                                          else
+                                            todosOpen.get.flatMap {
+                                              case true  => todosOpen.set(false)
+                                              case false =>
+                                                if ChatModel.turnIsRunning(c) then
+                                                  nowMs.get.flatMap { now =>
+                                                    lastCancelMs.set(Some(now)) *>
+                                                      lastIdleEsc.set(None) *>
+                                                      ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                                  }
+                                                else idleRewindEsc(c, text)
+                                            }
+                                      }
+                                  }
                               }
-                          }
-                      }
+                        }
+                    }
                 }
             }
           else
@@ -1389,6 +1507,42 @@ object ChatApp:
               chat.update(_.copy(modelId = m.modelId, effort = nextEffort, error = None)) *>
               ZIO.succeed(bridge.post(WebviewMsg.SetModel(m.modelId, e.getOrElse(""))))
 
+      def closePalette: UIO[Unit] =
+        paletteOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(None)
+
+      def openPalette: UIO[Unit] =
+        hideMenu *>
+          mcpsOpen.set(false) *>
+          paletteQuery.set("") *>
+          paletteIdx.set(Some(0)) *>
+          paletteOpen.set(true)
+
+      def togglePalette: UIO[Unit] =
+        paletteOpen.get.flatMap {
+          case true  => closePalette
+          case false => openPalette
+        }
+
+      def closeMcps: UIO[Unit] = mcpsOpen.set(false)
+
+      def openMcps: UIO[Unit] =
+        hideMenu *>
+          closePalette *>
+          mcpsOpen.set(true) *>
+          ZIO.succeed(bridge.post(WebviewMsg.ListMcps))
+
+      def pickPalette(row: PaletteRow): UIO[Unit] =
+        closePalette *> (
+          row.kind match
+            case PaletteKind.Mcps        => openMcps
+            case PaletteKind.Todos       => toggleTodos
+            case PaletteKind.Settings    => showMenu(OpenMenu.Settings)
+            case PaletteKind.Slash(name) => pickSlash(name)
+        )
+
+      def toggleMcp(name: String, enabled: Boolean): UIO[Unit] =
+        ZIO.succeed(bridge.post(WebviewMsg.SetMcpEnabled(name, enabled)))
+
       def pickSlash(name: String): UIO[Unit] =
         if SessionCommands.isNew(name) then draft.set("") *> startNew
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then draft.set("") *> openPicker
@@ -1400,6 +1554,7 @@ object ChatApp:
         else if SessionCommands.isCopy(name) then runCopyExport(ClientCommand("copy"))
         else if SessionCommands.isExport(name) then runCopyExport(ClientCommand("export"))
         else if SessionCommands.isRewind(name) then draft.set("") *> openRewindPicker
+        else if SessionCommands.isMcps(name) then draft.set("") *> openMcps
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1673,6 +1828,17 @@ object ChatApp:
           )
         ),
         renderChromeMenus(chat, openMenu, menuIdx, chooseMode, chooseModel, chooseEffort, chooseSetting),
+        when(paletteOpen)(
+          renderPalette(
+            paletteShown,
+            paletteQuery,
+            paletteIdx,
+            closePalette,
+            pickPalette,
+            s => paletteQuery.set(s) *> paletteIdx.set(Some(0)),
+          )
+        ),
+        when(mcpsOpen)(renderMcps(chat, closeMcps, toggleMcp)),
         when(historyShown.map(_.nonEmpty))(
           E.ul(
             ComposerMenu,
@@ -1755,6 +1921,8 @@ object ChatApp:
           pickHistory,
           onMenuKey,
           toggleTodos,
+          togglePalette,
+          openPalette,
         ),
       )
     end for
@@ -1953,6 +2121,8 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      togglePalette: UIO[Unit],
+      openPalette: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -1976,6 +2146,8 @@ object ChatApp:
         pickHistory,
         onMenuKey,
         toggleTodos,
+        togglePalette,
+        openPalette,
       ),
       renderComposerBar(bridge, chat, sendDraft),
     )
@@ -2028,6 +2200,8 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      togglePalette: UIO[Unit],
+      openPalette: UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -2060,6 +2234,8 @@ object ChatApp:
           pickHistory,
           onMenuKey,
           toggleTodos,
+          togglePalette,
+          openPalette,
         )
       ),
     )
@@ -2106,6 +2282,8 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      togglePalette: UIO[Unit],
+      openPalette: UIO[Unit],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
@@ -2157,6 +2335,8 @@ object ChatApp:
           PromptHistory.newer(browse.get) match
             case None    => go(historyBrowse.set(None) *> draft.set(""))
             case Some(n) => go(historyBrowse.set(Some(n)) *> draft.set(list(n)))
+        else if (e.ctrlKey || e.metaKey) && !e.shiftKey && (key == "p" || key == "P") then go(togglePalette)
+        else if key == "?" && !ctrlOrMeta && text.isEmpty && c.chips.isEmpty then go(openPalette)
         else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
           go(toggleTodos)
         else
@@ -2566,6 +2746,137 @@ object ChatApp:
       ),
     )
   end renderRewind
+
+  private def renderPalette(
+      rows: Squawk[List[PaletteRow]],
+      query: ascent.Source[String],
+      idx: ascent.Source[Option[Int]],
+      close: UIO[Unit],
+      pick: PaletteRow => UIO[Unit],
+      onQuery: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    def onKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
+      val key                         = e.key
+      val ctrlOrMeta                  = e.ctrlKey || e.metaKey
+      def go(z: UIO[Unit]): UIO[Unit] =
+        e.preventDefault()
+        z
+      if key == "Escape" || (ctrlOrMeta && !e.shiftKey && (key == "p" || key == "P")) then go(close)
+      else
+        for
+          list <- rows.get
+          cur  <- idx.get
+          _    <-
+            if list.isEmpty then ZIO.unit
+            else if key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End" then
+              go(idx.set(ComposerQuery.moveIndex(cur, key, list.size)))
+            else if (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
+              list.lift(cur.getOrElse(0)) match
+                case Some(row) => go(pick(row))
+                case None      => ZIO.unit
+            else ZIO.unit
+        yield ()
+      end if
+    end onKey
+    E.div(
+      PaletteScrim,
+      TestId("palette-scrim"),
+      Ev.onClick(_ => close),
+      E.div(
+        PalettePanel,
+        TestId("palette"),
+        Ev.onClick { e =>
+          e.stopPropagation()
+          ZIO.unit
+        },
+        E.input(
+          Filter,
+          TestId("palette-filter"),
+          A.`type`("search"),
+          A.value(query),
+          A.placeholder("Filter commands"),
+          Events.onInput(e => onQuery(e.targetValue.getOrElse(""))),
+          Ev.onKeyDown(onKey),
+        ),
+        E.div(
+          PaletteList,
+          TestId("palette-list"),
+          when(rows.map(_.isEmpty))(E.p(Copy, "No matching commands")),
+          forEach(
+            Squawk.zipWith(rows, idx) { (list, i) =>
+              list.zipWithIndex.map { (row, n) => (row, i.contains(n)) }
+            }
+          )(t => s"${t._1.id}-${t._2}") { t =>
+            val (row, on) = t
+            E.button(
+              if on then PaletteItemOn else PaletteItem,
+              TestId(s"palette-${row.id}"),
+              A.`type`("button"),
+              Ev.onClick(_ => pick(row)),
+              E.span(row.label, E.span(PaletteDesc, row.description)),
+              E.span(PaletteHint, row.hint),
+            )
+          },
+        ),
+      ),
+    )
+  end renderPalette
+
+  private def renderMcps(
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+      toggle: (String, Boolean) => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    E.div(
+      PaletteScrim,
+      TestId("mcps-scrim"),
+      Ev.onClick(_ => close),
+      E.div(
+        PalettePanel,
+        TestId("mcps"),
+        Ev.onClick { e =>
+          e.stopPropagation()
+          ZIO.unit
+        },
+        E.div(
+          PickerHead,
+          E.span(chat.map(c => Mcps.headline(c.mcps))),
+          E.button(Chip, TestId("mcps-close"), Ev.onClick(_ => close), "Close"),
+        ),
+        E.div(
+          PaletteList,
+          TestId("mcps-list"),
+          when(chat.map(_.mcps.isEmpty))(
+            E.p(
+              Copy,
+              TestId("mcps-empty"),
+              "No MCP servers. Add one with grok mcp add, or a project .mcp.json.",
+            )
+          ),
+          forEach(chat.map(_.mcps))(row => s"${row.name}-${row.enabled}") { row =>
+            E.div(
+              PaletteItem,
+              TestId(s"mcp-${row.name}"),
+              E.span(
+                E.strong(row.name),
+                E.span(
+                  PaletteDesc,
+                  s"${Mcps.sourceLabel(row.source)} · ${Mcps.status(row)}",
+                ),
+              ),
+              E.button(
+                Chip,
+                TestId(s"mcp-toggle-${row.name}"),
+                A.`type`("button"),
+                Ev.onClick(_ => toggle(row.name, !row.enabled)),
+                if row.enabled then "On" else "Off",
+              ),
+            )
+          },
+        ),
+      ),
+    )
+  end renderMcps
 
   private def renderTodos(
       chat: ascent.Source[ChatModel],

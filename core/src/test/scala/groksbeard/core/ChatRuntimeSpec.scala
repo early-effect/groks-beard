@@ -174,6 +174,35 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("listMcps posts the inspect inventory") {
+        val metals = McpServerView("metals", "http", "http://localhost:56126/mcp")
+        ZIO.scoped {
+          for
+            posted <- Ref.make(List.empty[HostMsg])
+            rt     <- ChatRuntime
+              .make()
+              .provideSome[Scope](
+                ChatEnv.test(
+                  post = msg => posted.update(_ :+ msg),
+                  mcps = Mcps.test(List(metals)),
+                )
+              )
+            _     <- rt.listMcps
+            msgs  <- posted.get
+            _     <- rt.setMcpEnabled("metals", enabled = false)
+            after <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.McpServers(rows) => rows.exists(_.name == "metals") && rows.head.enabled
+              case _                        => false
+            },
+            after.lastOption.exists {
+              case HostMsg.McpServers(rows) => rows.exists(r => r.name == "metals" && !r.enabled)
+              case _                        => false
+            },
+          )
+        }
+      },
       test("empty send is a no-op") {
         chat() { (rt, posted) =>
           for

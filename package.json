@@ -110,6 +110,14 @@
         "title": "Grok's Beard: Toggle Todos"
       },
       {
+        "command": "groksBeard.commandPalette",
+        "title": "Grok's Beard: Command Palette"
+      },
+      {
+        "command": "groksBeard.mcpServers",
+        "title": "Grok's Beard: MCP Servers"
+      },
+      {
         "command": "groksBeard.addSelection",
         "title": "Grok's Beard: Add Selection to Chat"
       },
@@ -254,6 +262,12 @@
       {
         "command": "groksBeard.toggleTodos",
         "key": "ctrl+t",
+        "when": "focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary"
+      },
+      {
+        "command": "groksBeard.commandPalette",
+        "key": "ctrl+p",
+        "mac": "cmd+p",
         "when": "focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary"
       }
     ]

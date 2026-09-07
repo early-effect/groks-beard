@@ -54,7 +54,13 @@ object LiveSession:
               ChangesPersist.noop ++
               TranscriptOut.of(NioSessionFs, home, cwd, env) ++
               ReviewOps.ignore ++
-              ProcessTerminals.layer(cwd)
+              ProcessTerminals.layer(cwd) ++
+              ZLayer.succeed(
+                Mcps.cli(
+                  args => ProcessCapture.run(cmd, args, cwd),
+                  ZIO.attempt(Files.readString(JPath.of(home, "config.toml"))).orElseSucceed(""),
+                )
+              )
           ProcessTransport
             .spawn(
               cmd,

@@ -19,6 +19,7 @@ final class ChatRuntime private (
     includeActiveFile: () => Boolean,
     settings: () => SettingsState,
     terminals: Terminals,
+    mcps: Mcps,
     scope: Scope,
     gate: Semaphore,
     reentrant: FiberRef[Boolean],
@@ -251,7 +252,14 @@ final class ChatRuntime private (
     if SessionCommands.isNew(name) then doNewSession
     else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then doPostList(open = true)
     else if SessionCommands.isRewind(name) then doOpenRewind
+    else if SessionCommands.isMcps(name) then doListMcps
     else ZIO.unit
+  }
+
+  def listMcps: UIO[Unit] = exclusive(doListMcps)
+
+  def setMcpEnabled(name: String, enabled: Boolean): UIO[Unit] = exclusive {
+    absorb(mcps.setEnabled(name, enabled).flatMap(rows => post(HostMsg.McpServers(rows))))
   }
 
   def openRewind: UIO[Unit] = exclusive(doOpenRewind)
@@ -323,6 +331,8 @@ final class ChatRuntime private (
             cmd.args.trim.toIntOption match
               case Some(i) => doRewindTo(i)
               case None    => post(HostMsg.Error("Usage: /rewind"))
+        case Some(cmd) if SessionCommands.isMcps(cmd.name) =>
+          doListMcps
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
@@ -332,6 +342,9 @@ final class ChatRuntime private (
             runTurn(trimmed, chosen)
       end match
     }
+
+  private def doListMcps: UIO[Unit] =
+    absorb(mcps.list.flatMap(rows => post(HostMsg.McpServers(rows))))
 
   private def doOpenRewind: UIO[Unit] =
     if running then post(HostMsg.Error("Stop the turn before rewinding."))
@@ -1150,6 +1163,7 @@ object ChatRuntime:
       copies    <- ZIO.service[TranscriptOut]
       review    <- ZIO.service[ReviewOps]
       terminals <- ZIO.service[Terminals]
+      mcps      <- ZIO.service[Mcps]
       scope     <- ZIO.scope
       gate      <- Semaphore.make(1)
       reentrant <- FiberRef.make(false)
@@ -1168,6 +1182,7 @@ object ChatRuntime:
         includeActiveFile,
         settings,
         terminals,
+        mcps,
         scope,
         gate,
         reentrant,

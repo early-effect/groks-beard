@@ -224,13 +224,21 @@ object ProtocolSpec extends ZIOSpecDefault:
             TodoEntry("Write tests", Todos.Pending, "high"),
           )
         )
-        val toggle: HostMsg = HostMsg.ToggleTodos
-        val plan: AcpUpdate = AcpUpdate.Plan(
+        val toggle: HostMsg  = HostMsg.ToggleTodos
+        val palette: HostMsg = HostMsg.OpenPalette
+        val mcps: HostMsg    = HostMsg.McpServers(List(McpServerView("metals", "http", "http://localhost")))
+        val list: WebviewMsg = WebviewMsg.ListMcps
+        val en: WebviewMsg   = WebviewMsg.SetMcpEnabled("metals", enabled = false)
+        val plan: AcpUpdate  = AcpUpdate.Plan(
           List(TodoEntry("Checkout branch", "in_progress", "medium"))
         )
         assertTrue(
           todos.toJson.fromJson[HostMsg] == Right(todos),
           toggle.toJson.fromJson[HostMsg] == Right(toggle),
+          palette.toJson.fromJson[HostMsg] == Right(palette),
+          mcps.toJson.fromJson[HostMsg] == Right(mcps),
+          list.toJson.fromJson[WebviewMsg] == Right(list),
+          en.toJson.fromJson[WebviewMsg] == Right(en),
           plan.toJson.fromJson[AcpUpdate] == Right(plan),
         )
       },

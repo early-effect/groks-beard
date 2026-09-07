@@ -131,6 +131,7 @@ final case class ChatModel(
     sessionOrder: Option[List[SessionId]] = None,
     rewind: List[RewindPoint] = Nil,
     rewindConfirm: Option[RewindPoint] = None,
+    mcps: List[McpServerView] = Nil,
 )
 
 object ChatModel:
@@ -201,10 +202,10 @@ object ChatModel:
       case None       => false
       case Some(want) =>
         msg match
-          case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | _: HostMsg.Transcript |
-              _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings |
-              _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission |
-              _: HostMsg.Plan | _: HostMsg.Question =>
+          case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | HostMsg.OpenPalette | HostMsg.OpenMcps |
+              _: HostMsg.McpServers | _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied |
+              _: HostMsg.AvailableCommands | _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList |
+              _: HostMsg.Elicit | _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -314,8 +315,10 @@ object ChatModel:
         model.copy(error = Some(message))
       case HostMsg.Todos(entries) =>
         model.copy(todos = Todos.fromEntries(entries))
-      case HostMsg.ToggleTodos =>
+      case HostMsg.ToggleTodos | HostMsg.OpenPalette | HostMsg.OpenMcps =>
         model
+      case HostMsg.McpServers(servers) =>
+        model.copy(mcps = servers)
       case HostMsg.ClearTranscript =>
         model.copy(
           turns = Nil,

@@ -662,12 +662,16 @@ final class ChatRuntime private (
     parsed match
       case Left(err) => reject(requestId, s"invalid terminal/create params: $err")
       case Right(p)  =>
-        terminals
-          .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
-          .foldZIO(
-            e => reject(requestId, e.message),
-            id => bindTerminal(requestId, id, p),
-          )
+        if framed.state.planActive && !PlanTerminals.allowed(p.command, p.args) then
+          reject(requestId, PlanTerminals.Reject)
+        else
+          terminals
+            .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
+            .foldZIO(
+              e => reject(requestId, e.message),
+              id => bindTerminal(requestId, id, p),
+            )
+    end match
   end handleTerminalCreate
 
   private def bindTerminal(requestId: RequestId, id: TerminalId, p: TerminalCreateParams): UIO[Unit] =

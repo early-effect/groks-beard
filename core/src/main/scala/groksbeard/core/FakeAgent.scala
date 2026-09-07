@@ -5,6 +5,7 @@ import zio.json.*
 final class FakeAgent(
     val sessionId: SessionId = SessionId("sess_test"),
     pairSetModeWithTerminal: Boolean = false,
+    pairTerminal: TerminalCreateParams = TerminalCreateParams(command = "rm", args = List("-rf", "/tmp/beard-probe")),
     lockLoad: Boolean = false,
     hangPrompt: Boolean = false,
 ):
@@ -90,7 +91,8 @@ final class FakeAgent(
             Rpc.request(
               RpcId.Str("term-1"),
               "terminal/create",
-              TerminalCreateParams(sessionId, "rm", List("-rf", "/tmp/beard-probe")),
+              pairTerminal.copy(sessionId = if pairTerminal.sessionId.isEmpty then sessionId
+              else pairTerminal.sessionId),
             ),
           )
         end if

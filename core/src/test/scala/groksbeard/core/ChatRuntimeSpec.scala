@@ -718,7 +718,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
-      test("same-chunk set_mode then terminal/create replies with term-1") {
+      test("same-chunk set_mode then mutating terminal/create is rejected") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(pairSetModeWithTerminal = true)), lines += _)
         chat(transport = wrap) { (rt, posted) =>
@@ -731,9 +731,56 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(
             rt.state.planActive,
             rt.state.modeId.contains("plan"),
-            blob.contains("\"terminalId\":\"term-1\""),
-            !blob.contains("Method not found"),
+            blob.contains(PlanTerminals.Reject),
+            !blob.contains("\"terminalId\":\"term-1\""),
           )
+        }
+      },
+      test("same-chunk set_mode then read-only terminal/create replies with term-1") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(
+          AcpTransport.fake(
+            FakeAgent(
+              pairSetModeWithTerminal = true,
+              pairTerminal = TerminalCreateParams(command = "ls"),
+            )
+          ),
+          lines += _,
+        )
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.setMode("plan")
+            blob = lines.mkString
+          yield assertTrue(
+            rt.state.planActive,
+            blob.contains("\"terminalId\":\"term-1\""),
+            !blob.contains(PlanTerminals.Reject),
+          )
+        }
+      },
+      test("mutating terminal/create is allowed when plan is off") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          val req = Rpc.request(
+            RpcId.Str("rm"),
+            "terminal/create",
+            TerminalCreateParams(command = "rm", args = List("-rf", "/tmp/beard-probe")).asJson,
+          )
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.ingestData(Ndjson.encode(Rpc.toLine(req)))
+            blob = lines.mkString
+          yield assertTrue(
+            !rt.state.planActive,
+            blob.contains("\"terminalId\":\"term-1\""),
+            !blob.contains(PlanTerminals.Reject),
+          )
+          end for
         }
       },
       test("PTY stdout is posted as ToolChunk events") {

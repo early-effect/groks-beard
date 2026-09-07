@@ -23,6 +23,16 @@ object LiveMainSpec extends ZIOSpecDefault:
           !c.openBrowser,
           c.root.endsWith(JPath.of("ui", "target", "preview")),
         )
-      }
+      },
+      test("logoFile walks up to media/logo.png") {
+        val tmp     = java.nio.file.Files.createTempDirectory("beard-logo")
+        val media   = tmp.resolve("media")
+        val preview = tmp.resolve("ui").resolve("target").resolve("preview")
+        java.nio.file.Files.createDirectories(media)
+        java.nio.file.Files.createDirectories(preview)
+        java.nio.file.Files.write(media.resolve("logo.png"), Array[Byte](1, 2, 3))
+        val found = LiveMain.logoFile(preview)
+        assertTrue(found.contains(media.resolve("logo.png").toFile))
+      },
     )
 end LiveMainSpec

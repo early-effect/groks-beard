@@ -171,12 +171,6 @@ lazy val ui = (projectMatrix in file("ui"))
           ascentPreviewClasspath := Def.uncached((LocalProject("preview") / Compile / fullClasspath).value),
           ascentPreviewServe     := Def.uncached(BeardPreview.serveLive.value),
           ascentPreview / watchOnTermination := BeardPreview.watchStop,
-          ascentPreviewRebuild               := Def.uncached {
-            val dest = ascentPreviewStage.value
-            val logo = (ThisBuild / baseDirectory).value / "media" / "logo.png"
-            IO.copyFile(logo, dest / "logo.png")
-            ()
-          },
         ),
   )
 

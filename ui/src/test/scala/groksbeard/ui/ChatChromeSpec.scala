@@ -1018,6 +1018,54 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("a running execute tool's live tail updates as stdout grows") {
+        val bridge                                                                = PushBridge()
+        def row(out: String, status: ToolStatus = ToolStatus.InProgress): ToolRow =
+          ToolRow(
+            ToolCallId("term-1"),
+            "run_terminal_command",
+            ToolKind.Execute,
+            status,
+            input = Some("echo beard-terminal-probe"),
+            output = Some(out),
+          )
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "probe"))
+                bridge.push(HostMsg.ToolGroup("t1", List(row((1 to 6).map(i => s"line-$i").mkString("\n")))))
+              }
+              first <- waitContains(root, "tool-tail-term-1", "line-6")
+              _     <- ZIO.succeed {
+                bridge.push(HostMsg.ToolGroup("t1", List(row((1 to 8).map(i => s"line-$i").mkString("\n")))))
+              }
+              grown <- waitContains(root, "tool-tail-term-1", "line-8")
+              _     <- ZIO.succeed {
+                bridge.push(
+                  HostMsg.ToolGroup("t1", List(row((1 to 8).map(i => s"line-$i").mkString("\n"), ToolStatus.Completed)))
+                )
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+              }
+              _ <- waitGone(root, "tool-tail-term-1")
+              details = root.element
+                .querySelector("""[data-testid="tool-term-1"]""")
+                .asInstanceOf[ascent.dom.HTMLElement]
+              _      <- ZIO.succeed { details.setAttribute("open", "") }
+              output <- waitContains(root, "tool-output-term-1", "line-1")
+            yield assertTrue(
+              first.contains("line-4"),
+              !first.contains("line-1"),
+              grown.contains("line-6"),
+              grown.contains("line-8"),
+              !grown.contains("line-5"),
+              output.contains("line-8"),
+            )
+          }
+        yield result
+        end for
+      },
       test("a running execute tool shows a live output tail until expanded") {
         val bridge  = PushBridge()
         val command = "echo beard-terminal-probe\npwd\nuname -s"
@@ -1252,6 +1300,13 @@ object ChatChromeSpec extends ZIOSpecDefault:
         case None    => ZIO.sleep(20.millis) *> loop
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $sel"))(5.seconds)
+
+  private def waitContains(root: AscentRoot, testId: String, needle: String)(using Trace): IO[Throwable, String] =
+    def loop: IO[Throwable, String] =
+      root.getByTestId(testId).innerText.flatMap { t =>
+        if t.contains(needle) then ZIO.succeed(t) else ZIO.sleep(20.millis) *> loop
+      }
+    loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to contain $needle"))(5.seconds)
 
   private def waitPresent(root: AscentRoot, testId: String)(using Trace): IO[Throwable, Boolean] =
     def loop: IO[Throwable, Boolean] =

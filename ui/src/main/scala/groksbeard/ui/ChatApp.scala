@@ -2222,7 +2222,7 @@ object ChatApp:
           E.pre(ThoughtBody, turn.map(_.thought)),
         )
       ),
-      turn.map(t => renderTools(bridge, t.tools)),
+      renderTools(bridge, turn.map(_.tools)),
       when(turn.map(_.agent.nonEmpty))(
         E.div(
           AgentMsg,
@@ -2248,61 +2248,66 @@ object ChatApp:
       }
       .getOrElse("")
 
-  private def renderTools(bridge: HostBridge, tools: List[ToolRow]): ascent.ast.UI[Any] =
-    if tools.isEmpty then E.span()
-    else
-      val (earlier, visible)               = ToolView.splitTail(tools)
-      val rolled: List[ascent.ast.UI[Any]] =
-        if earlier.nonEmpty then
-          List(
-            E.details(
-              ToolBox,
-              E.summary(ToolView.rollupLabel(earlier.size)),
-              Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(bridge, t)))),
-            )
-          )
-        else Nil
-      E.div(Arg.ArgsArg((rolled ++ visible.map(t => renderTool(bridge, t))).map(Arg.ChildArg(_))))
+  private def renderTools(bridge: HostBridge, tools: Squawk[List[ToolRow]]): ascent.ast.UI[Any] =
+    val split = tools.map(ToolView.splitTail(_))
+    E.div(
+      when(split.map(_._1.nonEmpty))(
+        E.details(
+          ToolBox,
+          E.summary(split.map { case (earlier, _) => ToolView.rollupLabel(earlier.size) }),
+          forEachSignal(split.map(_._1))(_.id.value) { (id, _, tool) =>
+            renderTool(bridge, id, tool)
+          },
+        )
+      ),
+      forEachSignal(split.map(_._2))(_.id.value) { (id, _, tool) =>
+        renderTool(bridge, id, tool)
+      },
+    )
+  end renderTools
 
-  private def renderTool(bridge: HostBridge, tool: ToolRow): ascent.ast.UI[Any] =
-    val stats =
-      (tool.additions, tool.deletions) match
-        case (Some(a), Some(d)) => Some((a, d))
-        case _                  => None
-    stats match
-      case Some((a, d)) =>
+  private def renderTool(bridge: HostBridge, id: String, tool: Squawk[ToolRow]): ascent.ast.UI[Any] =
+    val hasStats = tool.map(t => t.additions.isDefined && t.deletions.isDefined)
+    val liveTail = tool.map { t =>
+      if !ToolStatus.isLive(t.status) then ""
+      else ToolView.watchText(t).map(ToolView.liveTail(_)).filter(_.nonEmpty).getOrElse("")
+    }
+    E.div(
+      when(hasStats)(
         E.div(
           ToolBox,
           FileRow,
-          TestId(s"tool-${tool.id}"),
-          E.span(tool.title),
-          statsEl(a, d),
+          TestId(s"tool-$id"),
+          E.span(tool.map(_.title)),
+          E.span(StatAdd, tool.map(t => t.additions.fold("")(a => s"+$a"))),
+          E.span(StatDel, tool.map(t => t.deletions.fold("")(d => s"/-$d"))),
           E.button(
             Chip,
-            TestId(s"tool-diff-${tool.id}"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(RequestId(tool.id.value))))),
+            TestId(s"tool-diff-$id"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(RequestId(id))))),
             "Review",
           ),
         )
-      case None =>
-        val tail =
-          if !ToolStatus.isLive(tool.status) then None
-          else ToolView.watchText(tool).map(ToolView.liveTail(_)).filter(_.nonEmpty)
+      ),
+      when(hasStats.map(!_))(
         E.details(
           ToolBox,
-          TestId(s"tool-${tool.id}"),
+          TestId(s"tool-$id"),
           E.summary(
-            E.span(tool.title),
-            tail.fold(E.span())(t => E.pre(TestId(s"tool-tail-${tool.id}"), t)),
+            E.span(tool.map(_.title)),
+            when(liveTail.map(_.nonEmpty))(
+              E.pre(TestId(s"tool-tail-$id"), liveTail)
+            ),
           ),
-          tool.input
-            .filter(_.nonEmpty)
-            .fold(E.span())(in => E.pre(TestId(s"tool-input-${tool.id}"), ToolView.clip(in))),
-          tool.output
-            .filter(_.nonEmpty)
-            .fold(E.span())(out => E.pre(TestId(s"tool-output-${tool.id}"), ToolView.clip(out))),
+          when(tool.map(_.input.exists(_.nonEmpty)))(
+            E.pre(TestId(s"tool-input-$id"), tool.map(_.input.map(s => ToolView.clip(s)).getOrElse("")))
+          ),
+          when(tool.map(_.output.exists(_.nonEmpty)))(
+            E.pre(TestId(s"tool-output-$id"), tool.map(_.output.map(s => ToolView.clip(s)).getOrElse("")))
+          ),
         )
-    end match
+      ),
+    )
   end renderTool
 
   private def renderCards(

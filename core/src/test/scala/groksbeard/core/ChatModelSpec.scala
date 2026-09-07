@@ -45,29 +45,27 @@ object ChatModelSpec extends ZIOSpecDefault:
         val stream  = "beard-terminal-probe\n/tmp"
         val stdout  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
         val live    = ChatModel.applyMsg(
-          ChatModel.empty,
-          HostMsg.ToolGroup(
-            "t1",
-            List(
+          ChatModel.applyMsg(
+            ChatModel.empty,
+            HostMsg.ToolCall(
+              "t1",
               ToolRow(
                 "term-1",
                 "run_terminal_command",
                 "execute",
                 "in_progress",
                 input = Some(command),
-                output = Some(stream),
-              )
+              ),
             ),
           ),
+          HostMsg.ToolChunk("t1", "term-1", stream, snapshot = true),
         )
         val done = ChatModel.applyMsg(
-          live,
-          HostMsg.ToolGroup(
-            "t1",
-            List(
-              ToolRow("term-1", "Tool", "other", "completed", output = Some(stdout))
-            ),
+          ChatModel.applyMsg(
+            live,
+            HostMsg.ToolCall("t1", ToolRow("term-1", "Tool", "other", "completed")),
           ),
+          HostMsg.ToolChunk("t1", "term-1", stdout, snapshot = true),
         )
         val row = done.turns.head.tools.head
         assertTrue(
@@ -80,19 +78,58 @@ object ChatModelSpec extends ZIOSpecDefault:
           ToolView.liveTail(stream).contains("/tmp"),
         )
       },
+      test("Rewound truncates turns through the chosen prompt") {
+        val model = ChatModel.empty.copy(
+          turns = List(
+            TurnView("t1", user = Some(TurnUser("first")), agent = "a", stopReason = Some(StopReason.EndTurn)),
+            TurnView("t2", user = Some(TurnUser("second")), agent = "b", stopReason = Some(StopReason.EndTurn)),
+          ),
+          rewind = List(RewindPoint(0, "first"), RewindPoint(1, "second")),
+          rewindConfirm = Some(RewindPoint(0, "first")),
+        )
+        val next = ChatModel.applyMsg(model, HostMsg.Rewound(0))
+        assertTrue(
+          next.turns.map(_.id.value) == List("t1"),
+          next.rewind.isEmpty,
+          next.rewindConfirm.isEmpty,
+        )
+      },
+      test("RewindList keeps confirm when the point is still present") {
+        val armed = RewindPoint(0, "first")
+        val model = ChatModel.empty.copy(rewind = List(armed), rewindConfirm = Some(armed))
+        val keep  = ChatModel.applyMsg(model, HostMsg.RewindList(List(RewindPoint(0, "first prompt"))))
+        val drop  = ChatModel.applyMsg(model, HostMsg.RewindList(List(RewindPoint(1, "later"))))
+        assertTrue(
+          keep.rewindConfirm.exists(_.preview == "first prompt"),
+          drop.rewindConfirm.isEmpty,
+        )
+      },
+      test("tool chunks append deltas and grow snapshots") {
+        val start = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow("term-1", "run_terminal_command", "execute", "in_progress"),
+          ),
+        )
+        val d1   = ChatModel.applyMsg(start, HostMsg.ToolChunk("t1", "term-1", "line-1\n"))
+        val d2   = ChatModel.applyMsg(d1, HostMsg.ToolChunk("t1", "term-1", "line-2\n"))
+        val snap =
+          ChatModel.applyMsg(d2, HostMsg.ToolChunk("t1", "term-1", "line-1\nline-2\nline-3\n", snapshot = true))
+        assertTrue(
+          d1.turns.head.tools.head.output.contains("line-1\n"),
+          d2.turns.head.tools.head.output.contains("line-1\nline-2\n"),
+          snap.turns.head.tools.head.output.contains("line-1\nline-2\nline-3\n"),
+        )
+      },
       test("thought chunks concatenate and tools merge by id") {
         val start = ChatModel.applyMsg(ChatModel.empty, HostMsg.ThoughtChunk("t1", "hmm"))
         val more  = ChatModel.applyMsg(start, HostMsg.ThoughtChunk("t1", " ok"))
-        val tools = ChatModel.applyMsg(
-          more,
-          HostMsg.ToolGroup(
-            "t1",
-            List(
-              ToolRow("a", "Read", "read", "completed", input = Some("Foo.scala")),
-              ToolRow("a", "", "read", "completed", output = Some("ok")),
-            ),
-          ),
-        )
+        val tools = List(
+          HostMsg.ToolCall("t1", ToolRow("a", "Read", "read", "completed", input = Some("Foo.scala"))),
+          HostMsg.ToolCall("t1", ToolRow("a", "", "read", "completed")),
+          HostMsg.ToolChunk("t1", "a", "ok"),
+        ).foldLeft(more)(ChatModel.applyMsg)
         val row = tools.turns.head.tools.head
         assertTrue(
           tools.turns.head.thought == "hmm ok",

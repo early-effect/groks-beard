@@ -41,7 +41,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case HostMsg.UserMessage(_, text, _, _) => s"user:$text"
               case HostMsg.ThoughtChunk(_, text)      => s"thought:$text"
               case HostMsg.AgentChunk(_, text, _)     => s"agent:$text"
-              case HostMsg.ToolGroup(_, tools)        => s"tool:${tools.map(_.title).mkString}"
+              case HostMsg.ToolCall(_, tool)          => s"tool:${tool.title}"
+              case HostMsg.ToolChunk(_, _, text, _)   => s"chunk:$text"
               case HostMsg.TurnEnd(_, reason)         => s"end:${StopReason.wire(reason)}"
             }
           yield assertTrue(
@@ -103,6 +104,73 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                     => false
             },
             users == List("hello", "later"),
+          )
+        }
+      },
+      test("rewind points then execute posts Rewound") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("first")
+            _    <- rt.send("second")
+            _    <- posted.set(Nil)
+            _    <- rt.openRewind
+            _    <- rt.rewindTo(0)
+            msgs <- posted.get
+            model = msgs.foldLeft(
+              ChatModel.empty.copy(
+                turns = List(
+                  TurnView("t1", user = Some(TurnUser("first"))),
+                  TurnView("t2", user = Some(TurnUser("second"))),
+                )
+              )
+            )(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.RewindList(points) => points.map(_.promptIndex) == List(0, 1)
+              case _                          => false
+            },
+            msgs.exists {
+              case HostMsg.Rewound(0) => true
+              case _                  => false
+            },
+            model.turns.size == 1,
+          )
+        }
+      },
+      test("send /rewind intercepts and lists points") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("first")
+            _    <- posted.set(Nil)
+            _    <- rt.send("/rewind")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.RewindList(points) => points.map(_.promptIndex) == List(0, 1)
+              case _                          => false
+            }
+          )
+        }
+      },
+      test("rewind while a turn is running is refused") {
+        chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- rt.openRewind
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("Stop the turn")
+              case _                         => false
+            },
+            !msgs.exists {
+              case HostMsg.RewindList(_) => true
+              case _                     => false
+            },
           )
         }
       },
@@ -593,6 +661,55 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("PTY stdout is posted as ToolChunk events") {
+        ZIO.scoped {
+          for
+            q      <- Queue.unbounded[String]
+            posted <- Ref.make(List.empty[HostMsg])
+            rt     <- ChatRuntime
+              .make()
+              .provideSome[Scope](
+                ChatEnv.test(
+                  post = msg => posted.update(_ :+ msg),
+                  terminals = Terminals.streaming(q),
+                )
+              )
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.request(
+                    RpcId.Str("t"),
+                    "terminal/create",
+                    TerminalCreateParams(command = "echo", args = List("hi")).asJson,
+                  )
+                )
+              )
+            )
+            _    <- q.offer("line-1\n")
+            _    <- q.offer("line-2\n")
+            msgs <-
+              def wait: UIO[List[HostMsg]] =
+                posted.get.flatMap { m =>
+                  val bits = m.collect { case HostMsg.ToolChunk(_, _, t, _) => t }
+                  if bits.exists(_.contains("line-1")) && bits.exists(_.contains("line-2")) then ZIO.succeed(m)
+                  else ZIO.sleep(10.millis) *> wait
+                }
+              wait.timeout(2.seconds).someOrFail(new RuntimeException("no ToolChunk"))
+          yield
+            val bits = msgs.collect { case HostMsg.ToolChunk(_, _, t, _) => t }
+            assertTrue(
+              msgs.exists {
+                case HostMsg.ToolCall(_, row) =>
+                  row.kind == ToolKind.Execute && row.input.exists(_.contains("echo"))
+                case _ => false
+              },
+              bits.exists(_.contains("line-1")),
+              bits.exists(_.contains("line-2")),
+            )
+        }
+      } @@ TestAspect.withLiveClock,
       test("x.ai/terminal/create is handled") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)

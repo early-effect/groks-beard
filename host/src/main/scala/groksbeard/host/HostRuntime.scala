@@ -1,5 +1,6 @@
 package groksbeard.host
 
+import groksbeard.core.BeardLog
 import zio.*
 import zio.stream.*
 
@@ -13,9 +14,16 @@ object HostRuntime extends ZIOAppDefault:
   private val unset: UIO[Any] => Unit = _ => ()
   private val sink                    = new AtomicReference[UIO[Any] => Unit](unset)
   private val scopeRef                = new AtomicReference[Option[Scope.Closeable]](None)
+  private val writeLog                = new AtomicReference[String => Unit](line => java.lang.System.err.println(line))
 
-  def start(): Unit =
+  override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
+    Runtime.removeDefaultLoggers ++ Runtime.addLogger(BeardLog.logger(line => writeLog.get()(line)))
+
+  def start(log: String => Unit): Unit =
+    writeLog.set(log)
     if started.compareAndSet(false, true) then main(Array.empty)
+
+  def start(): Unit = start(writeLog.get())
 
   def shutdown(): Unit =
     scopeRef.get().foreach { scope =>

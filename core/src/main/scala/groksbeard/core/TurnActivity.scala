@@ -1,14 +1,19 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
+
 enum ActivityKind:
   case Wait, Think, Edit, Read, Execute, Search, Delete, Move, Other
+
+object ActivityKind:
+  given Eq[ActivityKind] = (a, b) => a == b
 
 final case class TurnActivity(
     kind: ActivityKind,
     label: String,
     elapsedMs: Long,
     detail: Option[String] = None,
-)
+) derives Eq
 
 object TurnActivity:
 

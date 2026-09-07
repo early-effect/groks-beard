@@ -51,6 +51,7 @@ final class ChatRuntime private (
   private var loadModel                    = ChatModel.empty
   private var pendingResume                = Option.empty[SessionId]
   private var pendingLoad                  = Map.empty[RpcId, SessionId]
+  private var pendingRewind                = Option.empty[Int]
   private var cancelledLoads               = Set.empty[SessionId]
   private val inboundEpoch                 = new java.util.concurrent.atomic.AtomicInteger(0)
   private var listOpen                     = false
@@ -58,6 +59,7 @@ final class ChatRuntime private (
   private var live                         = false
   private var agentGone                    = false
   private var lastFollow                   = Option.empty[FollowTarget]
+  private var liveExecute                  = Option.empty[ToolCallId]
 
   private def exclusive(body: UIO[Unit]): UIO[Unit] =
     reentrant.get.flatMap { held =>
@@ -246,8 +248,15 @@ final class ChatRuntime private (
   def slashPick(name: String): UIO[Unit] = exclusive {
     if SessionCommands.isNew(name) then doNewSession
     else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then doPostList(open = true)
+    else if SessionCommands.isRewind(name) then doOpenRewind
     else ZIO.unit
   }
+
+  def openRewind: UIO[Unit] = exclusive(doOpenRewind)
+
+  def closeRewind: UIO[Unit] = exclusive(post(HostMsg.RewindList(Nil)))
+
+  def rewindTo(promptIndex: Int): UIO[Unit] = exclusive(doRewindTo(promptIndex))
 
   def focusedId: Option[SessionId] = sessionId
 
@@ -306,6 +315,12 @@ final class ChatRuntime private (
           ZIO.unit
         case Some(cmd) if SessionCommands.isCopy(cmd.name) || SessionCommands.isExport(cmd.name) =>
           ZIO.unit
+        case Some(cmd) if SessionCommands.isRewind(cmd.name) =>
+          if cmd.args.isEmpty then doOpenRewind
+          else
+            cmd.args.trim.toIntOption match
+              case Some(i) => doRewindTo(i)
+              case None    => post(HostMsg.Error("Usage: /rewind"))
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
@@ -315,6 +330,19 @@ final class ChatRuntime private (
             runTurn(trimmed, chosen)
       end match
     }
+
+  private def doOpenRewind: UIO[Unit] =
+    if running then post(HostMsg.Error("Stop the turn before rewinding."))
+    else
+      val sid = sessionId.getOrElse(fallbackSessionId)
+      rpc("x.ai/rewind/points", RewindPointsParams(sid).asJson)
+
+  private def doRewindTo(promptIndex: Int): UIO[Unit] =
+    if running then post(HostMsg.Error("Stop the turn before rewinding."))
+    else
+      val sid = sessionId.getOrElse(fallbackSessionId)
+      pendingRewind = Some(promptIndex)
+      rpc("x.ai/rewind/execute", RewindExecuteParams(sid, promptIndex).asJson)
 
   private def doAgentGone: UIO[Unit] =
     ZIO.suspendSucceed {
@@ -520,6 +548,7 @@ final class ChatRuntime private (
   private def runTurn(text: String, chosen: List[PromptChip]): UIO[Unit] =
     ZIO.suspendSucceed {
       running = true
+      liveExecute = None
       turnSeq += 1
       currentTurn = TurnId.mint(turnSeq)
       currentTitle =
@@ -548,6 +577,7 @@ final class ChatRuntime private (
     queueSeq = 0
     occupancy = None
     running = false
+    liveExecute = None
     loadModel = ChatModel.empty
     lastFollow = None
   end resetTurnState
@@ -598,9 +628,46 @@ final class ChatRuntime private (
           .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
           .foldZIO(
             e => reject(requestId, e.message),
-            id => respond(requestId, TerminalCreateResult(id).asJson),
+            id => bindTerminal(requestId, id, p),
           )
   end handleTerminalCreate
+
+  private def bindTerminal(requestId: RequestId, id: TerminalId, p: TerminalCreateParams): UIO[Unit] =
+    val toolId = liveExecute.getOrElse(ToolCallId(id.value))
+    val start  =
+      if liveExecute.isDefined then ZIO.unit
+      else
+        val cmd =
+          if p.args.isEmpty then p.command
+          else s"${p.command} ${p.args.mkString(" ")}"
+        liveExecute = Some(toolId)
+        post(
+          HostMsg.ToolCall(
+            currentTurn,
+            ToolRow(
+              toolId,
+              "run_terminal_command",
+              ToolKind.Execute,
+              ToolStatus.InProgress,
+              input = Some(cmd).filter(_.nonEmpty),
+            ),
+          )
+        )
+    start *> respond(requestId, TerminalCreateResult(id).asJson) *> watchTerminal(id, toolId)
+  end bindTerminal
+
+  private def watchTerminal(id: TerminalId, toolId: ToolCallId): UIO[Unit] =
+    val turn = currentTurn
+    terminals.stream(id).flatMap {
+      case None         => ZIO.unit
+      case Some(chunks) =>
+        chunks
+          .filter(_.nonEmpty)
+          .foreach(text => exclusive(post(HostMsg.ToolChunk(turn, toolId, text))))
+          .forkIn(scope)
+          .unit
+    }
+  end watchTerminal
 
   private def handleTerminalOutput(requestId: RequestId, params: Json): UIO[Unit] =
     terminalIdOf(params) match
@@ -747,23 +814,41 @@ final class ChatRuntime private (
     }
 
   private def ingestLive(p: Json): UIO[Unit] =
-    ZIO.foreachDiscard(SessionUpdate.hostMsgs(p, currentTurn)) { msg =>
+    val msgs = SessionUpdate.hostMsgs(p, currentTurn)
+    val note =
+      if msgs.nonEmpty then ZIO.unit
+      else
+        SessionState.decodeUpdate(p) match
+          case Some(_) => ZIO.unit
+          case None    => ZIO.logWarning(s"ignored session/update ${sessionUpdateKind(p)}")
+    note *> ZIO.foreachDiscard(msgs) { msg =>
       val out = msg match
         case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
         case other                           => other
       out match
-        case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
-        case _                      => ()
+        case m: HostMsg.SessionMeta   => m.occupancy.foreach(o => occupancy = Some(o))
+        case HostMsg.ToolCall(_, row) => noteLiveTool(row)
+        case _                        => ()
       post(out)
     }
+  end ingestLive
+
+  private def noteLiveTool(row: ToolRow): Unit =
+    if ToolStatus.isLive(row.status) && isExecuteTool(row) then liveExecute = Some(row.id)
+    else if liveExecute.contains(row.id) && !ToolStatus.isLive(row.status) then liveExecute = None
+
+  private def isExecuteTool(row: ToolRow): Boolean =
+    row.kind == ToolKind.Execute ||
+      row.title.contains("terminal") ||
+      row.title.toLowerCase.contains("execute")
 
   private def ingestResponse(id: RpcId, result: Option[Json], error: Option[RpcError]): UIO[Unit] =
     ZIO.suspendSucceed {
       val method = pendingMethod.getOrElse(id, "")
       pendingMethod -= id
       val errPost =
-        if method != "session/load" then error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
-        else ZIO.unit
+        if method == "session/load" || method.endsWith("rewind/points") then ZIO.unit
+        else error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
       errPost *> (method match
         case "initialize" =>
           rpc("session/new", SessionNewParams(cwd).asJson)
@@ -788,6 +873,20 @@ final class ChatRuntime private (
                   }
         case "session/load" =>
           ingestLoad(id, result, error)
+        case m if m.endsWith("rewind/points") =>
+          if error.isDefined then ZIO.unit
+          else post(HostMsg.RewindList(Rewind.decodePoints(result.getOrElse(Json.Null))))
+        case m if m.endsWith("rewind/execute") =>
+          val idx = pendingRewind
+          pendingRewind = None
+          if error.isDefined then ZIO.unit
+          else
+            idx match
+              case None    => ZIO.unit
+              case Some(i) =>
+                pendingQueue = Vector.empty
+                store.keepAll()
+                postQueue *> postChanges *> post(HostMsg.ClearDiff) *> post(HostMsg.Rewound(i))
         case "session/prompt" =>
           val reason =
             result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse(StopReason.EndTurn)
@@ -995,6 +1094,19 @@ final class ChatRuntime private (
         post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models, effort))
       }
   end postMeta
+
+  private def sessionUpdateKind(params: Json): String =
+    def field(obj: Json.Obj, key: String): Option[Json] =
+      obj.fields.collectFirst { case (k, v) if k == key => v }
+    params match
+      case obj: Json.Obj =>
+        field(obj, "update")
+          .collect { case inner: Json.Obj => inner }
+          .flatMap(u => field(u, "sessionUpdate"))
+          .collect { case Json.Str(s) => s }
+          .getOrElse("unknown")
+      case _ => "unknown"
+  end sessionUpdateKind
 
   private def jsonStr(json: Json, key: String): Option[String] =
     json match

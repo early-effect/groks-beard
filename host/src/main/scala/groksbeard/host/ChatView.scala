@@ -68,23 +68,25 @@ final class ChatView(
     toHost = post
     bindAgent(post)
     webview.onDidReceiveMessage { raw =>
-      js.JSON.stringify(raw).fromJson[WebviewMsg].foreach { msg =>
-        runtime match
-          case Some(rt) =>
-            msg match
-              case WebviewMsg.MentionQuery(q)        => searchMentions(q, post)
-              case WebviewMsg.AddSelection           => addSelection()
-              case WebviewMsg.SetSetting(key, value) =>
-                writeSetting(key, value)
-                HostRuntime.runUIO(HostDispatch(rt, msg, post))
-              case other => HostRuntime.runUIO(HostDispatch(rt, other, post))
-          case None =>
-            val err = missingCli.getOrElse("Grok CLI not found.")
-            msg match
-              case WebviewMsg.Ready =>
-                HostRuntime.runUIO(post(HostMsg.Ready) *> post(HostMsg.Error(err)))
-              case _ => HostRuntime.runUIO(post(HostMsg.Error(err)))
-      }
+      Wire.webview(js.JSON.stringify(raw)) match
+        case Left(err) =>
+          HostRuntime.runUIO(ZIO.logError(err) *> post(HostMsg.Error(err, Some(Wire.Decode))))
+        case Right(msg) =>
+          runtime match
+            case Some(rt) =>
+              msg match
+                case WebviewMsg.MentionQuery(q)        => searchMentions(q, post)
+                case WebviewMsg.AddSelection           => addSelection()
+                case WebviewMsg.SetSetting(key, value) =>
+                  writeSetting(key, value)
+                  HostRuntime.runUIO(HostDispatch(rt, msg, post))
+                case other => HostRuntime.runUIO(HostDispatch(rt, other, post))
+            case None =>
+              val err = missingCli.getOrElse("Grok CLI not found.")
+              msg match
+                case WebviewMsg.Ready =>
+                  HostRuntime.runUIO(post(HostMsg.Ready) *> post(HostMsg.Error(err)))
+                case _ => HostRuntime.runUIO(post(HostMsg.Error(err)))
     }
     ()
   end resolveWebviewView

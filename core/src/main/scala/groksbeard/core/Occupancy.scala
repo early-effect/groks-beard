@@ -1,9 +1,10 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 import zio.json.ast.Json
 
-final case class Occupancy(used: Int, size: Int) derives JsonCodec
+final case class Occupancy(used: Int, size: Int) derives JsonCodec, Eq
 
 object Occupancy:
   def percent(used: Int, size: Int): Int =

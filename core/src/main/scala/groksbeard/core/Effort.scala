@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 import zio.json.ast.Json
 
@@ -8,7 +9,8 @@ final case class EffortLevel(
     label: Option[String] = None,
     description: Option[String] = None,
     default: Option[Boolean] = None,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 object Effort:
   val Tui: List[String] = List("low", "medium", "high", "xhigh")

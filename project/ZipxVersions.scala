@@ -33,6 +33,7 @@ object MyVersions extends ZipxVersions:
   def zioTests      = library(zioTest.test, zioTestSbt.test)
   def zioLib        = library(zio)
   def jsonLib       = library(zioJson)
+  def ascentCore    = library(ascent)
   def javaTime      = library(scalaJavaTime, scalaJavaTimeTzdb)
   def ascentUi      = library(ascent, ascentCss, ascentJs, ascentHistory, zio)
   def previewServer = library(ascentPreview)

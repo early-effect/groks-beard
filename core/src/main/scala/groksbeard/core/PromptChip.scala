@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 
 final case class PromptChip(
@@ -10,7 +11,8 @@ final case class PromptChip(
     endLine: Option[Int] = None,
     @jsonExclude languageId: Option[String] = None,
     @jsonExclude excerpt: Option[String] = None,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 object PromptChip:
   val EmbedByteCap: Int = 32 * 1024

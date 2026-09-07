@@ -1,5 +1,7 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
+
 enum ChangeKind:
   case Add, Modify, Delete, Move
 
@@ -19,6 +21,7 @@ object ChangeKind:
       case _        => ChangeKind.Modify
 
   given zio.json.JsonCodec[ChangeKind] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[ChangeKind]                 = (a, b) => a == b
 end ChangeKind
 
 final case class FileChange(

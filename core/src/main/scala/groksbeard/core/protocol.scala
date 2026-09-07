@@ -70,7 +70,13 @@ enum HostMsg derives JsonCodec:
   )
   @jsonHint("agentChunk") case AgentChunk(turnId: TurnId, text: String, messageId: Option[String] = None)
   @jsonHint("thoughtChunk") case ThoughtChunk(turnId: TurnId, text: String)
-  @jsonHint("toolGroup") case ToolGroup(turnId: TurnId, tools: List[ToolRow])
+  @jsonHint("toolCall") case ToolCall(turnId: TurnId, tool: ToolRow)
+  @jsonHint("toolChunk") case ToolChunk(
+      turnId: TurnId,
+      toolCallId: ToolCallId,
+      text: String,
+      snapshot: Boolean = false,
+  )
   @jsonHint("permissionCard") case Permission(
       requestId: RequestId,
       toolCallId: ToolCallId,
@@ -103,6 +109,8 @@ enum HostMsg derives JsonCodec:
   @jsonHint("toggleTodos") case ToggleTodos
   @jsonHint("clearTranscript") case ClearTranscript
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
+  @jsonHint("rewindList") case RewindList(points: List[RewindPoint] = Nil)
+  @jsonHint("rewound") case Rewound(promptIndex: Int)
 end HostMsg
 
 object HostMsg:
@@ -181,4 +189,8 @@ enum WebviewMsg derives JsonCodec:
       backup: Boolean = false,
       conversation: Boolean = false,
   )
+  @jsonHint("openRewind") case OpenRewind
+  @jsonHint("closeRewind") case CloseRewind
+  @jsonHint("rewindTo") case RewindTo(promptIndex: Int)
+  @jsonHint("log") case Log(message: String, level: String = "error")
 end WebviewMsg

@@ -173,6 +173,7 @@ object ChatEnv:
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
       onCopy: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
+      terminals: ULayer[Terminals] = Terminals.test(),
   ): ULayer[Env] =
     HostOut.layer(post) ++
       SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete, planOnDisk) ++
@@ -187,5 +188,5 @@ object ChatEnv:
         onFollow = (p, l) => ZIO.succeed(followFile(p, l)),
       ) ++
       TranscriptOut.test(onCopy) ++
-      Terminals.test()
+      terminals
 end ChatEnv

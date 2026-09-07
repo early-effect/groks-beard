@@ -60,13 +60,13 @@ Do not serve `target/` with a static file server. Preview restages on change and
 ## What you get
 
 - Grok Build CLI only.
-- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`.
+- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`).
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Follow-along: the editor reveals the file (and line) the agent is in, without stealing focus from a Beard diff.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): rewind.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork`, tasks / `/loop`, command palette.
 
 ## Shortcuts
 
@@ -76,6 +76,7 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): rewind
 | Add selection to chat | `Ctrl+Shift+;` / `Cmd+Shift+;` |
 | Toggle todos | `Ctrl+T` (chat focused) |
 | Stop the running turn | `Escape` (chat focused) |
+| Rewind (idle, empty prompt) | `Esc Esc` within 800ms |
 
 ## Modules
 

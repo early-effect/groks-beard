@@ -18,7 +18,10 @@ import zio.stream.ZStream
 enum OpenMenu:
   case Mode, Settings, Model, Effort
 
-final case class SessionLeave(id: SessionId, fromPicker: Boolean)
+object OpenMenu:
+  given Eq[OpenMenu] = (a, b) => a == b
+
+final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos
@@ -41,6 +44,7 @@ object Scene:
 end Scene
 
 object ChatApp:
+  given toolOutEq: Eq[Map[ToolCallId, String]] = (a, b) => a == b
 
   private def isMenuNav(key: String, shift: Boolean): Boolean =
     key == "ArrowUp" || key == "ArrowDown" || key == "Home" || key == "End" ||
@@ -885,10 +889,13 @@ object ChatApp:
       todosOpen      <- sq(scene == Scene.Todos)
       leaving        <- sq(Option.empty[SessionLeave])
       pendingDelete  <- sq(Option.empty[SessionId])
+      lastIdleEsc    <- Ref.make(Option.empty[Long])
+      lastCancelMs   <- Ref.make(Option.empty[Long])
       questionDraft  <- sq(QuestionDraft.empty)
       historyBrowse  <- sq(Option.empty[Int])
       historyPickIdx <- sq(Option.empty[Int])
       nowMs          <- wallMs.flatMap(sq(_))
+      toolOut        <- sq(Map.empty[ToolCallId, String])(using ChatApp.toolOutEq)
       lastHref       <- Ref.make("")
       bound          <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[SessionId])
@@ -923,7 +930,19 @@ object ChatApp:
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
-              case _                             => ZIO.unit
+              case HostMsg.ToolCall(_, row)      =>
+                toolOut.update { m =>
+                  m.updated(row.id, m.getOrElse(row.id, row.output.getOrElse("")))
+                }
+              case HostMsg.ToolChunk(_, id, text, snap) =>
+                toolOut.update(m => m.updated(id, ToolOutput.pull(m.getOrElse(id, ""), text, snap)))
+              case HostMsg.ClearTranscript | _: HostMsg.Rewound =>
+                toolOut.set(Map.empty)
+              case HostMsg.Transcript(turns) =>
+                toolOut.set(turns.flatMap(_.tools).map(t => t.id -> t.output.getOrElse("")).toMap)
+              case HostMsg.Error(message, Some(Wire.Decode)) =>
+                ZIO.succeed(js.Dynamic.global.console.error(message)).unit
+              case _ => ZIO.unit
             } *> chat.get.flatMap { before =>
               val next = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
               val auto = before.todos.isEmpty && next.todos.nonEmpty
@@ -1026,6 +1045,15 @@ object ChatApp:
                     draft.set("") *> applyRename(c.sessionId, op)
               case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
                 draft.set("") *> armDelete(c.sessionId)
+              case Some(cmd) if SessionCommands.isRewind(cmd.name) =>
+                draft.set("") *>
+                  (if ChatModel.turnIsRunning(c) then
+                     chat.update(_.copy(error = Some("Stop the turn before rewinding.")))
+                   else if cmd.args.isEmpty then openRewindPicker
+                   else
+                     cmd.args.trim.toIntOption match
+                       case Some(i) => ZIO.succeed(bridge.post(WebviewMsg.RewindTo(i)))
+                       case None    => chat.update(_.copy(error = Some("Usage: /rewind"))))
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1092,29 +1120,37 @@ object ChatApp:
                 pendingDelete.get.flatMap {
                   case Some(_) => cancelDelete
                   case None    =>
-                    mentionShown.get.flatMap { mentions =>
-                      if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                      else
-                        draft.get.flatMap { text =>
-                          if PromptHistory.query(text).isDefined then
-                            draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
-                          else
-                            historyBrowse.get.flatMap {
-                              case Some(_) => historyBrowse.set(None)
-                              case None    =>
-                                if c.pickerOpen then closePicker
-                                else if c.permission.isDefined then parkPermission
-                                else if c.question.isDefined then ZIO.unit
-                                else
-                                  todosOpen.get.flatMap {
-                                    case true  => todosOpen.set(false)
-                                    case false =>
-                                      if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                      else ZIO.unit
-                                  }
-                            }
-                        }
-                    }
+                    if c.rewindConfirm.nonEmpty then cancelRewind
+                    else if c.rewind.nonEmpty then closeRewindPicker
+                    else
+                      mentionShown.get.flatMap { mentions =>
+                        if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                        else
+                          draft.get.flatMap { text =>
+                            if PromptHistory.query(text).isDefined then
+                              draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                            else
+                              historyBrowse.get.flatMap {
+                                case Some(_) => historyBrowse.set(None)
+                                case None    =>
+                                  if c.pickerOpen then closePicker
+                                  else if c.permission.isDefined then parkPermission
+                                  else if c.question.isDefined then ZIO.unit
+                                  else
+                                    todosOpen.get.flatMap {
+                                      case true  => todosOpen.set(false)
+                                      case false =>
+                                        if ChatModel.turnIsRunning(c) then
+                                          nowMs.get.flatMap { now =>
+                                            lastCancelMs.set(Some(now)) *>
+                                              lastIdleEsc.set(None) *>
+                                              ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                          }
+                                        else idleRewindEsc(c, text)
+                                    }
+                              }
+                          }
+                      }
                 }
             }
           else
@@ -1136,6 +1172,12 @@ object ChatApp:
                     case Some(_) if key == "n" || key == "N" =>
                       e.preventDefault()
                       cancelDelete
+                    case _ if c.rewindConfirm.nonEmpty && (key == "y" || key == "Y") =>
+                      e.preventDefault()
+                      confirmRewind
+                    case _ if c.rewindConfirm.nonEmpty && (key == "n" || key == "N") =>
+                      e.preventDefault()
+                      cancelRewind
                     case _ =>
                       c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
                         case Some(opt) =>
@@ -1357,6 +1399,7 @@ object ChatApp:
         else if SessionCommands.isHistory(name) then draft.set("/history ") *> historyPickIdx.set(Some(0))
         else if SessionCommands.isCopy(name) then runCopyExport(ClientCommand("copy"))
         else if SessionCommands.isExport(name) then runCopyExport(ClientCommand("export"))
+        else if SessionCommands.isRewind(name) then draft.set("") *> openRewindPicker
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1386,6 +1429,50 @@ object ChatApp:
       def armDelete(id: SessionId): UIO[Unit] =
         if id.isEmpty then chat.update(_.copy(error = Some("No session to delete")))
         else pendingDelete.set(Some(id))
+
+      def openRewindPicker: UIO[Unit] =
+        chat.get.flatMap { c =>
+          if ChatModel.turnIsRunning(c) then chat.update(_.copy(error = Some("Stop the turn before rewinding.")))
+          else
+            val local = Rewind.fromTurns(c.turns)
+            if local.isEmpty then chat.update(_.copy(error = Some("Nothing to rewind")))
+            else
+              draft.set("") *>
+                chat.update(_.copy(rewind = local, rewindConfirm = None, error = None, pickerOpen = false)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.OpenRewind))
+        }
+
+      def closeRewindPicker: UIO[Unit] =
+        chat.update(_.copy(rewind = Nil, rewindConfirm = None)) *>
+          ZIO.succeed(bridge.post(WebviewMsg.CloseRewind))
+
+      def armRewind(point: RewindPoint): UIO[Unit] =
+        chat.update(_.copy(rewindConfirm = Some(point)))
+
+      def idleRewindEsc(c: ChatModel, text: String): UIO[Unit] =
+        if text.trim.nonEmpty || Rewind.fromTurns(c.turns).isEmpty then lastIdleEsc.set(None)
+        else
+          nowMs.get.flatMap { now =>
+            lastCancelMs.get.flatMap { cancelAt =>
+              if cancelAt.exists(now - _ < 1000L) then ZIO.unit
+              else
+                lastIdleEsc.get.flatMap { prev =>
+                  if prev.exists(now - _ <= 800L) then lastIdleEsc.set(None) *> openRewindPicker
+                  else lastIdleEsc.set(Some(now))
+                }
+            }
+          }
+
+      def cancelRewind: UIO[Unit] = chat.update(_.copy(rewindConfirm = None))
+
+      def confirmRewind: UIO[Unit] =
+        chat.get.flatMap { c =>
+          c.rewindConfirm match
+            case None    => ZIO.unit
+            case Some(p) =>
+              chat.update(_.copy(rewind = Nil, rewindConfirm = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.RewindTo(p.promptIndex)))
+        }
 
       def cancelDelete: UIO[Unit] = pendingDelete.set(None)
 
@@ -1534,7 +1621,7 @@ object ChatApp:
               TestId("transcript"),
               Lifecycle.onMountScoped[ascent.dom.Element, Any](TranscriptScroll.bind),
               forEachSignal(chat.map(_.turns))(_.id.value) { (id, _, turn) =>
-                renderTurn(bridge, id, turn)
+                renderTurn(bridge, id, turn, toolOut)
               },
               forEach(chat.map(_.queue))(_.id.value) { item =>
                 renderQueued(item)
@@ -1543,6 +1630,7 @@ object ChatApp:
           ),
         ),
         renderCards(bridge, chat, questionDraft, applyQuestionPick),
+        renderRewind(chat, armRewind, confirmRewind, cancelRewind),
         when(pendingDelete.map(_.nonEmpty))(
           E.div(
             Cards,
@@ -1893,10 +1981,9 @@ object ChatApp:
     )
 
   private def renderActivityStrip(chat: ascent.Source[ChatModel], nowMs: ascent.Source[Long]): ascent.ast.UI[Any] =
-    forEach(Squawk.zipWith(chat, nowMs)((c, n) => TurnActivity.of(c, n).toList))(a =>
-      s"${a.kind}-${a.label}-${a.detail.getOrElse("")}-${a.elapsedMs / 1000}"
-    ) { a =>
-      renderActivity(a)
+    forEachSignal(Squawk.zipWith(chat, nowMs)((c, n) => TurnActivity.of(c, n).toList))(a => s"${a.kind}-${a.label}") {
+      (_, _, activity) =>
+        renderActivity(activity)
     }
 
   private def renderChipRow(chat: ascent.Source[ChatModel], dropChip: PromptChip => UIO[Unit]): ascent.ast.UI[Any] =
@@ -2081,32 +2168,23 @@ object ChatApp:
     end for
   end onDraftKey
 
-  private def renderActivity(a: TurnActivity): ascent.ast.UI[Any] =
-    val tone = a.kind match
-      case ActivityKind.Think   => ActivityThink
-      case ActivityKind.Edit    => ActivityEdit
-      case ActivityKind.Read    => ActivityRead
-      case ActivityKind.Execute => ActivityRun
-      case ActivityKind.Search  => ActivitySearch
-      case ActivityKind.Delete  => ActivityDelete
-      case ActivityKind.Move    => ActivityMove
-      case ActivityKind.Wait    => ActivityWait
-      case ActivityKind.Other   => ActivityOther
+  private def renderActivity(activity: Squawk[TurnActivity]): ascent.ast.UI[Any] =
+    val detail = activity.map(_.detail.getOrElse(""))
+    val timer  = activity.map(a => TurnActivity.timerLabel(a.elapsedMs).getOrElse(""))
     E.div(
       ActivityRow,
       TestId("activity"),
       E.span(
         ActivityIcon,
-        tone,
-        A.title(a.label),
+        A.title(activity.map(_.label)),
         E.span(SpinGlyph, "⋅"),
         E.span(SpinGlyph, ":"),
         E.span(SpinGlyph, "⸬"),
         E.span(SpinGlyph, "⁙"),
       ),
-      E.span(a.label),
-      a.detail.filter(_.nonEmpty).fold(E.span())(d => E.pre(TestId("activity-detail"), d)),
-      TurnActivity.timerLabel(a.elapsedMs).fold(E.span())(t => E.span(TestId("activity-timer"), t)),
+      E.span(activity.map(_.label)),
+      when(detail.map(_.nonEmpty))(E.pre(TestId("activity-detail"), detail)),
+      when(timer.map(_.nonEmpty))(E.span(TestId("activity-timer"), timer)),
     )
   end renderActivity
 
@@ -2131,7 +2209,12 @@ object ChatApp:
       QueuedPrompt.display(item),
     )
 
-  private def renderTurn(bridge: HostBridge, id: String, turn: Squawk[TurnView]): ascent.ast.UI[Any] =
+  private def renderTurn(
+      bridge: HostBridge,
+      id: String,
+      turn: Squawk[TurnView],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): ascent.ast.UI[Any] =
     val parts = turn.map(ChatMarkdown.parts)
     val tail  = parts.map(_._2)
     E.section(
@@ -2148,7 +2231,7 @@ object ChatApp:
           E.pre(ThoughtBody, turn.map(_.thought)),
         )
       ),
-      turn.map(t => renderTools(bridge, t.tools)),
+      renderTools(bridge, turn.map(_.tools), outputs),
       when(turn.map(_.agent.nonEmpty))(
         E.div(
           AgentMsg,
@@ -2174,61 +2257,90 @@ object ChatApp:
       }
       .getOrElse("")
 
-  private def renderTools(bridge: HostBridge, tools: List[ToolRow]): ascent.ast.UI[Any] =
-    if tools.isEmpty then E.span()
-    else
-      val (earlier, visible)               = ToolView.splitTail(tools)
-      val rolled: List[ascent.ast.UI[Any]] =
-        if earlier.nonEmpty then
-          List(
-            E.details(
-              ToolBox,
-              E.summary(ToolView.rollupLabel(earlier.size)),
-              Arg.ArgsArg(earlier.map(t => Arg.ChildArg(renderTool(bridge, t)))),
-            )
-          )
-        else Nil
-      E.div(Arg.ArgsArg((rolled ++ visible.map(t => renderTool(bridge, t))).map(Arg.ChildArg(_))))
+  private def renderTools(
+      bridge: HostBridge,
+      tools: Squawk[List[ToolRow]],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): ascent.ast.UI[Any] =
+    val split = tools.map(ToolView.splitTail(_))
+    E.div(
+      when(split.map(_._1.nonEmpty))(
+        E.details(
+          ToolBox,
+          E.summary(split.map { case (earlier, _) => ToolView.rollupLabel(earlier.size) }),
+          forEachSignal(split.map(_._1))(_.id.value) { (id, _, tool) =>
+            renderTool(bridge, id, tool, outputOf(id, tool, outputs))
+          },
+        )
+      ),
+      forEachSignal(split.map(_._2))(_.id.value) { (id, _, tool) =>
+        renderTool(bridge, id, tool, outputOf(id, tool, outputs))
+      },
+    )
+  end renderTools
 
-  private def renderTool(bridge: HostBridge, tool: ToolRow): ascent.ast.UI[Any] =
-    val stats =
-      (tool.additions, tool.deletions) match
-        case (Some(a), Some(d)) => Some((a, d))
-        case _                  => None
-    stats match
-      case Some((a, d)) =>
+  private def outputOf(
+      id: String,
+      tool: Squawk[ToolRow],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): Squawk[String] =
+    Squawk.zipWith(tool, outputs) { (t, m) =>
+      val live = m.getOrElse(ToolCallId(id), "")
+      if live.nonEmpty then live else t.output.getOrElse("")
+    }
+
+  private def renderTool(
+      bridge: HostBridge,
+      id: String,
+      tool: Squawk[ToolRow],
+      output: Squawk[String],
+  ): ascent.ast.UI[Any] =
+    val hasStats = tool.map(t => t.additions.isDefined && t.deletions.isDefined)
+    val liveTail = Squawk.zipWith(tool, output) { (t, out) =>
+      if !ToolStatus.isLive(t.status) then ""
+      else
+        Option(out)
+          .filter(_.nonEmpty)
+          .orElse(t.input.filter(_.nonEmpty))
+          .map(s => ToolView.liveTail(s))
+          .getOrElse("")
+    }
+    E.div(
+      when(hasStats)(
         E.div(
           ToolBox,
           FileRow,
-          TestId(s"tool-${tool.id}"),
-          E.span(tool.title),
-          statsEl(a, d),
+          TestId(s"tool-$id"),
+          E.span(tool.map(_.title)),
+          E.span(StatAdd, tool.map(t => t.additions.fold("")(a => s"+$a"))),
+          E.span(StatDel, tool.map(t => t.deletions.fold("")(d => s"/-$d"))),
           E.button(
             Chip,
-            TestId(s"tool-diff-${tool.id}"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(RequestId(tool.id.value))))),
+            TestId(s"tool-diff-$id"),
+            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenDiff(RequestId(id))))),
             "Review",
           ),
         )
-      case None =>
-        val tail =
-          if !ToolStatus.isLive(tool.status) then None
-          else ToolView.watchText(tool).map(ToolView.liveTail(_)).filter(_.nonEmpty)
+      ),
+      when(hasStats.map(!_))(
         E.details(
           ToolBox,
-          TestId(s"tool-${tool.id}"),
+          TestId(s"tool-$id"),
           E.summary(
-            E.span(tool.title),
-            tail.fold(E.span())(t => E.pre(TestId(s"tool-tail-${tool.id}"), t)),
+            E.span(tool.map(_.title)),
+            when(liveTail.map(_.nonEmpty))(
+              E.pre(TestId(s"tool-tail-$id"), liveTail)
+            ),
           ),
-          tool.input
-            .filter(_.nonEmpty)
-            .fold(E.span())(in => E.pre(TestId(s"tool-input-${tool.id}"), ToolView.clip(in))),
-          tool.output
-            .filter(_.nonEmpty)
-            .fold(E.span())(out => E.pre(TestId(s"tool-output-${tool.id}"), ToolView.clip(out))),
+          when(tool.map(_.input.exists(_.nonEmpty)))(
+            E.pre(TestId(s"tool-input-$id"), tool.map(_.input.map(s => ToolView.clip(s)).getOrElse("")))
+          ),
+          when(output.map(_.nonEmpty))(
+            E.pre(TestId(s"tool-output-$id"), output.map(s => ToolView.clip(s)))
+          ),
         )
-    end match
+      ),
+    )
   end renderTool
 
   private def renderCards(
@@ -2402,6 +2514,58 @@ object ChatApp:
       ),
     )
   end renderQuestionCard
+
+  private def renderRewind(
+      chat: ascent.Source[ChatModel],
+      armRewind: RewindPoint => UIO[Unit],
+      confirmRewind: UIO[Unit],
+      cancelRewind: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    E.div(
+      when(chat.map(_.rewind.nonEmpty))(
+        E.ul(
+          ComposerMenu,
+          TestId("rewind"),
+          A.role("listbox"),
+          forEach(chat.map(_.rewind))(p => s"${p.promptIndex}-${p.preview}") { point =>
+            E.li(
+              E.button(
+                MenuItem,
+                TestId(s"rewind-${point.promptIndex}"),
+                Ev.onClick(_ => armRewind(point)),
+                point.preview,
+              )
+            )
+          },
+        )
+      ),
+      when(chat.map(_.rewindConfirm.nonEmpty))(
+        E.div(
+          Cards,
+          forEach(chat.map(_.rewindConfirm.toList))(p => s"${p.promptIndex}") { point =>
+            E.div(
+              Card,
+              TestId("rewind-confirm"),
+              E.h3("Rewind conversation to this turn?"),
+              E.p(Copy, point.preview),
+              E.button(
+                Send,
+                TestId("rewind-yes"),
+                Ev.onClick(_ => confirmRewind),
+                "Rewind",
+              ),
+              E.button(
+                CardBtn,
+                TestId("rewind-no"),
+                Ev.onClick(_ => cancelRewind),
+                "Cancel",
+              ),
+            )
+          },
+        )
+      ),
+    )
+  end renderRewind
 
   private def renderTodos(
       chat: ascent.Source[ChatModel],

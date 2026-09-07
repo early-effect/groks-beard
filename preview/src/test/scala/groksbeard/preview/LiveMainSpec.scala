@@ -8,9 +8,9 @@ object LiveMainSpec extends ZIOSpecDefault:
   def spec =
     suite("LiveMain")(
       test("configFromArgs reads port, root, and --open in PreviewMain order") {
-        val site = JPath.of("/tmp/site").toAbsolutePath.normalize
-        val a    = LiveMain.configFromArgs(Chunk("9000", "/tmp/site", "--open"))
-        val b    = LiveMain.configFromArgs(Chunk("--open", "9000", "/tmp/site"))
+        val site = JPath.of("site").toAbsolutePath.normalize
+        val a    = LiveMain.configFromArgs(Chunk("9000", "site", "--open"))
+        val b    = LiveMain.configFromArgs(Chunk("--open", "9000", "site"))
         val c    = LiveMain.configFromArgs(Chunk.empty)
         assertTrue(
           a.port == 9000,
@@ -23,6 +23,14 @@ object LiveMainSpec extends ZIOSpecDefault:
           !c.openBrowser,
           c.root.endsWith(JPath.of("ui", "target", "preview")),
         )
-      }
-    )
+      },
+      test("hold publishes clients and clears them when the scope closes") {
+        for
+          holder  <- Ref.make(Option.empty[LiveClients])
+          clients <- LiveClients.fake()
+          up      <- ZIO.scoped(LiveMain.hold(holder, clients) *> holder.get)
+          down    <- holder.get
+        yield assertTrue(up.isDefined, down.isEmpty)
+      },
+    ) @@ TestAspect.sequential
 end LiveMainSpec

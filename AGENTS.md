@@ -41,9 +41,13 @@ Beard should be a project people can point at for effect-oriented Scala. Write i
 
 ### Streams, not bags of callbacks
 
+Streaming is the rule. This is an event-sourced chat: ACP `session/update`, tool stdout, PTY bytes, and `HostMsg` are async events. Fold them into a projection. A `List` is a snapshot of identity (which tools exist), never the live text.
+
 - Inbound HostMsg is a `ZStream`. Coalesce with a scoped `Queue` and one pull per paint (`FrameBurst`), not `ConcurrentLinkedQueue` + `AtomicBoolean`.
 - `ZStream.async` / `asyncZIO` at impure callback edges. No `Unsafe` / `runtime.unsafe` in application code.
-- Fold events into a projection (`Markdown.streamParts`, `QuestionDraft`). Do not rebuild `List`s from concatenated strings every token.
+- Fold events into a projection (`Markdown.streamParts`, `QuestionDraft`, `ToolOutput.pull`). Do not rebuild `List`s from concatenated strings every token.
+- Growing text is a chunk event. Agent tokens are `HostMsg.AgentChunk`. Thought tokens are `HostMsg.ThoughtChunk`. Tool stdout is `HostMsg.ToolChunk`. Tool identity/status is `HostMsg.ToolCall` (one tool). Do not send `List[ToolRow]` as the live-update mechanism, and do not fight `Eq[List[ToolRow]]` / `forEachSignal` to make a tail move.
+- PTY bytes (`terminal/create` stdout) are a `ZStream`. Fold them into `ToolChunk` as they arrive. Do not wait for the next `tool_call_update` snapshot, and do not grow a `StringBuilder` that only `terminal/output` polls.
 - `Chunk` is the batch type. `groupedWithin` on a wall clock is a test flake; prefer pull + `requestAnimationFrame` with a short `timeout`.
 
 ### Extract, do not pile on

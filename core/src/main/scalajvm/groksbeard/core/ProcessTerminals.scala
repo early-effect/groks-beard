@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import zio.*
+import zio.stream.ZStream
 import BeardError.orSystem
 
 import java.io.File
@@ -43,6 +44,9 @@ final class ProcessTerminals(defaultCwd: String) extends Terminals:
     ZIO.succeed {
       lock.synchronized(slots.get(id)).map(_.snapshot)
     }
+
+  def stream(id: TerminalId): UIO[Option[ZStream[Any, Nothing, String]]] =
+    ZIO.succeed(lock.synchronized(slots.get(id)).map(_.outputStream))
 
   def waitForExit(id: TerminalId): UIO[Option[TerminalExitStatus]] =
     lock.synchronized(slots.get(id)) match
@@ -87,10 +91,12 @@ object ProcessTerminals:
     )
 
   private final class Slot(val process: Process, val limit: Int):
-    private val buf      = new StringBuilder
-    private var cut      = false
-    private var exit     = Option.empty[TerminalExitStatus]
-    private val exitLock = new Object
+    private val buf       = new StringBuilder
+    private var cut       = false
+    private var exit      = Option.empty[TerminalExitStatus]
+    private val exitLock  = new Object
+    private var listeners = List.empty[String => Unit]
+    private var completes = List.empty[() => Unit]
 
     def drain(): Unit =
       val t = new Thread(
@@ -105,10 +111,7 @@ object ProcessTerminals:
           catch case _: Throwable => ()
           finally
             val code = process.waitFor()
-            exitLock.synchronized {
-              exit = Some(TerminalExitStatus(Some(code), None))
-              exitLock.notifyAll()
-            }
+            finish(TerminalExitStatus(Some(code), None))
           end try
         ,
         "beard-term",
@@ -117,15 +120,50 @@ object ProcessTerminals:
       t.start()
     end drain
 
-    def append(chunk: String): Unit =
-      synchronized {
-        buf.append(chunk)
-        val (kept, truncated) = Terminals.capTail(buf.toString, limit)
-        if truncated then
-          buf.clear()
-          buf.append(kept)
-          cut = true
+    def outputStream: ZStream[Any, Nothing, String] =
+      ZStream.asyncScoped { emit =>
+        ZIO.succeed {
+          synchronized {
+            val prefix = buf.toString
+            if prefix.nonEmpty then emit(ZIO.succeed(Chunk.single(prefix)))
+            val push: String => Unit = s => emit(ZIO.succeed(Chunk.single(s)))
+            val stop: () => Unit     = () => emit(ZIO.fail(None))
+            listeners = push :: listeners
+            completes = stop :: completes
+            if exitLock.synchronized(exit.isDefined) then stop()
+          }
+        }
       }
+
+    def append(chunk: String): Unit =
+      val notify =
+        synchronized {
+          buf.append(chunk)
+          val (kept, truncated) = Terminals.capTail(buf.toString, limit)
+          if truncated then
+            buf.clear()
+            buf.append(kept)
+            cut = true
+          listeners
+        }
+      notify.foreach(_(chunk))
+    end append
+
+    def finish(st: TerminalExitStatus): Unit =
+      val done =
+        synchronized {
+          exitLock.synchronized {
+            if exit.isDefined then Nil
+            else
+              exit = Some(st)
+              exitLock.notifyAll()
+              val c = completes
+              completes = Nil
+              c
+          }
+        }
+      done.foreach(_())
+    end finish
 
     def snapshot: TerminalOutputResult =
       synchronized {
@@ -144,10 +182,7 @@ object ProcessTerminals:
       if process.isAlive then
         val _ = process.destroyForcibly()
         val _ = process.waitFor(1, TimeUnit.SECONDS)
-      exitLock.synchronized {
-        if exit.isEmpty then exit = Some(TerminalExitStatus(None, Some("SIGTERM")))
-        exitLock.notifyAll()
-      }
+      finish(TerminalExitStatus(None, Some("SIGTERM")))
     end kill
   end Slot
 end ProcessTerminals

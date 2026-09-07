@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 import zio.json.ast.Json
 
@@ -8,7 +9,8 @@ final case class TodoEntry(
     status: TodoStatus = TodoStatus.Pending,
     priority: TodoPriority = TodoPriority.Medium,
     id: Option[String] = None,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 object Todos:
   val Pending: TodoStatus    = TodoStatus.Pending

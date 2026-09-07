@@ -144,6 +144,20 @@ final class FakeAgent(
           ),
           Rpc.ok(id, SessionPromptResult(StopReason.EndTurn).asJson),
         )
+      case "x.ai/rewind/points" | "_x.ai/rewind/points" =>
+        List(
+          Rpc.ok(
+            id,
+            RewindPointsResult(
+              List(
+                RewindPoint(0, "first prompt"),
+                RewindPoint(1, "second prompt"),
+              )
+            ).asJson,
+          )
+        )
+      case "x.ai/rewind/execute" | "_x.ai/rewind/execute" =>
+        List(Rpc.ok(id, EmptyObject().asJson))
       case _ =>
         List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
 

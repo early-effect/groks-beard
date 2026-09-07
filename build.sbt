@@ -103,6 +103,7 @@ lazy val core = (projectMatrix in file("core"))
     scalacOptions ++= commonScalacOptions,
     MyVersions.zioLib,
     MyVersions.jsonLib,
+    MyVersions.ascentCore,
     zioTestSettings,
   )
   .jvmPlatform(scalaVersions = scalaVersions)
@@ -172,8 +173,7 @@ lazy val ui = (projectMatrix in file("ui"))
           ascentPreview / watchOnTermination := BeardPreview.watchStop,
           ascentPreviewRebuild               := Def.uncached {
             val dest = ascentPreviewStage.value
-            val logo = (ThisBuild / baseDirectory).value / "media" / "logo.png"
-            IO.copyFile(logo, dest / "logo.png")
+            IO.copyFile((ThisBuild / baseDirectory).value / "media" / "logo.png", dest / "logo.png")
             ()
           },
         ),

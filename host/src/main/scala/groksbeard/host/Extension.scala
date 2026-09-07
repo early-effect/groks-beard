@@ -13,13 +13,13 @@ object Extension:
 
   @JSExportTopLevel("activate")
   def activate(context: ExtensionContext): Unit =
-    HostRuntime.start()
+    val out = vscode.window.createOutputChannel("Grok's Beard")
+    HostRuntime.start(line => out.appendLine(line))
     val docs   = new BeardDocs
     val review = new Review(docs)
     val status = vscode.window.createStatusBarItem(2, 80)
     status.command = "groksBeard.openChangesReview"
     status.text = "$(diff) Grok Changes"
-    val out                          = vscode.window.createOutputChannel("Grok's Beard")
     var chatRef: Option[ChatView]    = None
     var treeRef: Option[ChangesTree] = None
     val mcpHost                      = new McpHost(review, () => treeRef.foreach(_.refresh()))

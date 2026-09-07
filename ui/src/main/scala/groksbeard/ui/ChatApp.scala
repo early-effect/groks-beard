@@ -18,7 +18,10 @@ import zio.stream.ZStream
 enum OpenMenu:
   case Mode, Settings, Model, Effort
 
-final case class SessionLeave(id: SessionId, fromPicker: Boolean)
+object OpenMenu:
+  given Eq[OpenMenu] = (a, b) => a == b
+
+final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos
@@ -885,6 +888,8 @@ object ChatApp:
       todosOpen      <- sq(scene == Scene.Todos)
       leaving        <- sq(Option.empty[SessionLeave])
       pendingDelete  <- sq(Option.empty[SessionId])
+      lastIdleEsc    <- Ref.make(Option.empty[Long])
+      lastCancelMs   <- Ref.make(Option.empty[Long])
       questionDraft  <- sq(QuestionDraft.empty)
       historyBrowse  <- sq(Option.empty[Int])
       historyPickIdx <- sq(Option.empty[Int])
@@ -1026,6 +1031,15 @@ object ChatApp:
                     draft.set("") *> applyRename(c.sessionId, op)
               case Some(cmd) if SessionCommands.isDelete(cmd.name) =>
                 draft.set("") *> armDelete(c.sessionId)
+              case Some(cmd) if SessionCommands.isRewind(cmd.name) =>
+                draft.set("") *>
+                  (if ChatModel.turnIsRunning(c) then
+                     chat.update(_.copy(error = Some("Stop the turn before rewinding.")))
+                   else if cmd.args.isEmpty then openRewindPicker
+                   else
+                     cmd.args.trim.toIntOption match
+                       case Some(i) => ZIO.succeed(bridge.post(WebviewMsg.RewindTo(i)))
+                       case None    => chat.update(_.copy(error = Some("Usage: /rewind"))))
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1092,29 +1106,37 @@ object ChatApp:
                 pendingDelete.get.flatMap {
                   case Some(_) => cancelDelete
                   case None    =>
-                    mentionShown.get.flatMap { mentions =>
-                      if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                      else
-                        draft.get.flatMap { text =>
-                          if PromptHistory.query(text).isDefined then
-                            draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
-                          else
-                            historyBrowse.get.flatMap {
-                              case Some(_) => historyBrowse.set(None)
-                              case None    =>
-                                if c.pickerOpen then closePicker
-                                else if c.permission.isDefined then parkPermission
-                                else if c.question.isDefined then ZIO.unit
-                                else
-                                  todosOpen.get.flatMap {
-                                    case true  => todosOpen.set(false)
-                                    case false =>
-                                      if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                      else ZIO.unit
-                                  }
-                            }
-                        }
-                    }
+                    if c.rewindConfirm.nonEmpty then cancelRewind
+                    else if c.rewind.nonEmpty then closeRewindPicker
+                    else
+                      mentionShown.get.flatMap { mentions =>
+                        if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                        else
+                          draft.get.flatMap { text =>
+                            if PromptHistory.query(text).isDefined then
+                              draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                            else
+                              historyBrowse.get.flatMap {
+                                case Some(_) => historyBrowse.set(None)
+                                case None    =>
+                                  if c.pickerOpen then closePicker
+                                  else if c.permission.isDefined then parkPermission
+                                  else if c.question.isDefined then ZIO.unit
+                                  else
+                                    todosOpen.get.flatMap {
+                                      case true  => todosOpen.set(false)
+                                      case false =>
+                                        if ChatModel.turnIsRunning(c) then
+                                          nowMs.get.flatMap { now =>
+                                            lastCancelMs.set(Some(now)) *>
+                                              lastIdleEsc.set(None) *>
+                                              ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                          }
+                                        else idleRewindEsc(c, text)
+                                    }
+                              }
+                          }
+                      }
                 }
             }
           else
@@ -1136,6 +1158,12 @@ object ChatApp:
                     case Some(_) if key == "n" || key == "N" =>
                       e.preventDefault()
                       cancelDelete
+                    case _ if c.rewindConfirm.nonEmpty && (key == "y" || key == "Y") =>
+                      e.preventDefault()
+                      confirmRewind
+                    case _ if c.rewindConfirm.nonEmpty && (key == "n" || key == "N") =>
+                      e.preventDefault()
+                      cancelRewind
                     case _ =>
                       c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
                         case Some(opt) =>
@@ -1357,6 +1385,7 @@ object ChatApp:
         else if SessionCommands.isHistory(name) then draft.set("/history ") *> historyPickIdx.set(Some(0))
         else if SessionCommands.isCopy(name) then runCopyExport(ClientCommand("copy"))
         else if SessionCommands.isExport(name) then runCopyExport(ClientCommand("export"))
+        else if SessionCommands.isRewind(name) then draft.set("") *> openRewindPicker
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1386,6 +1415,50 @@ object ChatApp:
       def armDelete(id: SessionId): UIO[Unit] =
         if id.isEmpty then chat.update(_.copy(error = Some("No session to delete")))
         else pendingDelete.set(Some(id))
+
+      def openRewindPicker: UIO[Unit] =
+        chat.get.flatMap { c =>
+          if ChatModel.turnIsRunning(c) then chat.update(_.copy(error = Some("Stop the turn before rewinding.")))
+          else
+            val local = Rewind.fromTurns(c.turns)
+            if local.isEmpty then chat.update(_.copy(error = Some("Nothing to rewind")))
+            else
+              draft.set("") *>
+                chat.update(_.copy(rewind = local, rewindConfirm = None, error = None, pickerOpen = false)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.OpenRewind))
+        }
+
+      def closeRewindPicker: UIO[Unit] =
+        chat.update(_.copy(rewind = Nil, rewindConfirm = None)) *>
+          ZIO.succeed(bridge.post(WebviewMsg.CloseRewind))
+
+      def armRewind(point: RewindPoint): UIO[Unit] =
+        chat.update(_.copy(rewindConfirm = Some(point)))
+
+      def idleRewindEsc(c: ChatModel, text: String): UIO[Unit] =
+        if text.trim.nonEmpty || Rewind.fromTurns(c.turns).isEmpty then lastIdleEsc.set(None)
+        else
+          nowMs.get.flatMap { now =>
+            lastCancelMs.get.flatMap { cancelAt =>
+              if cancelAt.exists(now - _ < 1000L) then ZIO.unit
+              else
+                lastIdleEsc.get.flatMap { prev =>
+                  if prev.exists(now - _ <= 800L) then lastIdleEsc.set(None) *> openRewindPicker
+                  else lastIdleEsc.set(Some(now))
+                }
+            }
+          }
+
+      def cancelRewind: UIO[Unit] = chat.update(_.copy(rewindConfirm = None))
+
+      def confirmRewind: UIO[Unit] =
+        chat.get.flatMap { c =>
+          c.rewindConfirm match
+            case None    => ZIO.unit
+            case Some(p) =>
+              chat.update(_.copy(rewind = Nil, rewindConfirm = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.RewindTo(p.promptIndex)))
+        }
 
       def cancelDelete: UIO[Unit] = pendingDelete.set(None)
 
@@ -1543,6 +1616,7 @@ object ChatApp:
           ),
         ),
         renderCards(bridge, chat, questionDraft, applyQuestionPick),
+        renderRewind(chat, armRewind, confirmRewind, cancelRewind),
         when(pendingDelete.map(_.nonEmpty))(
           E.div(
             Cards,
@@ -2402,6 +2476,58 @@ object ChatApp:
       ),
     )
   end renderQuestionCard
+
+  private def renderRewind(
+      chat: ascent.Source[ChatModel],
+      armRewind: RewindPoint => UIO[Unit],
+      confirmRewind: UIO[Unit],
+      cancelRewind: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    E.div(
+      when(chat.map(_.rewind.nonEmpty))(
+        E.ul(
+          ComposerMenu,
+          TestId("rewind"),
+          A.role("listbox"),
+          forEach(chat.map(_.rewind))(p => s"${p.promptIndex}-${p.preview}") { point =>
+            E.li(
+              E.button(
+                MenuItem,
+                TestId(s"rewind-${point.promptIndex}"),
+                Ev.onClick(_ => armRewind(point)),
+                point.preview,
+              )
+            )
+          },
+        )
+      ),
+      when(chat.map(_.rewindConfirm.nonEmpty))(
+        E.div(
+          Cards,
+          forEach(chat.map(_.rewindConfirm.toList))(p => s"${p.promptIndex}") { point =>
+            E.div(
+              Card,
+              TestId("rewind-confirm"),
+              E.h3("Rewind conversation to this turn?"),
+              E.p(Copy, point.preview),
+              E.button(
+                Send,
+                TestId("rewind-yes"),
+                Ev.onClick(_ => confirmRewind),
+                "Rewind",
+              ),
+              E.button(
+                CardBtn,
+                TestId("rewind-no"),
+                Ev.onClick(_ => cancelRewind),
+                "Cancel",
+              ),
+            )
+          },
+        )
+      ),
+    )
+  end renderRewind
 
   private def renderTodos(
       chat: ascent.Source[ChatModel],

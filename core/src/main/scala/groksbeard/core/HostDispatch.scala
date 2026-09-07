@@ -45,4 +45,7 @@ object HostDispatch:
       case WebviewMsg.QuestionDismiss(id)              => runtime.questionDismiss(id)
       case WebviewMsg.ElicitAccept(id)                 => runtime.elicitAccept(id)
       case WebviewMsg.ElicitDecline(id)                => runtime.elicitDecline(id)
+      case WebviewMsg.OpenRewind                       => runtime.openRewind
+      case WebviewMsg.CloseRewind                      => runtime.closeRewind
+      case WebviewMsg.RewindTo(index)                  => runtime.rewindTo(index)
 end HostDispatch

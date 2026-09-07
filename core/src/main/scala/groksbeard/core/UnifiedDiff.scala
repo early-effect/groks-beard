@@ -1,9 +1,14 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
+
 enum DiffLine:
   case Context(text: String)
   case Add(text: String)
   case Del(text: String)
+
+object DiffLine:
+  given Eq[DiffLine] = (a, b) => a == b
 
 object UnifiedDiff:
   def lines(oldText: String, newText: String): List[DiffLine] =

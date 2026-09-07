@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.JsonCodec
 
 final case class QuestionAnswer(
@@ -14,7 +15,7 @@ final case class QuestionDraft(
     index: Int = 0,
     selected: Map[String, List[String]] = Map.empty,
     freeText: Map[String, String] = Map.empty,
-)
+) derives Eq
 
 object QuestionDraft:
   val empty: QuestionDraft = QuestionDraft()

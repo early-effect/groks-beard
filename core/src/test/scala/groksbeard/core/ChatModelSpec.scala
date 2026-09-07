@@ -80,6 +80,32 @@ object ChatModelSpec extends ZIOSpecDefault:
           ToolView.liveTail(stream).contains("/tmp"),
         )
       },
+      test("Rewound truncates turns through the chosen prompt") {
+        val model = ChatModel.empty.copy(
+          turns = List(
+            TurnView("t1", user = Some(TurnUser("first")), agent = "a", stopReason = Some(StopReason.EndTurn)),
+            TurnView("t2", user = Some(TurnUser("second")), agent = "b", stopReason = Some(StopReason.EndTurn)),
+          ),
+          rewind = List(RewindPoint(0, "first"), RewindPoint(1, "second")),
+          rewindConfirm = Some(RewindPoint(0, "first")),
+        )
+        val next = ChatModel.applyMsg(model, HostMsg.Rewound(0))
+        assertTrue(
+          next.turns.map(_.id.value) == List("t1"),
+          next.rewind.isEmpty,
+          next.rewindConfirm.isEmpty,
+        )
+      },
+      test("RewindList keeps confirm when the point is still present") {
+        val armed = RewindPoint(0, "first")
+        val model = ChatModel.empty.copy(rewind = List(armed), rewindConfirm = Some(armed))
+        val keep  = ChatModel.applyMsg(model, HostMsg.RewindList(List(RewindPoint(0, "first prompt"))))
+        val drop  = ChatModel.applyMsg(model, HostMsg.RewindList(List(RewindPoint(1, "later"))))
+        assertTrue(
+          keep.rewindConfirm.exists(_.preview == "first prompt"),
+          drop.rewindConfirm.isEmpty,
+        )
+      },
       test("thought chunks concatenate and tools merge by id") {
         val start = ChatModel.applyMsg(ChatModel.empty, HostMsg.ThoughtChunk("t1", "hmm"))
         val more  = ChatModel.applyMsg(start, HostMsg.ThoughtChunk("t1", " ok"))

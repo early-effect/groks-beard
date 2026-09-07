@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import java.nio.charset.StandardCharsets
 import zio.*
 import zio.json.*
@@ -20,7 +21,8 @@ final case class SessionRow(
     lastTurn: Option[String] = None,
     modelId: Option[ModelId] = None,
     messages: Option[Int] = None,
-) derives zio.json.JsonCodec
+) derives zio.json.JsonCodec,
+      Eq
 
 trait SessionFs:
   def listNames(dir: String): BeardError.Result[List[String]]

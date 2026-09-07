@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 
 enum TodoStatus:
@@ -19,6 +20,7 @@ object TodoStatus:
       case _                                                 => TodoStatus.Pending
 
   given JsonCodec[TodoStatus] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[TodoStatus]        = (a, b) => a == b
 end TodoStatus
 
 enum TodoPriority:
@@ -38,6 +40,7 @@ object TodoPriority:
       case _      => TodoPriority.Medium
 
   given JsonCodec[TodoPriority] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[TodoPriority]        = (a, b) => a == b
 end TodoPriority
 
 enum PlanOutcome:
@@ -82,6 +85,7 @@ object ChipSource:
       case _           => ChipSource.File
 
   given JsonCodec[ChipSource] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[ChipSource]        = (a, b) => a == b
 end ChipSource
 
 enum ToolStatus:
@@ -106,6 +110,7 @@ object ToolStatus:
     status == ToolStatus.Pending || status == ToolStatus.InProgress
 
   given JsonCodec[ToolStatus] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[ToolStatus]        = (a, b) => a == b
 end ToolStatus
 
 enum ToolKind:
@@ -135,6 +140,7 @@ object ToolKind:
       case _                               => ToolKind.Other
 
   given JsonCodec[ToolKind] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[ToolKind]        = (a, b) => a == b
 end ToolKind
 
 enum StopReason:
@@ -160,6 +166,7 @@ object StopReason:
       case _                   => StopReason.Unknown
 
   given JsonCodec[StopReason] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[StopReason]        = (a, b) => a == b
 end StopReason
 
 enum PermissionKind:
@@ -183,6 +190,7 @@ object PermissionKind:
       case _               => PermissionKind.Other
 
   given JsonCodec[PermissionKind] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[PermissionKind]        = (a, b) => a == b
 end PermissionKind
 
 enum ElicitMode:
@@ -198,4 +206,5 @@ object ElicitMode:
     if raw.trim.equalsIgnoreCase("url") then ElicitMode.Url else ElicitMode.Form
 
   given JsonCodec[ElicitMode] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[ElicitMode]        = (a, b) => a == b
 end ElicitMode

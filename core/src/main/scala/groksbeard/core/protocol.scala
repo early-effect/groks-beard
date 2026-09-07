@@ -103,6 +103,8 @@ enum HostMsg derives JsonCodec:
   @jsonHint("toggleTodos") case ToggleTodos
   @jsonHint("clearTranscript") case ClearTranscript
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
+  @jsonHint("rewindList") case RewindList(points: List[RewindPoint] = Nil)
+  @jsonHint("rewound") case Rewound(promptIndex: Int)
 end HostMsg
 
 object HostMsg:
@@ -181,4 +183,7 @@ enum WebviewMsg derives JsonCodec:
       backup: Boolean = false,
       conversation: Boolean = false,
   )
+  @jsonHint("openRewind") case OpenRewind
+  @jsonHint("closeRewind") case CloseRewind
+  @jsonHint("rewindTo") case RewindTo(promptIndex: Int)
 end WebviewMsg

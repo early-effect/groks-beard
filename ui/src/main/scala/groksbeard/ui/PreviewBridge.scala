@@ -155,6 +155,11 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.SlashPick(name) =>
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
+        else if SessionCommands.isRewind(name) then post(WebviewMsg.OpenRewind)
+      case WebviewMsg.OpenRewind | WebviewMsg.CloseRewind =>
+        ()
+      case WebviewMsg.RewindTo(index) =>
+        emit(HostMsg.Rewound(index))
       case WebviewMsg.NewSession =>
         currentId = SessionId.empty
         pickerOpen = false

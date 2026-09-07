@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.Chunk
 
 /** Conservative markdown: escaped inlines, https/http/vscode links only. No HTML passthrough. */
@@ -12,12 +13,18 @@ object Markdown:
     case Em(value: String)
     case Link(href: String, label: String)
 
+  object Inline:
+    given Eq[Inline] = (a, b) => a == b
+
   enum Block:
     case Paragraph(inlines: List[Inline])
     case Heading(level: Int, inlines: List[Inline])
     case Fence(lang: Option[String], body: String)
     case Bullet(items: List[List[Inline]])
     case Quote(inlines: List[Inline])
+
+  object Block:
+    given Eq[Block] = (a, b) => a == b
 
   def allowedHref(href: String): Boolean =
     href.startsWith("https://") || href.startsWith("http://") ||

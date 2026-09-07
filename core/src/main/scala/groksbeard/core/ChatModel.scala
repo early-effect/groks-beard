@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 
 final case class ToolRow(
@@ -13,6 +14,9 @@ final case class ToolRow(
     output: Option[String] = None,
 ) derives JsonCodec
 
+object ToolRow:
+  given Eq[ToolRow] = (a, b) => a == b
+
 final case class TurnView(
     id: TurnId,
     user: Option[TurnUser] = None,
@@ -20,18 +24,19 @@ final case class TurnView(
     agent: String = "",
     tools: List[ToolRow] = Nil,
     stopReason: Option[StopReason] = None,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
-final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false) derives JsonCodec
+final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false) derives JsonCodec, Eq
 
-final case class QueuedPrompt(id: QueueId, text: String, chips: List[PromptChip] = Nil) derives JsonCodec
+final case class QueuedPrompt(id: QueueId, text: String, chips: List[PromptChip] = Nil) derives JsonCodec, Eq
 
 object QueuedPrompt:
   def display(item: QueuedPrompt): String =
     val refs = item.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
     (refs :+ item.text).filter(_.nonEmpty).mkString("\n")
 
-final case class PermissionOption(optionId: String, name: String, kind: PermissionKind) derives JsonCodec
+final case class PermissionOption(optionId: String, name: String, kind: PermissionKind) derives JsonCodec, Eq
 
 final case class PermissionCard(
     requestId: RequestId,
@@ -39,11 +44,12 @@ final case class PermissionCard(
     title: String,
     options: List[PermissionOption],
     hasDiff: Boolean,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
-final case class PlanCard(requestId: RequestId, planMarkdown: String) derives JsonCodec
+final case class PlanCard(requestId: RequestId, planMarkdown: String) derives JsonCodec, Eq
 
-final case class QuestionOption(id: String, label: String) derives JsonCodec
+final case class QuestionOption(id: String, label: String) derives JsonCodec, Eq
 
 final case class AgentQuestion(
     id: String,
@@ -51,9 +57,10 @@ final case class AgentQuestion(
     options: List[QuestionOption],
     allowMultiple: Boolean = false,
     allowFreeText: Boolean = false,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
-final case class QuestionCard(requestId: RequestId, questions: List[AgentQuestion]) derives JsonCodec
+final case class QuestionCard(requestId: RequestId, questions: List[AgentQuestion]) derives JsonCodec, Eq
 
 final case class ElicitCard(
     requestId: RequestId,
@@ -61,7 +68,8 @@ final case class ElicitCard(
     mode: ElicitMode,
     title: String,
     url: Option[String] = None,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 final case class ChangeFileView(
     path: String,
@@ -72,21 +80,23 @@ final case class ChangeFileView(
     undoDisabled: Option[String] = None,
     turnId: TurnId = TurnId.empty,
     turnTitle: String = "",
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 final case class ChangesSummary(
     fileCount: Int,
     additions: Int,
     deletions: Int,
     files: List[ChangeFileView] = Nil,
-) derives JsonCodec
+) derives JsonCodec,
+      Eq
 
 final case class DiffView(
     path: String,
     oldText: String,
     newText: String,
     wholeFile: Boolean = true,
-)
+) derives Eq
 
 final case class ChatModel(
     sessionId: SessionId = SessionId.empty,
@@ -119,10 +129,15 @@ final case class ChatModel(
     awaitingSession: Option[SessionId] = None,
     inSession: Boolean = false,
     sessionOrder: Option[List[SessionId]] = None,
+    rewind: List[RewindPoint] = Nil,
+    rewindConfirm: Option[RewindPoint] = None,
 )
 
 object ChatModel:
   val empty: ChatModel = ChatModel()
+
+  // Always copied on update. Derived Eq inlines past 32 fields and walks the transcript.
+  given Eq[ChatModel] = Eq.byRef
 
   def turnIsRunning(model: ChatModel): Boolean =
     model.turns.lastOption.exists(_.stopReason.isEmpty)
@@ -176,6 +191,8 @@ object ChatModel:
       awaitingSession = Some(sessionId),
       inSession = sessionId.nonEmpty,
       sessionOrder = order,
+      rewind = Nil,
+      rewindConfirm = None,
     )
   end adopt
 
@@ -313,6 +330,30 @@ object ChatModel:
           pickerOpen = false,
           locked = None,
           runningSinceMs = None,
+          rewind = Nil,
+          rewindConfirm = None,
+        )
+      case HostMsg.RewindList(points) =>
+        val confirm =
+          if points.isEmpty then None
+          else model.rewindConfirm.flatMap(p => points.find(_.promptIndex == p.promptIndex))
+        model.copy(rewind = points, rewindConfirm = confirm, pickerOpen = false, error = None)
+      case HostMsg.Rewound(promptIndex) =>
+        model.copy(
+          turns = Rewind.truncate(model.turns, promptIndex),
+          rewind = Nil,
+          rewindConfirm = None,
+          queue = Nil,
+          chips = Nil,
+          permission = None,
+          plan = None,
+          question = None,
+          elicit = None,
+          changes = None,
+          diff = None,
+          todos = Nil,
+          runningSinceMs = None,
+          error = None,
         )
 
   private def markRunning(model: ChatModel, nowMs: Long): ChatModel =

@@ -106,6 +106,73 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("rewind points then execute posts Rewound") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("first")
+            _    <- rt.send("second")
+            _    <- posted.set(Nil)
+            _    <- rt.openRewind
+            _    <- rt.rewindTo(0)
+            msgs <- posted.get
+            model = msgs.foldLeft(
+              ChatModel.empty.copy(
+                turns = List(
+                  TurnView("t1", user = Some(TurnUser("first"))),
+                  TurnView("t2", user = Some(TurnUser("second"))),
+                )
+              )
+            )(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.RewindList(points) => points.map(_.promptIndex) == List(0, 1)
+              case _                          => false
+            },
+            msgs.exists {
+              case HostMsg.Rewound(0) => true
+              case _                  => false
+            },
+            model.turns.size == 1,
+          )
+        }
+      },
+      test("send /rewind intercepts and lists points") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("first")
+            _    <- posted.set(Nil)
+            _    <- rt.send("/rewind")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.RewindList(points) => points.map(_.promptIndex) == List(0, 1)
+              case _                          => false
+            }
+          )
+        }
+      },
+      test("rewind while a turn is running is refused") {
+        chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- rt.openRewind
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("Stop the turn")
+              case _                         => false
+            },
+            !msgs.exists {
+              case HostMsg.RewindList(_) => true
+              case _                     => false
+            },
+          )
+        }
+      },
       test("empty send is a no-op") {
         chat() { (rt, posted) =>
           for

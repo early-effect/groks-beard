@@ -103,6 +103,7 @@ lazy val core = (projectMatrix in file("core"))
     scalacOptions ++= commonScalacOptions,
     MyVersions.zioLib,
     MyVersions.jsonLib,
+    MyVersions.ascentCore,
     zioTestSettings,
   )
   .jvmPlatform(scalaVersions = scalaVersions)

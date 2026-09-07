@@ -1,14 +1,16 @@
 package groksbeard.core
 
+import ascent.squawk.Eq
 import zio.json.*
 import zio.json.ast.Json
 
 final case class SlashCommand(name: String, description: String, @jsonExclude hint: Option[String] = None)
-    derives JsonCodec
+    derives JsonCodec,
+      Eq
 
-final case class MentionFile(path: String, absPath: String) derives JsonCodec
+final case class MentionFile(path: String, absPath: String) derives JsonCodec, Eq
 
-final case class ModeOption(id: ModeId, name: String) derives JsonCodec
+final case class ModeOption(id: ModeId, name: String) derives JsonCodec, Eq
 
 final case class ModelOption(
     modelId: ModelId,
@@ -18,6 +20,8 @@ final case class ModelOption(
 ) derives JsonCodec
 
 object ModelOption:
+  // `_meta` is a JSON AST; derived Eq would walk it. Case-class == is enough.
+  given Eq[ModelOption]                                     = (a, b) => a == b
   def label(id: ModelId, models: List[ModelOption]): String =
     models.find(_.modelId == id).map(_.name).filter(_.nonEmpty).getOrElse {
       if id.nonEmpty then id.value else "Model"

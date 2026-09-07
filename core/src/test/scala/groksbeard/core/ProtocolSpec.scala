@@ -175,6 +175,18 @@ object ProtocolSpec extends ZIOSpecDefault:
           diff.toJson.fromJson[HostMsg] == Right(diff),
         )
       },
+      test("rewind list and rewindTo round-trip") {
+        val list: HostMsg    = HostMsg.RewindList(List(RewindPoint(0, "first prompt", 2)))
+        val done: HostMsg    = HostMsg.Rewound(0)
+        val open: WebviewMsg = WebviewMsg.OpenRewind
+        val to: WebviewMsg   = WebviewMsg.RewindTo(1)
+        assertTrue(
+          list.toJson.fromJson[HostMsg] == Right(list),
+          done.toJson.fromJson[HostMsg] == Right(done),
+          open.toJson.fromJson[WebviewMsg] == Right(open),
+          to.toJson.fromJson[WebviewMsg] == Right(to),
+        )
+      },
       test("live SSE payloads from grok agent stdio decode") {
         val user =
           """{"_tag":"userMessage","turnId":"turn_1","text":"hello","chips":[],"steer":false}"""

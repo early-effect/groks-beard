@@ -51,6 +51,7 @@ final class ChatRuntime private (
   private var loadModel                    = ChatModel.empty
   private var pendingResume                = Option.empty[SessionId]
   private var pendingLoad                  = Map.empty[RpcId, SessionId]
+  private var pendingRewind                = Option.empty[Int]
   private var cancelledLoads               = Set.empty[SessionId]
   private val inboundEpoch                 = new java.util.concurrent.atomic.AtomicInteger(0)
   private var listOpen                     = false
@@ -246,8 +247,15 @@ final class ChatRuntime private (
   def slashPick(name: String): UIO[Unit] = exclusive {
     if SessionCommands.isNew(name) then doNewSession
     else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then doPostList(open = true)
+    else if SessionCommands.isRewind(name) then doOpenRewind
     else ZIO.unit
   }
+
+  def openRewind: UIO[Unit] = exclusive(doOpenRewind)
+
+  def closeRewind: UIO[Unit] = exclusive(post(HostMsg.RewindList(Nil)))
+
+  def rewindTo(promptIndex: Int): UIO[Unit] = exclusive(doRewindTo(promptIndex))
 
   def focusedId: Option[SessionId] = sessionId
 
@@ -306,6 +314,12 @@ final class ChatRuntime private (
           ZIO.unit
         case Some(cmd) if SessionCommands.isCopy(cmd.name) || SessionCommands.isExport(cmd.name) =>
           ZIO.unit
+        case Some(cmd) if SessionCommands.isRewind(cmd.name) =>
+          if cmd.args.isEmpty then doOpenRewind
+          else
+            cmd.args.trim.toIntOption match
+              case Some(i) => doRewindTo(i)
+              case None    => post(HostMsg.Error("Usage: /rewind"))
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
@@ -315,6 +329,19 @@ final class ChatRuntime private (
             runTurn(trimmed, chosen)
       end match
     }
+
+  private def doOpenRewind: UIO[Unit] =
+    if running then post(HostMsg.Error("Stop the turn before rewinding."))
+    else
+      val sid = sessionId.getOrElse(fallbackSessionId)
+      rpc("x.ai/rewind/points", RewindPointsParams(sid).asJson)
+
+  private def doRewindTo(promptIndex: Int): UIO[Unit] =
+    if running then post(HostMsg.Error("Stop the turn before rewinding."))
+    else
+      val sid = sessionId.getOrElse(fallbackSessionId)
+      pendingRewind = Some(promptIndex)
+      rpc("x.ai/rewind/execute", RewindExecuteParams(sid, promptIndex).asJson)
 
   private def doAgentGone: UIO[Unit] =
     ZIO.suspendSucceed {
@@ -762,8 +789,8 @@ final class ChatRuntime private (
       val method = pendingMethod.getOrElse(id, "")
       pendingMethod -= id
       val errPost =
-        if method != "session/load" then error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
-        else ZIO.unit
+        if method == "session/load" || method.endsWith("rewind/points") then ZIO.unit
+        else error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
       errPost *> (method match
         case "initialize" =>
           rpc("session/new", SessionNewParams(cwd).asJson)
@@ -788,6 +815,20 @@ final class ChatRuntime private (
                   }
         case "session/load" =>
           ingestLoad(id, result, error)
+        case m if m.endsWith("rewind/points") =>
+          if error.isDefined then ZIO.unit
+          else post(HostMsg.RewindList(Rewind.decodePoints(result.getOrElse(Json.Null))))
+        case m if m.endsWith("rewind/execute") =>
+          val idx = pendingRewind
+          pendingRewind = None
+          if error.isDefined then ZIO.unit
+          else
+            idx match
+              case None    => ZIO.unit
+              case Some(i) =>
+                pendingQueue = Vector.empty
+                store.keepAll()
+                postQueue *> postChanges *> post(HostMsg.ClearDiff) *> post(HostMsg.Rewound(i))
         case "session/prompt" =>
           val reason =
             result.flatMap(_.as[SessionPromptResult].toOption).map(_.stopReason).getOrElse(StopReason.EndTurn)

@@ -853,6 +853,67 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("rewind lists prompts and confirm keeps the earlier turn") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "first prompt"))
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+                bridge.push(HostMsg.UserMessage("t2", "second prompt"))
+                bridge.push(HostMsg.TurnEnd("t2", "end_turn"))
+                bridge.push(HostMsg.RewindList(List(RewindPoint(0, "first prompt"), RewindPoint(1, "second prompt"))))
+              }
+              _     <- waitPresent(root, "rewind-0")
+              _     <- root.button("rewind-0").click
+              _     <- waitPresent(root, "rewind-confirm")
+              _     <- root.button("rewind-yes").click
+              _     <- waitGone(root, "rewind-confirm")
+              first <- waitPresent(root, "user-t1") *> root.getByTestId("user-t1").innerText
+              gone  <- root.getByTestId("user-t2").innerText.either
+            yield assertTrue(first.contains("first prompt"), gone.isLeft)
+          }
+        yield result
+        end for
+      },
+      test("slash rewind with no turns toasts") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- root.textarea("draft").fill("/rewind")
+              _      <- root.button("send").click
+              status <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(status.contains("Nothing to rewind"))
+          }
+        yield result
+        end for
+      },
+      test("slash rewind with turns opens the picker from local prompts") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "first prompt"))
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+                bridge.push(HostMsg.UserMessage("t2", "second prompt"))
+                bridge.push(HostMsg.TurnEnd("t2", "end_turn"))
+              }
+              _ <- waitPresent(root, "user-t2")
+              _ <- root.textarea("draft").fill("/rewind")
+              _ <- root.button("send").click
+              _ <- waitPresent(root, "rewind-0")
+              _ <- waitPresent(root, "rewind-1")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("slash resume opens the session picker") {
         val bridge = PreviewBridge()
         for
@@ -1224,9 +1285,12 @@ end ChatChromeSpec
 /** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */
 final class PushBridge extends HostBridge:
   private var listener: HostMsg => Unit = _ => ()
-  def post(msg: WebviewMsg): Unit       = ()
-  def onHost(f: HostMsg => Unit): Unit  = listener = f
-  def push(msg: HostMsg): Unit          = listener(msg)
+  def post(msg: WebviewMsg): Unit       =
+    msg match
+      case WebviewMsg.RewindTo(index) => listener(HostMsg.Rewound(index))
+      case _                          => ()
+  def onHost(f: HostMsg => Unit): Unit = listener = f
+  def push(msg: HostMsg): Unit         = listener(msg)
 
 /** ResumeSession holds the snapshot until [[completeResume]], so tests can see loading chrome. */
 final class GatedResumeBridge extends HostBridge:

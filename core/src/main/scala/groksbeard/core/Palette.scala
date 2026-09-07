@@ -33,7 +33,7 @@ object Palette:
     )
 
   def rows(commands: List[SlashCommand]): List[PaletteRow] =
-    val advertised = commands.map(slashRow)
+    val advertised = SessionCommands.merge(commands).map(slashRow)
     val extra      = List(McpsRow, TodosRow, SettingsRow).filterNot(r => advertised.exists(_.id == r.id))
     val merged     = advertised ++ extra
     val seen       = scala.collection.mutable.LinkedHashSet.empty[String]

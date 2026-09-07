@@ -53,6 +53,14 @@ object ChatApp:
     key == "ArrowUp" || key == "ArrowDown" || key == "Home" || key == "End" ||
       ((key == "Enter" || key == "Tab") && !shift)
 
+  private val PaletteFilterSel = """[data-testid="palette-filter"]"""
+
+  private def focusPaletteFilter(el: ascent.dom.Element): URIO[Scope, Unit] =
+    ZIO.succeed {
+      el.asInstanceOf[js.Dynamic].focus()
+      ()
+    }
+
   private val LeaveMs      = 320L
   private val fg           = Color.Keyword("var(--vscode-foreground, #f3e6d0)")
   private val muted        = Color.Keyword("var(--vscode-descriptionForeground, #9d9488)")
@@ -1027,7 +1035,8 @@ object ChatApp:
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
               case HostMsg.OpenPalette           =>
-                mcpsOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *> paletteOpen.set(true)
+                mcpsOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *> paletteOpen.set(true) *>
+                  ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
               case HostMsg.OpenMcps =>
                 paletteOpen.set(false) *> mcpsOpen.set(true)
               case HostMsg.ToolCall(_, row) =>
@@ -1208,7 +1217,51 @@ object ChatApp:
             tag == "textarea" || tag == "input"
           case _ => false
 
+      def onPaletteKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
+        paletteOpen.get.flatMap {
+          case false => ZIO.succeed(false)
+          case true  =>
+            val key                            = e.key
+            val ctrlOrMeta                     = e.ctrlKey || e.metaKey
+            def go(z: UIO[Unit]): UIO[Boolean] =
+              e.preventDefault()
+              e.stopPropagation()
+              z.as(true)
+            val inFilter = e.target match
+              case el: ascent.dom.Element =>
+                Option(el.getAttribute("data-testid")).contains("palette-filter")
+              case _ => false
+            if key == "Escape" || (ctrlOrMeta && !e.shiftKey && (key == "p" || key == "P")) then go(closePalette)
+            else if key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End" then
+              paletteShown.get.flatMap { list =>
+                paletteIdx.get.flatMap { cur =>
+                  go(paletteIdx.set(ComposerQuery.moveIndex(cur, key, list.size)))
+                }
+              }
+            else if (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
+              paletteShown.get.flatMap { list =>
+                paletteIdx.get.flatMap { cur =>
+                  list.lift(cur.getOrElse(0)) match
+                    case Some(row) => go(pickPalette(row))
+                    case None      => ZIO.succeed(false)
+                }
+              }
+            else if inFilter then ZIO.succeed(false)
+            else if key == "Backspace" && !ctrlOrMeta then
+              go(paletteQuery.update(_.dropRight(1)) *> paletteIdx.set(Some(0)))
+            else if !ctrlOrMeta && !e.altKey && key.length == 1 then
+              go(paletteQuery.update(_ + key) *> paletteIdx.set(Some(0)))
+            else ZIO.succeed(false)
+            end if
+        }
+
       def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
+        onPaletteKey(e).flatMap {
+          case true  => ZIO.unit
+          case false => handleShellKey(e)
+        }
+
+      def handleShellKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
         val key        = e.key
         val ctrlOrMeta = e.ctrlKey || e.metaKey
         chat.get.flatMap { c =>
@@ -1216,6 +1269,7 @@ object ChatApp:
             if typingInField(e) then ZIO.unit
             else
               e.preventDefault()
+              e.stopPropagation()
               togglePalette
           else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
@@ -1328,7 +1382,7 @@ object ChatApp:
                   }
             }
         }
-      end onCardKey
+      end handleShellKey
 
       def startNew: UIO[Unit] =
         leaving.set(None) *>
@@ -1515,7 +1569,8 @@ object ChatApp:
           mcpsOpen.set(false) *>
           paletteQuery.set("") *>
           paletteIdx.set(Some(0)) *>
-          paletteOpen.set(true)
+          paletteOpen.set(true) *>
+          ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
 
       def togglePalette: UIO[Unit] =
         paletteOpen.get.flatMap {
@@ -1836,6 +1891,7 @@ object ChatApp:
             closePalette,
             pickPalette,
             s => paletteQuery.set(s) *> paletteIdx.set(Some(0)),
+            onPaletteKey,
           )
         ),
         when(mcpsOpen)(renderMcps(chat, closeMcps, toggleMcp)),
@@ -1923,6 +1979,7 @@ object ChatApp:
           toggleTodos,
           togglePalette,
           openPalette,
+          onPaletteKey,
         ),
       )
     end for
@@ -2123,6 +2180,7 @@ object ChatApp:
       toggleTodos: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
+      onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -2148,6 +2206,7 @@ object ChatApp:
         toggleTodos,
         togglePalette,
         openPalette,
+        onPaletteKey,
       ),
       renderComposerBar(bridge, chat, sendDraft),
     )
@@ -2202,6 +2261,7 @@ object ChatApp:
       toggleTodos: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
+      onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -2236,6 +2296,7 @@ object ChatApp:
           toggleTodos,
           togglePalette,
           openPalette,
+          onPaletteKey,
         )
       ),
     )
@@ -2284,13 +2345,16 @@ object ChatApp:
       toggleTodos: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
+      onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
     def go(z: UIO[Unit]): UIO[Unit] =
       e.preventDefault()
+      e.stopPropagation()
       z
     for
+      stolen    <- onPaletteKey(e)
       slash     <- slashShown.get
       mentions  <- mentionShown.get
       history   <- historyShown.get
@@ -2305,7 +2369,8 @@ object ChatApp:
       list = PromptHistory.entries(c)
       step = key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End"
       out <-
-        if menu.isDefined && isMenuNav(key, e.shiftKey) then onMenuKey(e).unit
+        if stolen then ZIO.unit
+        else if menu.isDefined && isMenuNav(key, e.shiftKey) then onMenuKey(e).unit
         else if mentions.nonEmpty && step then go(mentionIdx.set(ComposerQuery.moveIndex(idx, key, mentions.size)))
         else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
           mentions.lift(idx.getOrElse(0)) match
@@ -2754,30 +2819,8 @@ object ChatApp:
       close: UIO[Unit],
       pick: PaletteRow => UIO[Unit],
       onQuery: String => UIO[Unit],
+      onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
-    def onKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
-      val key                         = e.key
-      val ctrlOrMeta                  = e.ctrlKey || e.metaKey
-      def go(z: UIO[Unit]): UIO[Unit] =
-        e.preventDefault()
-        z
-      if key == "Escape" || (ctrlOrMeta && !e.shiftKey && (key == "p" || key == "P")) then go(close)
-      else
-        for
-          list <- rows.get
-          cur  <- idx.get
-          _    <-
-            if list.isEmpty then ZIO.unit
-            else if key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End" then
-              go(idx.set(ComposerQuery.moveIndex(cur, key, list.size)))
-            else if (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
-              list.lift(cur.getOrElse(0)) match
-                case Some(row) => go(pick(row))
-                case None      => ZIO.unit
-            else ZIO.unit
-        yield ()
-      end if
-    end onKey
     E.div(
       PaletteScrim,
       TestId("palette-scrim"),
@@ -2785,18 +2828,24 @@ object ChatApp:
       E.div(
         PalettePanel,
         TestId("palette"),
+        A.role("dialog"),
+        Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
+          onPaletteKey(ev.raw.asInstanceOf[ascent.dom.KeyboardEvent]).unit
+        },
         Ev.onClick { e =>
           e.stopPropagation()
-          ZIO.unit
+          ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
         },
         E.input(
           Filter,
           TestId("palette-filter"),
           A.`type`("search"),
+          Attr.StaticAttr("autofocus", AttrValue.Str("autofocus")),
           A.value(query),
           A.placeholder("Filter commands"),
           Events.onInput(e => onQuery(e.targetValue.getOrElse(""))),
-          Ev.onKeyDown(onKey),
+          Ev.onKeyDown(e => onPaletteKey(e).unit),
+          Lifecycle.onMountScoped[ascent.dom.Element, Any](ChatApp.focusPaletteFilter),
         ),
         E.div(
           PaletteList,

@@ -1250,10 +1250,91 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Empty)
           result <- withMounted(ui) { root =>
             for
+              _      <- waitPresent(root, "draft")
+              _      <- root.textarea("draft").press("?")
+              _      <- waitPresent(root, "palette")
+              _      <- waitPresent(root, "palette-mcps")
+              filter <- root.input("palette-filter").value
+            yield assertTrue(filter == "")
+          }
+        yield result
+        end for
+      },
+      test("palette Enter from the composer opens MCP servers") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
               _ <- waitPresent(root, "draft")
               _ <- root.textarea("draft").press("?")
-              _ <- waitPresent(root, "palette")
               _ <- waitPresent(root, "palette-mcps")
+              _ <- root.textarea("draft").press("Enter")
+              _ <- waitPresent(root, "mcps")
+              _ <- waitGone(root, "palette")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("palette arrows from the composer move the highlight") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "draft")
+              _ <- root.textarea("draft").press("?")
+              _ <- waitPresent(root, "palette-new")
+              _ <- root.textarea("draft").press("ArrowDown")
+              _ <- root.textarea("draft").press("Enter")
+              _ <- waitGone(root, "palette")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("palette Enter from the filter opens MCP servers") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Palette)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "palette-mcps")
+              _ <- root.input("palette-filter").press("Enter")
+              _ <- waitPresent(root, "mcps")
+              _ <- waitGone(root, "palette")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("palette arrows from the filter move the highlight") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Palette)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "palette-new")
+              _ <- root.input("palette-filter").press("ArrowDown")
+              _ <- root.input("palette-filter").press("Enter")
+              _ <- waitGone(root, "palette")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("palette filter input narrows the list") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Palette)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "palette-mcps")
+              _ <- waitPresent(root, "palette-new")
+              _ <- root.input("palette-filter").fill("todo")
+              _ <- waitPresent(root, "palette-todos")
+              _ <- waitGone(root, "palette-mcps")
             yield assertTrue(true)
           }
         yield result

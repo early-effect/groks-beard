@@ -28,6 +28,10 @@ object PaletteSpec extends ZIOSpecDefault:
           Palette.filter(rows, "context").map(_.id).contains("compact"),
         )
       },
+      test("empty advertised still lists pager builtins and MCP") {
+        val rows = Palette.rows(Nil)
+        assertTrue(rows.map(_.id).take(4) == List("mcps", "new", "resume", "home"))
+      },
       test("/mcps is a client command") {
         assertTrue(
           SessionCommands.intercept("/mcps").contains(ClientCommand("mcps")),

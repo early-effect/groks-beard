@@ -31,21 +31,21 @@ object SettingsState:
 enum HostMsg derives JsonCodec:
   @jsonHint("ready") case Ready
   @jsonHint("sessionMeta") case SessionMeta(
-      sessionId: String,
+      sessionId: SessionId,
       title: String,
-      modeId: String,
+      modeId: ModeId,
       availableModes: List[ModeOption] = Nil,
       occupancy: Option[Occupancy] = None,
-      modelId: String = "",
+      modelId: ModelId = ModelId.empty,
       availableModels: List[ModelOption] = Nil,
       effort: String = "",
   )
   @jsonHint("sessionList") case SessionList(
       sessions: List[SessionRow],
-      currentId: String = "",
+      currentId: SessionId = SessionId.empty,
       openPicker: Boolean = false,
   )
-  @jsonHint("sessionLocked") case SessionLocked(sessionId: String, message: String)
+  @jsonHint("sessionLocked") case SessionLocked(sessionId: SessionId, message: String)
   @jsonHint("availableCommands") case AvailableCommands(commands: List[SlashCommand])
   @jsonHint("mentionResults") case MentionResults(query: String, files: List[MentionFile])
   @jsonHint("settingsState") case Settings(
@@ -58,36 +58,36 @@ enum HostMsg derives JsonCodec:
   @jsonHint("composerChip") case ComposerChip(
       path: String,
       absPath: String,
-      source: String,
+      source: ChipSource,
       startLine: Option[Int] = None,
       endLine: Option[Int] = None,
   )
   @jsonHint("userMessage") case UserMessage(
-      turnId: String,
+      turnId: TurnId,
       text: String,
       chips: List[PromptChip] = Nil,
       steer: Boolean = false,
   )
-  @jsonHint("agentChunk") case AgentChunk(turnId: String, text: String, messageId: Option[String] = None)
-  @jsonHint("thoughtChunk") case ThoughtChunk(turnId: String, text: String)
-  @jsonHint("toolGroup") case ToolGroup(turnId: String, tools: List[ToolRow])
+  @jsonHint("agentChunk") case AgentChunk(turnId: TurnId, text: String, messageId: Option[String] = None)
+  @jsonHint("thoughtChunk") case ThoughtChunk(turnId: TurnId, text: String)
+  @jsonHint("toolGroup") case ToolGroup(turnId: TurnId, tools: List[ToolRow])
   @jsonHint("permissionCard") case Permission(
-      requestId: String,
-      toolCallId: String,
+      requestId: RequestId,
+      toolCallId: ToolCallId,
       title: String,
       options: List[PermissionOption] = Nil,
       hasDiff: Boolean = false,
   )
-  @jsonHint("planCard") case Plan(requestId: String, planMarkdown: String)
-  @jsonHint("questionCard") case Question(requestId: String, questions: List[AgentQuestion])
+  @jsonHint("planCard") case Plan(requestId: RequestId, planMarkdown: String)
+  @jsonHint("questionCard") case Question(requestId: RequestId, questions: List[AgentQuestion])
   @jsonHint("elicitCard") case Elicit(
-      requestId: String,
+      requestId: RequestId,
       serverName: String,
-      mode: String,
+      mode: ElicitMode,
       title: String,
       url: Option[String] = None,
   )
-  @jsonHint("turnEnd") case TurnEnd(turnId: String, stopReason: String)
+  @jsonHint("turnEnd") case TurnEnd(turnId: TurnId, stopReason: StopReason)
   @jsonHint("queued") case Queued(items: List[QueuedPrompt] = Nil)
   @jsonHint("changesSummary") case Changes(
       fileCount: Int,
@@ -148,33 +148,33 @@ enum WebviewMsg derives JsonCodec:
       endLine: Option[Int] = None,
   )
   @jsonHint("cycleMode") case CycleMode
-  @jsonHint("setMode") case SetMode(modeId: String)
-  @jsonHint("setModel") case SetModel(modelId: String, effort: String = "")
+  @jsonHint("setMode") case SetMode(modeId: ModeId)
+  @jsonHint("setModel") case SetModel(modelId: ModelId, effort: String = "")
   @jsonHint("setEffort") case SetEffort(level: String)
   @jsonHint("openSettings") case OpenSettings
   @jsonHint("setSetting") case SetSetting(key: String, value: String | Boolean)
-  @jsonHint("permissionChoice") case PermissionChoice(requestId: String, optionId: String)
-  @jsonHint("permissionPark") case PermissionPark(requestId: String)
-  @jsonHint("openDiff") case OpenDiff(requestId: String)
-  @jsonHint("planVerdict") case PlanVerdict(requestId: String, verdict: String)
-  @jsonHint("questionSubmit") case QuestionSubmit(requestId: String, answers: List[QuestionAnswer])
-  @jsonHint("questionDismiss") case QuestionDismiss(requestId: String)
-  @jsonHint("elicitAccept") case ElicitAccept(requestId: String)
-  @jsonHint("elicitDecline") case ElicitDecline(requestId: String)
+  @jsonHint("permissionChoice") case PermissionChoice(requestId: RequestId, optionId: String)
+  @jsonHint("permissionPark") case PermissionPark(requestId: RequestId)
+  @jsonHint("openDiff") case OpenDiff(requestId: RequestId)
+  @jsonHint("planVerdict") case PlanVerdict(requestId: RequestId, verdict: PlanOutcome)
+  @jsonHint("questionSubmit") case QuestionSubmit(requestId: RequestId, answers: List[QuestionAnswer])
+  @jsonHint("questionDismiss") case QuestionDismiss(requestId: RequestId)
+  @jsonHint("elicitAccept") case ElicitAccept(requestId: RequestId)
+  @jsonHint("elicitDecline") case ElicitDecline(requestId: RequestId)
   @jsonHint("openChanges") case OpenChanges
   @jsonHint("keepChange") case KeepChange(path: String)
   @jsonHint("undoChange") case UndoChange(path: String)
-  @jsonHint("keepTurn") case KeepTurn(turnId: String)
-  @jsonHint("undoTurn") case UndoTurn(turnId: String)
+  @jsonHint("keepTurn") case KeepTurn(turnId: TurnId)
+  @jsonHint("undoTurn") case UndoTurn(turnId: TurnId)
   @jsonHint("keepAll") case KeepAll
   @jsonHint("undoAll") case UndoAll
   @jsonHint("closeDiff") case CloseDiff
   @jsonHint("newSession") case NewSession
-  @jsonHint("resumeSession") case ResumeSession(sessionId: String)
+  @jsonHint("resumeSession") case ResumeSession(sessionId: SessionId)
   @jsonHint("openSessionPicker") case OpenSessionPicker
   @jsonHint("closeSessionPicker") case CloseSessionPicker
-  @jsonHint("renameSession") case RenameSession(sessionId: String, title: String, auto: Boolean = false)
-  @jsonHint("deleteSession") case DeleteSession(sessionId: String)
+  @jsonHint("renameSession") case RenameSession(sessionId: SessionId, title: String, auto: Boolean = false)
+  @jsonHint("deleteSession") case DeleteSession(sessionId: SessionId)
   @jsonHint("copyOut") case CopyOut(
       text: String,
       path: Option[String] = None,

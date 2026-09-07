@@ -6,12 +6,12 @@ import groksbeard.host.vscode.*
 import scala.scalajs.js
 
 object ChangeTreeKey:
-  def turn(id: String): String = s"t:$id"
+  def turn(id: groksbeard.core.TurnId): String = s"t:${id.value}"
 
-  def file(turnId: String, path: String): String = s"f:$turnId\t$path"
+  def file(turnId: groksbeard.core.TurnId, path: String): String = s"f:${turnId.value}\t$path"
 
-  def turnId(raw: String): Option[String] =
-    if raw.startsWith("t:") then Some(raw.drop(2)) else None
+  def turnId(raw: String): Option[groksbeard.core.TurnId] =
+    if raw.startsWith("t:") then Some(groksbeard.core.TurnId(raw.drop(2))) else None
 
   def filePath(raw: String): Option[String] =
     if !raw.startsWith("f:") then None
@@ -32,7 +32,7 @@ final class ChangesTree(sets: () => List[ChangeSet]) extends TreeDataProvider[St
     ChangeTreeKey.turnId(element) match
       case Some(id) =>
         sets().find(_.turnId == id) match
-          case None      => new TreeItem(id, TreeItemCollapsible.None)
+          case None      => new TreeItem(id.value, TreeItemCollapsible.None)
           case Some(set) =>
             val (add, del) = ChangeSet.lineStats(set.files)
             val item       = new TreeItem(set.title, TreeItemCollapsible.Expanded)

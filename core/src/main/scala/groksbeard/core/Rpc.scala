@@ -61,6 +61,7 @@ enum Rpc:
 
 object Rpc:
   val MethodNotFound: Int = -32601
+  val InvalidParams: Int  = -32602
 
   def ok(id: RpcId, result: Json): Rpc.Response =
     Rpc.Response(id, result = Some(result))

@@ -3,7 +3,12 @@ package groksbeard.core
 enum ActivityKind:
   case Wait, Think, Edit, Read, Execute, Search, Delete, Move, Other
 
-final case class TurnActivity(kind: ActivityKind, label: String, elapsedMs: Long)
+final case class TurnActivity(
+    kind: ActivityKind,
+    label: String,
+    elapsedMs: Long,
+    detail: Option[String] = None,
+)
 
 object TurnActivity:
 
@@ -15,7 +20,12 @@ object TurnActivity:
 
   def fromTurn(turn: TurnView, elapsedMs: Long): TurnActivity =
     turn.tools.reverse.find(live).map(fromTool(_, elapsedMs)).getOrElse {
-      if turn.thought.nonEmpty && turn.agent.isEmpty then TurnActivity(ActivityKind.Think, "Thinking...", elapsedMs)
+      if turn.thought.nonEmpty && turn.agent.isEmpty then
+        val head = Thought.headline(turn.thought)
+        TurnActivity(ActivityKind.Think, "Thinking...", elapsedMs, Option(head).filter(_.nonEmpty))
+      else if turn.agent.nonEmpty then
+        val head = Thought.headline(turn.agent)
+        TurnActivity(ActivityKind.Wait, "Waiting for response...", elapsedMs, Option(head).filter(_.nonEmpty))
       else TurnActivity(ActivityKind.Wait, "Waiting for response...", elapsedMs)
     }
 
@@ -27,23 +37,23 @@ object TurnActivity:
     else Some(s"${s / 3600}h ${(s / 60) % 60}m")
 
   private def live(tool: ToolRow): Boolean =
-    val s = tool.status.toLowerCase
-    s == "pending" || s == "in_progress"
+    ToolStatus.isLive(tool.status)
 
   private def fromTool(tool: ToolRow, elapsedMs: Long): TurnActivity =
-    val kind = kindOf(tool.kind)
-    TurnActivity(kind, labelOf(kind, tool.title), elapsedMs)
+    val kind   = kindOf(tool.kind)
+    val detail = ToolView.watchText(tool).map(ToolView.liveTail(_, 1)).filter(_.nonEmpty)
+    TurnActivity(kind, labelOf(kind, tool.title), elapsedMs, detail)
 
-  private def kindOf(kind: String): ActivityKind =
-    kind.toLowerCase match
-      case "edit" | "write"                => ActivityKind.Edit
-      case "read"                          => ActivityKind.Read
-      case "execute" | "bash" | "terminal" => ActivityKind.Execute
-      case "search" | "grep" | "glob"      => ActivityKind.Search
-      case "delete"                        => ActivityKind.Delete
-      case "move" | "rename"               => ActivityKind.Move
-      case "think" | "thought"             => ActivityKind.Think
-      case _                               => ActivityKind.Other
+  private def kindOf(kind: ToolKind): ActivityKind =
+    kind match
+      case ToolKind.Edit    => ActivityKind.Edit
+      case ToolKind.Read    => ActivityKind.Read
+      case ToolKind.Execute => ActivityKind.Execute
+      case ToolKind.Search  => ActivityKind.Search
+      case ToolKind.Delete  => ActivityKind.Delete
+      case ToolKind.Move    => ActivityKind.Move
+      case ToolKind.Think   => ActivityKind.Think
+      case ToolKind.Other   => ActivityKind.Other
 
   private def labelOf(kind: ActivityKind, title: String): String =
     kind match

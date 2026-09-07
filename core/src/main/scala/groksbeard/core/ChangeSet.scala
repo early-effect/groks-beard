@@ -17,6 +17,8 @@ object ChangeKind:
       case "delete" => ChangeKind.Delete
       case "move"   => ChangeKind.Move
       case _        => ChangeKind.Modify
+
+  given zio.json.JsonCodec[ChangeKind] = JsonExt.stringCodec(wire, fromWire)
 end ChangeKind
 
 final case class FileChange(
@@ -25,7 +27,7 @@ final case class FileChange(
     additions: Int,
     deletions: Int,
     wholeFile: Boolean,
-    toolCallId: String,
+    toolCallId: ToolCallId,
     fromPath: Option[String] = None,
     oldSnapshot: Option[String] = None,
     newSnapshot: Option[String] = None,
@@ -33,8 +35,8 @@ final case class FileChange(
 )
 
 final case class ChangeSet(
-    sessionId: String,
-    turnId: String,
+    sessionId: SessionId,
+    turnId: TurnId,
     title: String,
     files: List[FileChange],
     createdAt: Long,
@@ -155,10 +157,10 @@ object ChangeSet:
       case UndoPlan.Delete(_, _) => None
       case _                     => change.oldSnapshot
 
-  def toView(change: FileChange, turnId: String = "", turnTitle: String = ""): ChangeFileView =
+  def toView(change: FileChange, turnId: TurnId = TurnId.empty, turnTitle: String = ""): ChangeFileView =
     ChangeFileView(
       path = change.path,
-      kind = ChangeKind.wire(change.kind),
+      kind = change.kind,
       additions = change.additions,
       deletions = change.deletions,
       wholeFile = change.wholeFile,
@@ -176,7 +178,7 @@ object ChangeSet:
     val (add, del) = lineStats(sets.flatMap(_.files))
     ChangesSummary(views.size, add, del, views)
 
-  def groupByTurn(files: List[ChangeFileView]): List[(String, String, List[ChangeFileView])] =
+  def groupByTurn(files: List[ChangeFileView]): List[(TurnId, String, List[ChangeFileView])] =
     files.map(_.turnId).distinct.map { id =>
       val group = files.filter(_.turnId == id)
       val title = group.map(_.turnTitle.trim).find(_.nonEmpty).getOrElse("Changes")
@@ -224,7 +226,7 @@ final class ChangeStore:
   def get(path: String): Option[FileChange] =
     pending.find(_.path == path)
 
-  def ingest(sessionId: String, turnId: String, title: String, incoming: List[FileChange]): Unit =
+  def ingest(sessionId: SessionId, turnId: TurnId, title: String, incoming: List[FileChange]): Unit =
     if incoming.isEmpty then ()
     else
       val idx = sets.indexWhere(s => s.sessionId == sessionId && s.turnId == turnId)
@@ -241,10 +243,10 @@ final class ChangeStore:
   def keepAll(): Unit =
     sets = Nil
 
-  def keepTurn(turnId: String): Unit =
+  def keepTurn(turnId: TurnId): Unit =
     sets = sets.filterNot(_.turnId == turnId)
 
-  def filesOf(turnId: String): List[FileChange] =
+  def filesOf(turnId: TurnId): List[FileChange] =
     sets.find(_.turnId == turnId).map(_.files).getOrElse(Nil)
 
   def drop(path: String): Unit = keep(path)

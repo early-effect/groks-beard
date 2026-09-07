@@ -10,7 +10,7 @@ final case class QuestionAnswer(
 
 /** UI fold of an ask-user-question card: current item, selected ids, free text. */
 final case class QuestionDraft(
-    requestId: String = "",
+    requestId: RequestId = RequestId.empty,
     index: Int = 0,
     selected: Map[String, List[String]] = Map.empty,
     freeText: Map[String, String] = Map.empty,

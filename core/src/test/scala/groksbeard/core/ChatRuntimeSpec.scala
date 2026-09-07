@@ -42,7 +42,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case HostMsg.ThoughtChunk(_, text)      => s"thought:$text"
               case HostMsg.AgentChunk(_, text, _)     => s"agent:$text"
               case HostMsg.ToolGroup(_, tools)        => s"tool:${tools.map(_.title).mkString}"
-              case HostMsg.TurnEnd(_, reason)         => s"end:$reason"
+              case HostMsg.TurnEnd(_, reason)         => s"end:${StopReason.wire(reason)}"
             }
           yield assertTrue(
             tags.head == "user:hello",
@@ -67,7 +67,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             turn.thought.contains("Considering"),
             turn.agent == "hello",
             turn.tools.exists(_.title.contains("Edit")),
-            turn.stopReason.contains("end_turn"),
+            turn.stopReason.contains(StopReason.EndTurn),
             !ChatModel.turnIsRunning(model),
           )
         }
@@ -116,7 +116,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(msgs.isEmpty)
         }
       },
-      test("MCP AuthRequired unsticks a hung prompt and sends the parked follow-up") {
+      test("MCP AuthRequired is a notice and does not cancel the turn") {
         chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
           for
             _ <- rt.ready
@@ -132,15 +132,108 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case HostMsg.Error(message, _) => message.toLowerCase.contains("atlassian")
               case _                         => false
             },
-            msgs.exists {
-              case HostMsg.TurnEnd(_, "cancelled") => true
-              case _                               => false
+            !msgs.exists {
+              case HostMsg.TurnEnd(_, _) => true
+              case _                     => false
             },
-            msgs.exists {
+            !msgs.exists {
               case HostMsg.UserMessage(_, "later", _, _) => true
               case _                                     => false
             },
+            msgs.exists {
+              case HostMsg.Queued(items) => items.map(_.text) == List("later")
+              case _                     => false
+            },
           )
+        }
+      },
+      test("MCP AuthRequired during session/load is a notice and does not fail the load") {
+        delayedLoad().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _ <- rt.ready
+              _ <- rt.resumeSession("sess_disk")
+              _ <- posted.set(Nil)
+              _ <- rt.noteAgentLine(
+                """ERROR worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer resource_metadata=\"https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2\", error=\"invalid_token\"" })"""
+              )
+              mid  <- posted.get
+              _    <- rt.ingestData(held.disk)
+              msgs <- posted.get
+            yield assertTrue(
+              mid.exists {
+                case HostMsg.Error(message, _) => message.toLowerCase.contains("atlassian")
+                case _                         => false
+              },
+              !mid.exists {
+                case _: HostMsg.SessionLocked => true
+                case _                        => false
+              },
+              msgs.exists {
+                case HostMsg.Transcript(_) => true
+                case _                     => false
+              },
+            )
+          }
+        }
+      },
+      test("agent process exit unsticks a hung prompt") {
+        chat(transport = AcpTransport.fake(FakeAgent(hangPrompt = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            _    <- rt.queue("later")
+            _    <- rt.noteAgentGone
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.toLowerCase.contains("stopped")
+              case _                         => false
+            },
+            msgs.exists {
+              case HostMsg.TurnEnd(_, StopReason.Cancelled) => true
+              case _                                        => false
+            },
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "later", _, _) => true
+              case _                                     => false
+            },
+            msgs.exists {
+              case HostMsg.Queued(items) => items.map(_.text) == List("later")
+              case _                     => false
+            },
+          )
+        }
+      },
+      test("agent process exit unsticks a pending session/load") {
+        delayedLoad().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _     <- rt.ready
+              _     <- rt.resumeSession("sess_disk")
+              _     <- posted.set(Nil)
+              _     <- rt.noteAgentGone
+              mid   <- posted.get
+              _     <- rt.ingestData(held.disk)
+              after <- posted.get
+            yield assertTrue(
+              mid.exists {
+                case HostMsg.SessionLocked("sess_disk", msg) => msg.toLowerCase.contains("resume")
+                case _                                       => false
+              },
+              mid.exists {
+                case HostMsg.Error(message, _) => message.toLowerCase.contains("stopped")
+                case _                         => false
+              },
+              !after.exists {
+                case HostMsg.Transcript(_)  => true
+                case _: HostMsg.UserMessage => true
+                case _: HostMsg.AgentChunk  => true
+                case _                      => false
+              },
+            )
+          }
         }
       },
       test("queue parks the follow-up text without sending it") {
@@ -482,6 +575,44 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("same-chunk set_mode then terminal/create replies with term-1") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(pairSetModeWithTerminal = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.setMode("plan")
+            blob = lines.mkString
+          yield assertTrue(
+            rt.state.planActive,
+            rt.state.modeId.contains("plan"),
+            blob.contains("\"terminalId\":\"term-1\""),
+            !blob.contains("Method not found"),
+          )
+        }
+      },
+      test("x.ai/terminal/create is handled") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          val req = Rpc.request(
+            RpcId.Str("xt"),
+            "x.ai/terminal/create",
+            TerminalCreateParams(command = "echo", args = List("hi")).asJson,
+          )
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.ingestData(Ndjson.encode(Rpc.toLine(req)))
+            blob = lines.mkString
+          yield assertTrue(
+            blob.contains("\"terminalId\":\"term-1\""),
+            !blob.contains("Method not found"),
+          )
+        }
+      },
       test("cycleMode walks Normal to Plan") {
         chat() { (rt, posted) =>
           for
@@ -725,13 +856,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         }
       },
       test("newSession deletes an unused session this process created") {
-        val deleted = scala.collection.mutable.ListBuffer.empty[String]
+        val deleted = scala.collection.mutable.ListBuffer.empty[SessionId]
         chat(scheduleEmptyDelete = deleted += _) { (rt, _) =>
           rt.ready *> rt.newSession.as(assertTrue(deleted.contains("sess_test")))
         }
       },
       test("newSession keeps a session that already has a prompt") {
-        val deleted = scala.collection.mutable.ListBuffer.empty[String]
+        val deleted = scala.collection.mutable.ListBuffer.empty[SessionId]
         chat(scheduleEmptyDelete = deleted += _) { (rt, _) =>
           for
             _ <- rt.ready
@@ -1149,11 +1280,12 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             Rpc.parse(line) match
               case Right(Rpc.Request(id, "session/load", params)) =>
                 ZIO.succeed {
-                  val sid    = params.as[SessionLoadParams].toOption.map(_.sessionId).getOrElse("")
+                  val sid    = params.as[SessionLoadParams].toOption.map(_.sessionId).getOrElse(SessionId.empty)
                   val ndjson =
-                    if sid == "sess_disk" then ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
+                    if sid == SessionId("sess_disk") then
+                      ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
                     else ChatRuntimeSpec.loadReplay(id, sid, "hello from live", "live agent")
-                  if sid == "sess_disk" then held.disk = ndjson else held.live = ndjson
+                  if sid == SessionId("sess_disk") then held.disk = ndjson else held.live = ndjson
                 }
               case Right(msg) => ingest(agent.encodeReplies(msg))
               case Left(_)    => ZIO.unit
@@ -1187,13 +1319,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       transport: AcpTransport = AcpTransport.fake(),
       searchFiles: String => List[MentionFile] = _ => Nil,
       listSessions: () => List[SessionRow] = () => Nil,
-      scheduleEmptyDelete: String => Unit = _ => (),
-      renameOnDisk: (String, RenameOp) => Option[SessionRow] = (_, _) => None,
-      deleteOnDisk: String => Boolean = _ => false,
+      scheduleEmptyDelete: SessionId => Unit = _ => (),
+      renameOnDisk: (SessionId, RenameOp) => Option[SessionRow] = (_, _) => None,
+      deleteOnDisk: SessionId => Boolean = _ => false,
       persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
       readDisk: String => Option[String] = _ => None,
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
-      planOnDisk: String => List[TodoEntry] = _ => Nil,
+      planOnDisk: SessionId => List[TodoEntry] = _ => Nil,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
       for
@@ -1218,7 +1350,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       yield result
     }
 
-  def loadReplay(id: RpcId, sessionId: String, user: String, agent: String): String =
+  def loadReplay(id: RpcId, sessionId: SessionId, user: String, agent: String): String =
     Ndjson.encodeChunk(
       List(
         Rpc.toLine(

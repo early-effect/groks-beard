@@ -24,6 +24,8 @@ build.sbt.semanticdb
 # OS / editor
 .DS_Store
 *.log
+.vscode/
+.mcp.json
 
 # Agent / Playwright review captures. Product images live under media/.
 /*.png

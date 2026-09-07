@@ -5,15 +5,15 @@ import zio.json.ast.Json
 
 final case class TodoEntry(
     content: String,
-    status: String = "pending",
-    priority: String = "medium",
+    status: TodoStatus = TodoStatus.Pending,
+    priority: TodoPriority = TodoPriority.Medium,
     id: Option[String] = None,
 ) derives JsonCodec
 
 object Todos:
-  val Pending: String    = "pending"
-  val InProgress: String = "in_progress"
-  val Completed: String  = "completed"
+  val Pending: TodoStatus    = TodoStatus.Pending
+  val InProgress: TodoStatus = TodoStatus.InProgress
+  val Completed: TodoStatus  = TodoStatus.Completed
 
   def fromPlanJson(json: Json): List[TodoEntry] =
     json match
@@ -27,21 +27,17 @@ object Todos:
   def fromEntries(entries: List[TodoEntry]): List[TodoEntry] =
     entries.map(normalize).filter(_.content.nonEmpty)
 
-  def kind(status: String): String =
-    status.trim.toLowerCase.replace('-', '_').replace(' ', '_') match
-      case "completed" | "complete" | "done"                 => Completed
-      case "in_progress" | "inprogress" | "active" | "doing" => InProgress
-      case _                                                 => Pending
+  def kind(status: TodoStatus): TodoStatus = status
 
-  def mark(status: String): String =
-    kind(status) match
-      case Completed  => "☑"
-      case InProgress => "▶"
-      case _          => "☐"
+  def mark(status: TodoStatus): String =
+    status match
+      case TodoStatus.Completed  => "☑"
+      case TodoStatus.InProgress => "▶"
+      case TodoStatus.Pending    => "☐"
 
   def progress(entries: List[TodoEntry]): (Int, Int) =
     val n    = entries.size
-    val done = entries.count(e => kind(e.status) == Completed)
+    val done = entries.count(_.status == TodoStatus.Completed)
     (done, n)
 
   def headline(entries: List[TodoEntry]): String =
@@ -75,8 +71,8 @@ object Todos:
             normalize(
               TodoEntry(
                 content = s.trim,
-                status = str(obj, "status").getOrElse(Pending),
-                priority = str(obj, "priority").getOrElse("medium"),
+                status = str(obj, "status").map(TodoStatus.fromWire).getOrElse(TodoStatus.Pending),
+                priority = str(obj, "priority").map(TodoPriority.fromWire).getOrElse(TodoPriority.Medium),
                 id = str(obj, "id"),
               )
             )
@@ -86,10 +82,8 @@ object Todos:
   private def normalize(entry: TodoEntry): TodoEntry =
     entry.copy(
       content = entry.content.trim,
-      status = kind(entry.status),
-      priority = entry.priority.trim.toLowerCase match
-        case "high" | "low" => entry.priority.trim.toLowerCase
-        case _              => "medium",
+      status = entry.status,
+      priority = entry.priority,
       id = entry.id.map(_.trim).filter(_.nonEmpty),
     )
 

@@ -6,11 +6,11 @@ import zio.json.*
 
 final case class ChangeIndexFile(
     path: String,
-    kind: String,
+    kind: ChangeKind,
     additions: Int,
     deletions: Int,
     wholeFile: Boolean,
-    toolCallId: String,
+    toolCallId: ToolCallId,
     fromPath: Option[String] = None,
     undoDisabled: Option[String] = None,
     hasOld: Boolean = false,
@@ -18,8 +18,8 @@ final case class ChangeIndexFile(
 ) derives JsonCodec
 
 final case class ChangeIndexSet(
-    sessionId: String,
-    turnId: String,
+    sessionId: SessionId,
+    turnId: TurnId,
     title: String,
     files: List[ChangeIndexFile],
     createdAt: Long,
@@ -41,8 +41,8 @@ object ChangePersist:
     sb.toString
   end encodePath
 
-  def rel(sessionId: String, turnId: String, path: String, side: String): String =
-    s"$sessionId/$turnId/${encodePath(path)}.$side"
+  def rel(sessionId: SessionId, turnId: TurnId, path: String, side: String): String =
+    s"${sessionId.value}/${turnId.value}/${encodePath(path)}.$side"
 
   def rels(sets: List[ChangeSet]): List[String] =
     sets.flatMap { s =>
@@ -64,7 +64,7 @@ object ChangePersist:
         files = s.files.map { f =>
           ChangeIndexFile(
             path = f.path,
-            kind = ChangeKind.wire(f.kind),
+            kind = f.kind,
             additions = f.additions,
             deletions = f.deletions,
             wholeFile = f.wholeFile,
@@ -86,7 +86,7 @@ object ChangePersist:
         val missing = (f.hasOld && oldText.isEmpty) || (f.hasNew && newText.isEmpty)
         FileChange(
           path = f.path,
-          kind = ChangeKind.fromWire(f.kind),
+          kind = f.kind,
           additions = f.additions,
           deletions = f.deletions,
           wholeFile = f.wholeFile,

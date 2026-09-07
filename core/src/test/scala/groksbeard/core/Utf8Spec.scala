@@ -13,6 +13,13 @@ object Utf8Spec extends ZIOSpecDefault:
           assertTrue(Utf8.byteLength(t) <= cap, s.startsWith(t))
         }
       },
+      test("keepTailToByteCap never exceeds the cap and is a suffix") {
+        val text = Gen.stringBounded(0, 64)(Gen.char.filterNot(_.isSurrogate))
+        check(text, Gen.int(0, 180)) { (s, cap) =>
+          val t = Utf8.keepTailToByteCap(s, cap)
+          assertTrue(Utf8.byteLength(t) <= cap, s.endsWith(t))
+        }
+      },
       test("truncateToByteCap is identity when the text already fits") {
         val text = Gen.stringBounded(0, 40)(Gen.asciiChar)
         check(text, Gen.int(0, 80)) { (s, extra) =>

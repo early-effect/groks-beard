@@ -44,6 +44,71 @@ object SessionUpdateSpec extends ZIOSpecDefault:
         )
         assertTrue(msgs == List(HostMsg.SessionMeta("", "", "", occupancy = Some(Occupancy(80, 500)))))
       },
+      test("execute tool_call keeps the shell command as input") {
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val msgs    = SessionUpdate.hostMsgs(executeStart("call_1", command), "t1")
+        val row     = msgs.collectFirst { case HostMsg.ToolGroup(_, tools) => tools.head }
+        assertTrue(
+          row.exists(_.title == "run_terminal_command"),
+          row.exists(_.input.contains(command)),
+          row.exists(_.output.isEmpty),
+        )
+      },
+      test("in-progress execute output is watched before the command finishes") {
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stream  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        val start   = SessionUpdate.hostMsgs(executeStart("call_1", command), "t1")
+        val live    = SessionUpdate.hostMsgs(executeProgress("call_1", command, stream), "t1")
+        val model   = (start ++ live).foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        val row     = model.turns.head.tools.head
+        val act     = TurnActivity.fromTurn(model.turns.head, 0)
+        assertTrue(
+          row.input.contains(command),
+          row.output.exists(_.contains("Darwin")),
+          ToolStatus.isLive(row.status),
+          act.kind == ActivityKind.Execute,
+          act.detail.exists(_.contains("Darwin")),
+          !act.detail.exists(_.contains("echo beard-terminal-probe")),
+        )
+      },
+      test("completed execute tool_call_update keeps nested stdout") {
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stdout  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        val start   = SessionUpdate.hostMsgs(executeStart("call_1", command), "t1")
+        val done    = SessionUpdate.hostMsgs(executeDone("call_1", command, stdout), "t1")
+        val model   = (start ++ done).foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        val row     = model.turns.head.tools.head
+        assertTrue(
+          row.title == "run_terminal_command",
+          row.kind == ToolKind.Execute,
+          row.input.contains(command),
+          row.output.exists(_.contains("beard-terminal-probe")),
+          row.output.exists(_.contains("Darwin")),
+        )
+      },
+      test("a grok completed execute without kind or title still expands to command and stdout") {
+        val command   = "echo beard-terminal-probe\npwd\nuname -s"
+        val stdout    = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        val start     = SessionUpdate.hostMsgs(executeStart("call_1", command), "t1")
+        val described =
+          SessionUpdate.hostMsgs(executeDescribed("call_1", command, "Run exact user-requested probe command"), "t1")
+        val done  = SessionUpdate.hostMsgs(executeFinished("call_1", command, stdout), "t1")
+        val live  = (start ++ described).foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+        val model = done.foldLeft(live)(ChatModel.applyMsg)
+        val row   = model.turns.head.tools.head
+        assertTrue(
+          ToolStatus.isLive(live.turns.head.tools.head.status),
+          live.turns.head.tools.head.input.contains(command),
+          !live.turns.head.tools.head.output.exists(_.contains("Run exact")),
+          row.title == "run_terminal_command",
+          row.kind == ToolKind.Execute,
+          row.status == ToolStatus.Completed,
+          row.input.contains(command),
+          row.output.exists(_.contains("beard-terminal-probe")),
+          row.output.exists(_.contains("Darwin")),
+          !row.output.exists(_.contains("exit: 0")),
+        )
+      },
       test("unknown sessionUpdate is ignored") {
         val msgs = SessionUpdate.hostMsgs(
           Json.Obj(
@@ -86,6 +151,104 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           )
         )
       },
+    )
+
+  private def executeStart(id: String, command: String): Json =
+    Json.Obj(
+      "sessionId" -> Json.Str("sess_test"),
+      "update"    -> Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call"),
+        "toolCallId"    -> Json.Str(id),
+        "title"         -> Json.Str("run_terminal_command"),
+        "rawInput"      -> Json.Obj(
+          "command"     -> Json.Str(command),
+          "description" -> Json.Str("Run exact probe command as requested"),
+        ),
+      ),
+    )
+
+  private def executeDescribed(id: String, command: String, description: String): Json =
+    Json.Obj(
+      "sessionId" -> Json.Str("sess_test"),
+      "update"    -> Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str(id),
+        "kind"          -> Json.Str("execute"),
+        "title"         -> Json.Str(s"Execute `$command`"),
+        "rawInput"      -> Json.Obj("command" -> Json.Str(command), "description" -> Json.Str(description)),
+        "content"       -> Json.Arr(
+          Json.Obj(
+            "type"    -> Json.Str("content"),
+            "content" -> Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(description)),
+          )
+        ),
+      ),
+    )
+
+  private def executeFinished(id: String, command: String, stdout: String): Json =
+    Json.Obj(
+      "sessionId" -> Json.Str("sess_test"),
+      "update"    -> Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str(id),
+        "status"        -> Json.Str("completed"),
+        "content"       -> Json.Arr(
+          Json.Obj(
+            "type"    -> Json.Str("content"),
+            "content" -> Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(stdout)),
+          )
+        ),
+        "rawOutput" -> Json.Obj(
+          "output_for_prompt" -> Json.Str(s"exit: 0\n$stdout"),
+          "command"           -> Json.Str(command),
+          "exit_code"         -> Json.Num(0),
+        ),
+      ),
+    )
+
+  private def executeProgress(id: String, command: String, stdout: String): Json =
+    Json.Obj(
+      "sessionId" -> Json.Str("sess_test"),
+      "update"    -> Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str(id),
+        "kind"          -> Json.Str("execute"),
+        "status"        -> Json.Str("in_progress"),
+        "title"         -> Json.Str(s"Execute `$command`"),
+        "rawInput"      -> Json.Obj(
+          "command"     -> Json.Str(command),
+          "description" -> Json.Str("Run exact probe command as requested"),
+        ),
+        "content" -> Json.Arr(
+          Json.Obj(
+            "type"    -> Json.Str("content"),
+            "content" -> Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(stdout)),
+          )
+        ),
+      ),
+    )
+
+  private def executeDone(id: String, command: String, stdout: String): Json =
+    Json.Obj(
+      "sessionId" -> Json.Str("sess_test"),
+      "update"    -> Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str(id),
+        "kind"          -> Json.Str("execute"),
+        "status"        -> Json.Str("completed"),
+        "title"         -> Json.Str(s"Execute `$command`"),
+        "content"       -> Json.Arr(
+          Json.Obj(
+            "type"    -> Json.Str("content"),
+            "content" -> Json.Obj("type" -> Json.Str("text"), "text" -> Json.Str(stdout)),
+          )
+        ),
+        "rawOutput" -> Json.Obj(
+          "output_for_prompt" -> Json.Str(s"exit: 0\n$stdout"),
+          "command"           -> Json.Str(command),
+          "exit_code"         -> Json.Num(0),
+        ),
+      ),
     )
 
   private def chunk(kind: String, text: String): Json =

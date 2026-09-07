@@ -885,6 +885,179 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("expanding a finished execute tool still shows command and stdout after the live tail") {
+        val bridge  = PushBridge()
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stream  = "one\ntwo\nthree\nbeard-terminal-probe"
+        val stdout  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "probe"))
+                bridge.push(
+                  HostMsg.ToolGroup(
+                    "t1",
+                    List(
+                      ToolRow(
+                        ToolCallId("term-1"),
+                        "run_terminal_command",
+                        ToolKind.Execute,
+                        ToolStatus.InProgress,
+                        input = Some(command),
+                        output = Some(stream),
+                      )
+                    ),
+                  )
+                )
+              }
+              tail <- waitPresent(root, "tool-tail-term-1") *>
+                root.getByTestId("tool-tail-term-1").innerText
+              _ <- ZIO.succeed {
+                bridge.push(
+                  HostMsg.ToolGroup(
+                    "t1",
+                    List(
+                      ToolRow(
+                        ToolCallId("term-1"),
+                        "Tool",
+                        ToolKind.Other,
+                        ToolStatus.Completed,
+                        output = Some(stdout),
+                      )
+                    ),
+                  )
+                )
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+              }
+              _ <- waitGone(root, "tool-tail-term-1")
+              details = root.element
+                .querySelector("""[data-testid="tool-term-1"]""")
+                .asInstanceOf[ascent.dom.HTMLElement]
+              _       <- ZIO.succeed { details.setAttribute("open", "") }
+              summary <- ZIO.succeed(
+                details.querySelector("summary").asInstanceOf[ascent.dom.HTMLElement].innerText
+              )
+              input <- waitPresent(root, "tool-input-term-1") *>
+                root.getByTestId("tool-input-term-1").innerText
+              output <- waitPresent(root, "tool-output-term-1") *>
+                root.getByTestId("tool-output-term-1").innerText
+            yield assertTrue(
+              tail.contains("beard-terminal-probe"),
+              !tail.contains("uname -s"),
+              summary.contains("run_terminal_command"),
+              !summary.contains("Darwin"),
+              input.contains("echo beard-terminal-probe"),
+              input.contains("uname -s"),
+              output.contains("beard-terminal-probe"),
+              output.contains("Darwin"),
+            )
+          }
+        yield result
+        end for
+      },
+      test("a running execute tool shows a live output tail until expanded") {
+        val bridge  = PushBridge()
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stdout  = "one\ntwo\nthree\nbeard-terminal-probe\nDarwin\n"
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "probe"))
+                bridge.push(
+                  HostMsg.ToolGroup(
+                    "t1",
+                    List(
+                      ToolRow(
+                        ToolCallId("term-1"),
+                        "run_terminal_command",
+                        ToolKind.Execute,
+                        ToolStatus.InProgress,
+                        input = Some(command),
+                        output = Some(stdout),
+                      )
+                    ),
+                  )
+                )
+              }
+              tail <- waitPresent(root, "tool-tail-term-1") *>
+                root.getByTestId("tool-tail-term-1").innerText
+              activity <- waitPresent(root, "activity-detail") *>
+                root.getByTestId("activity-detail").innerText
+              details = root.element
+                .querySelector("""[data-testid="tool-term-1"]""")
+                .asInstanceOf[ascent.dom.HTMLElement]
+              _     <- ZIO.succeed { details.setAttribute("open", "") }
+              input <- waitPresent(root, "tool-input-term-1") *>
+                root.getByTestId("tool-input-term-1").innerText
+              output <- waitPresent(root, "tool-output-term-1") *>
+                root.getByTestId("tool-output-term-1").innerText
+            yield assertTrue(
+              tail.contains("Darwin"),
+              !tail.contains("echo beard-terminal-probe"),
+              activity.contains("Darwin"),
+              input.contains("echo beard-terminal-probe"),
+              output.contains("one"),
+              output.contains("Darwin"),
+            )
+          }
+        yield result
+        end for
+      },
+      test("execute tool details keep the command and its output") {
+        val bridge  = PushBridge()
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stdout  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                bridge.push(HostMsg.UserMessage("t1", "probe"))
+                bridge.push(
+                  HostMsg.ToolGroup(
+                    "t1",
+                    List(
+                      ToolRow(
+                        ToolCallId("term-1"),
+                        "run_terminal_command",
+                        ToolKind.Execute,
+                        ToolStatus.Completed,
+                        input = Some(command),
+                        output = Some(stdout),
+                      )
+                    ),
+                  )
+                )
+                bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
+              }
+              _ <- waitPresent(root, "tool-term-1")
+              details = root.element
+                .querySelector("""[data-testid="tool-term-1"]""")
+                .asInstanceOf[ascent.dom.HTMLElement]
+              _       <- ZIO.succeed { details.setAttribute("open", "") }
+              summary <- ZIO.succeed(
+                details.querySelector("summary").asInstanceOf[ascent.dom.HTMLElement].innerText
+              )
+              input <- waitPresent(root, "tool-input-term-1") *>
+                root.getByTestId("tool-input-term-1").innerText
+              output <- waitPresent(root, "tool-output-term-1") *>
+                root.getByTestId("tool-output-term-1").innerText
+            yield assertTrue(
+              summary.contains("run_terminal_command"),
+              !summary.contains("Darwin"),
+              input.contains("echo beard-terminal-probe"),
+              input.contains("uname -s"),
+              output.contains("beard-terminal-probe"),
+              output.contains("Darwin"),
+            )
+          }
+        yield result
+        end for
+      },
       test("thought details keep the full thinking body") {
         val bridge = PushBridge()
         val line   = ("thinking " * 40).trim
@@ -1057,9 +1230,9 @@ final class PushBridge extends HostBridge:
 
 /** ResumeSession holds the snapshot until [[completeResume]], so tests can see loading chrome. */
 final class GatedResumeBridge extends HostBridge:
-  private var listener: HostMsg => Unit = _ => ()
-  private var pending: Option[String]   = None
-  private val sessions                  = List(
+  private var listener: HostMsg => Unit  = _ => ()
+  private var pending: Option[SessionId] = None
+  private val sessions                   = List(
     SessionRow("preview", "New session", activityMs = 20),
     SessionRow(
       "disk-1",
@@ -1077,9 +1250,9 @@ final class GatedResumeBridge extends HostBridge:
         emit(HostMsg.SessionList(sessions, "", openPicker = false))
       case WebviewMsg.ResumeSession(id) =>
         pending = Some(id)
-        val title = sessions.find(_.id == id).map(_.title).getOrElse(id)
+        val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
         emit(HostMsg.ClearTranscript)
-        emit(HostMsg.SessionMeta(id, title, "normal"))
+        emit(HostMsg.SessionMeta(id, title, ModeId.Normal))
       case WebviewMsg.NewSession =>
         emit(HostMsg.ClearTranscript)
         emit(HostMsg.SessionList(sessions, "", openPicker = false))

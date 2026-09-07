@@ -6,19 +6,19 @@ import zio.json.*
 import zio.json.ast.Json
 
 final case class SessionActivity(
-    id: String,
+    id: SessionId,
     updatesMtimeMs: Option[Long] = None,
     eventsMtimeMs: Option[Long] = None,
     summaryMtimeMs: Option[Long] = None,
 )
 
 final case class SessionRow(
-    id: String,
+    id: SessionId,
     title: String,
     activityMs: Long = 0,
     summary: Option[String] = None,
     lastTurn: Option[String] = None,
-    modelId: Option[String] = None,
+    modelId: Option[ModelId] = None,
     messages: Option[Int] = None,
 ) derives zio.json.JsonCodec
 
@@ -60,10 +60,10 @@ object SessionIndex:
   def encodedCwdExceedsLimit(encoded: String): Boolean =
     Utf8.byteLength(encoded) > MaxEncodedCwdBytes
 
-  def sessionPath(home: String, cwd: String, sessionId: String): String =
-    join(join(sessionsRoot(home), encodeCwd(cwd)), sessionId)
+  def sessionPath(home: String, cwd: String, sessionId: SessionId): String =
+    join(join(sessionsRoot(home), encodeCwd(cwd)), sessionId.value)
 
-  def readPlan(fs: SessionFs, home: String, cwd: String, sessionId: String): BeardError.Result[List[TodoEntry]] =
+  def readPlan(fs: SessionFs, home: String, cwd: String, sessionId: SessionId): BeardError.Result[List[TodoEntry]] =
     if sessionId.isEmpty then ZIO.succeed(Nil)
     else
       fs.readText(join(sessionPath(home, cwd, sessionId), "plan.json")).map {
@@ -79,13 +79,13 @@ object SessionIndex:
     rows.sortBy(r => -r.activityMs)
 
   /** Keep `ids` order; drop missing ids; append rows that are not in `ids` by last used. */
-  def holdOrder(rows: List[SessionRow], ids: List[String]): List[SessionRow] =
+  def holdOrder(rows: List[SessionRow], ids: List[SessionId]): List[SessionRow] =
     val byId  = rows.map(r => r.id -> r).toMap
     val held  = ids.flatMap(byId.get)
     val extra = byLastUsed(rows.filterNot(r => ids.contains(r.id)))
     held ++ extra
 
-  def present(rows: List[SessionRow], order: Option[List[String]]): List[SessionRow] =
+  def present(rows: List[SessionRow], order: Option[List[SessionId]]): List[SessionRow] =
     order match
       case None      => byLastUsed(rows)
       case Some(ids) => holdOrder(rows, ids)
@@ -105,7 +105,7 @@ object SessionIndex:
       }
     kept.toList
 
-  def touchCurrent(rows: List[SessionRow], currentId: String, nowMs: Long, skip: Boolean): List[SessionRow] =
+  def touchCurrent(rows: List[SessionRow], currentId: SessionId, nowMs: Long, skip: Boolean): List[SessionRow] =
     byLastUsed(
       if currentId.isEmpty || skip then rows
       else
@@ -118,14 +118,14 @@ object SessionIndex:
   def index(stats: List[SessionActivity]): List[SessionActivity] =
     stats.sortBy(s => -activityMs(s))
 
-  def page(ordered: List[SessionActivity], offset: Int, limit: Int = PageSize): List[String] =
+  def page(ordered: List[SessionActivity], offset: Int, limit: Int = PageSize): List[SessionId] =
     ordered.slice(offset, offset + limit).map(_.id)
 
   def matches(row: SessionRow, query: String): Boolean =
     val q = query.trim.toLowerCase
     if q.isEmpty then true
     else
-      List(Some(row.id), Some(row.title), row.summary, row.lastTurn, row.modelId).flatten
+      List(Some(row.id.value), Some(row.title), row.summary, row.lastTurn, row.modelId.map(_.value)).flatten
         .exists(_.toLowerCase.contains(q))
 
   def filter(rows: List[SessionRow], query: String): List[SessionRow] =
@@ -134,9 +134,9 @@ object SessionIndex:
   private val OpaqueId =
     raw"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}".r
 
-  def isOpaqueId(title: String, id: String = ""): Boolean =
+  def isOpaqueId(title: String, id: SessionId = SessionId.empty): Boolean =
     val t = title.trim
-    t.isEmpty || t == id || OpaqueId.matches(t)
+    t.isEmpty || t == id.value || OpaqueId.matches(t)
 
   def displayTitle(row: SessionRow): String =
     val named = row.title.trim
@@ -170,9 +170,10 @@ object SessionIndex:
     groupDirs(fs, home, cwd).flatMap { groups =>
       ZIO
         .foreach(groups) { group =>
-          fs.listNames(group).flatMap { ids =>
-            ZIO.foreach(ids) { id =>
-              val dir = join(group, id)
+          fs.listNames(group).flatMap { names =>
+            ZIO.foreach(names) { name =>
+              val id  = SessionId(name)
+              val dir = join(group, name)
               fs.isDirectory(dir).flatMap { isDir =>
                 if !isDir then ZIO.none
                 else

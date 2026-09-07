@@ -103,12 +103,21 @@ final class ChatView(
         val args = Spawn.grokAgentStdioArgs()
         log(s"spawning $cmd ${args.mkString(" ")}")
         val note = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
-        val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+        val gone = new java.util.concurrent.atomic.AtomicReference[UIO[Unit]](ZIO.unit)
+        val caps = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = true)
         val home = GrokHome(env)
         val disk = new ChangeDisk(context)
         HostRuntime.runScoped {
           NodeTransport
-            .spawn(cmd, args, cwd, log, onErr = line => note.get()(line), run = HostRuntime.runUIO)
+            .spawn(
+              cmd,
+              args,
+              cwd,
+              log,
+              onErr = line => note.get()(line),
+              onExit = _ => gone.get(),
+              run = HostRuntime.runUIO,
+            )
             .flatMap { transport =>
               ChatRuntime
                 .make(
@@ -137,11 +146,13 @@ final class ChatView(
                       undo = review.applyUndo,
                       storeChanged = ZIO.succeed(tree.refresh()),
                       onFollow = (path, line) => ZIO.succeed(review.follow(path, line)),
-                    )
+                    ) ++
+                    NodeTerminals.layer(cwd)
                 )
                 .flatMap { rt =>
                   ZIO.succeed {
                     note.set(rt.noteAgentLine)
+                    gone.set(rt.noteAgentGone)
                     runtime = Some(rt)
                   } *> disk.load.orElseSucceed(Nil).flatMap(rt.restoreChanges)
                 }
@@ -173,7 +184,7 @@ final class ChatView(
       case None =>
         val _ = vscode.window.showWarningMessage("No active editor.")
       case Some(chip) =>
-        runtime.foreach(rt => HostRuntime.runUIO(rt.addChip(chip.copy(source = "file"))))
+        runtime.foreach(rt => HostRuntime.runUIO(rt.addChip(chip.copy(source = ChipSource.File))))
         val _ = vscode.window.showInformationMessage(s"Added ${PromptChip.formatAtRef(chip)}")
 
   def copySelectionAsGrokRef(): Unit =
@@ -227,7 +238,7 @@ final class ChatView(
         ed.document.uri.fsPath,
         workspaceRoot,
         languageId = Some(ed.document.languageId),
-        source = "active",
+        source = ChipSource.Active,
       )
     }
 

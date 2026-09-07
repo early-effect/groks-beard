@@ -33,4 +33,25 @@ object Utf8:
         i += (if size == 4 then 2 else 1)
       end while
       text.substring(0, i)
+
+  /** Drop a prefix so the remainder fits `cap` bytes, on a character boundary. */
+  def keepTailToByteCap(text: String, cap: Int): String =
+    val total = byteLength(text)
+    if total <= cap then text
+    else
+      var skip = total - cap
+      var i    = 0
+      while i < text.length && skip > 0 do
+        val c    = text.charAt(i).toInt
+        val size =
+          if c <= 0x7f then 1
+          else if c <= 0x7ff then 2
+          else if c >= 0xd800 && c <= 0xdbff then 4
+          else 3
+        skip -= size
+        i += (if size == 4 then 2 else 1)
+      end while
+      text.substring(i)
+    end if
+  end keepTailToByteCap
 end Utf8

@@ -1,17 +1,17 @@
 package groksbeard.core
 
 final class EmptySessionTracker:
-  private val created = scala.collection.mutable.Set.empty[String]
-  private val history = scala.collection.mutable.Set.empty[String]
+  private val created = scala.collection.mutable.Set.empty[SessionId]
+  private val history = scala.collection.mutable.Set.empty[SessionId]
 
-  def markCreated(id: String): Unit = created += id
+  def markCreated(id: SessionId): Unit = created += id
 
-  def markHasHistory(id: String): Unit = history += id
+  def markHasHistory(id: SessionId): Unit = history += id
 
-  def shouldDelete(id: String): Boolean =
+  def shouldDelete(id: SessionId): Boolean =
     created.contains(id) && !history.contains(id)
 
-  def forget(id: String): Unit =
+  def forget(id: SessionId): Unit =
     created -= id
     history -= id
 end EmptySessionTracker

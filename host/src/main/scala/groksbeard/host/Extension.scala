@@ -28,7 +28,7 @@ object Extension:
         val fromChat = chatRef.toList.flatMap(_.current.toList.flatMap(_.pendingSets))
         val side     = mcpHost.sidecar
         if side.isEmpty then fromChat
-        else fromChat :+ ChangeSet("", "sidecar", "TUI", side, 0L)
+        else fromChat :+ ChangeSet(SessionId.empty, TurnId("sidecar"), "TUI", side, 0L)
       )
     treeRef = Some(tree)
     val chat = new ChatView(context, review, tree, status, line => out.appendLine(line), mcpHost.rememberSelection)
@@ -79,7 +79,7 @@ object Extension:
         "groksBeard.openDiff",
         (arg: js.Any) =>
           val id = Extension.asString(arg)
-          if id.nonEmpty then chat.current.foreach(rt => HostRuntime.runUIO(rt.openDiff(id)))
+          if id.nonEmpty then chat.current.foreach(rt => HostRuntime.runUIO(rt.openDiff(RequestId(id))))
           else chat.current.foreach(rt => HostRuntime.runUIO(rt.openChanges)),
       )
     )
@@ -154,7 +154,7 @@ object Extension:
               .`then` { (value: js.UndefOr[String]) =>
                 value.toOption.map(_.trim).filter(_.nonEmpty).foreach { title =>
                   SessionEdit.parseRename(title) match
-                    case Right(op) => HostRuntime.runUIO(rt.renameSession(rt.focusedId.getOrElse(""), op))
+                    case Right(op) => HostRuntime.runUIO(rt.renameSession(rt.focusedId.getOrElse(SessionId.empty), op))
                     case Left(err) if err != "empty" =>
                       val _ = vscode.window.showErrorMessage(err)
                     case _ => ()
@@ -169,7 +169,7 @@ object Extension:
         "groksBeard.deleteSession",
         () =>
           chat.current.foreach { rt =>
-            val id = rt.focusedId.getOrElse("")
+            val id = rt.focusedId.getOrElse(SessionId.empty)
             if id.isEmpty then
               val _ = vscode.window.showWarningMessage("No session to delete.")
             else

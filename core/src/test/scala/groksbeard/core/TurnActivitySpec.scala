@@ -23,7 +23,27 @@ object TurnActivitySpec extends ZIOSpecDefault:
       },
       test("thought without agent is Thinking") {
         val turn = TurnView("t1", thought = "hmm")
-        assertTrue(TurnActivity.fromTurn(turn, 0).kind == ActivityKind.Think)
+        val got  = TurnActivity.fromTurn(turn, 0)
+        assertTrue(got.kind == ActivityKind.Think, got.detail.contains("hmm"))
+      },
+      test("a running execute tool watches the output tail") {
+        val out  = (1 to 6).map(i => s"line-$i").mkString("\n")
+        val turn = TurnView(
+          "t1",
+          tools = List(
+            ToolRow("x1", "run_terminal_command", "execute", "in_progress", output = Some(out))
+          ),
+        )
+        val got = TurnActivity.fromTurn(turn, 2000)
+        assertTrue(
+          got.kind == ActivityKind.Execute,
+          got.label == "Running...",
+          got.detail.contains("line-6"),
+          !got.detail.exists(_.contains("line-1")),
+          ToolView.liveTail(out).contains("line-4"),
+          ToolView.liveTail(out).contains("line-6"),
+          !ToolView.liveTail(out).contains("line-1"),
+        )
       },
       test("a pending edit tool wins over thinking") {
         val turn = TurnView(

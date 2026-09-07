@@ -12,6 +12,7 @@ object AgentLogSpec extends ZIOSpecDefault:
         assertTrue(
           got.exists(_.toLowerCase.contains("atlassian")),
           got.exists(_.toLowerCase.contains("authentication")),
+          got.exists(m => !m.toLowerCase.contains("stopped") && !m.toLowerCase.contains("turn")),
           AgentLog.classify("info: ready").isEmpty,
         )
       }

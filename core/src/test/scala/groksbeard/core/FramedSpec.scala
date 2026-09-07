@@ -36,7 +36,7 @@ object FramedSpec extends ZIOSpecDefault:
         var seen: Option[(String, Boolean)] = None
         framed.feed(fake.encodeReplies(req)).foreach {
           case Rpc.Request(_, "terminal/create", _) =>
-            seen = Some((framed.state.modeId.getOrElse("unset"), framed.state.planActive))
+            seen = Some((framed.state.modeId.map(_.value).getOrElse("unset"), framed.state.planActive))
           case _ => ()
         }
         assertTrue(seen.contains(("plan", true)), framed.state.planActive)

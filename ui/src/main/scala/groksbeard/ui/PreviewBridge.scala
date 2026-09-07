@@ -5,20 +5,20 @@ import groksbeard.core.*
 final class PreviewBridge extends HostBridge:
   private var listener: HostMsg => Unit = _ => ()
   private var settings: SettingsState   = SettingsState.defaults
-  private var modeId: String            = "normal"
-  private var modelId: String           = "grok-4.6"
+  private var modeId: ModeId            = ModeId.Normal
+  private var modelId: ModelId          = ModelId("grok-4.6")
   private var effort: String            = "high"
 
   private val modes = List(
-    ModeOption("normal", "Normal"),
-    ModeOption("plan", "Plan"),
-    ModeOption("auto", "Auto"),
-    ModeOption("always-approve", "Always approve"),
+    ModeOption(ModeId.Normal, "Normal"),
+    ModeOption(ModeId.Plan, "Plan"),
+    ModeOption(ModeId.Auto, "Auto"),
+    ModeOption(ModeId.AlwaysApprove, "Always approve"),
   )
 
   private val models = List(
-    ModelOption("grok-4.6", "Grok 4.6", _meta = Some(Effort.grokMeta())),
-    ModelOption("grok-code-fast-1", "Grok Code Fast"),
+    ModelOption(ModelId("grok-4.6"), "Grok 4.6", _meta = Some(Effort.grokMeta())),
+    ModelOption(ModelId("grok-code-fast-1"), "Grok Code Fast"),
   )
 
   private val commands = SessionCommands.merge(
@@ -30,14 +30,14 @@ final class PreviewBridge extends HostBridge:
   )
 
   private var sessions = List(
-    SessionRow("preview", "New session", activityMs = 20),
+    SessionRow(SessionId("preview"), "New session", activityMs = 20),
     SessionRow(
-      "disk-1",
+      SessionId("disk-1"),
       "Effect-TS Grok Build VS Code Plugin Plan",
       activityMs = 10,
       lastTurn = Some("Continue the plan"),
     ),
-    SessionRow("disk-2", "Ascent chat chrome", activityMs = 5, summary = Some("Composer and cards")),
+    SessionRow(SessionId("disk-2"), "Ascent chat chrome", activityMs = 5, summary = Some("Composer and cards")),
   )
 
   private val files = List(
@@ -50,27 +50,27 @@ final class PreviewBridge extends HostBridge:
     List(
       ChangeFileView(
         PreviewDiffs.MainPath,
-        "modify",
+        ChangeKind.Modify,
         2,
         1,
         wholeFile = true,
-        turnId = "t3",
+        turnId = TurnId("t3"),
         turnTitle = "Patch Main.scala",
       )
     )
-  private var currentId  = ""
+  private var currentId  = SessionId.empty
   private var pickerOpen = false
 
   def post(msg: WebviewMsg): Unit =
     msg match
       case WebviewMsg.Ready =>
-        currentId = ""
+        currentId = SessionId.empty
         pickerOpen = false
         emit(HostMsg.Ready)
-        emitMeta("", "Grok's Beard")
+        emitMeta(SessionId.empty, "Grok's Beard")
         emit(HostMsg.AvailableCommands(commands))
         emit(HostMsg.settings(settings))
-        emit(HostMsg.SessionList(sessions, "", openPicker = false))
+        emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
       case WebviewMsg.MentionQuery(query) =>
         val q    = query.toLowerCase
         val hits =
@@ -124,17 +124,17 @@ final class PreviewBridge extends HostBridge:
           case _ => settings
         emit(HostMsg.settings(settings))
       case WebviewMsg.Send(text) =>
-        emit(HostMsg.UserMessage("preview-turn", text))
-        emit(HostMsg.AgentChunk("preview-turn", s"Echo: **$text**"))
+        emit(HostMsg.UserMessage(TurnId("preview-turn"), text))
+        emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Echo: **$text**"))
         emit(
           HostMsg.ToolGroup(
-            "preview-turn",
+            TurnId("preview-turn"),
             List(
               ToolRow(
-                "call_1",
+                ToolCallId("call_1"),
                 "Edit Main.scala",
-                "edit",
-                "completed",
+                ToolKind.Edit,
+                ToolStatus.Completed,
                 additions = Some(2),
                 deletions = Some(1),
                 input = Some(PreviewDiffs.MainPath),
@@ -143,38 +143,38 @@ final class PreviewBridge extends HostBridge:
           )
         )
         emitChanges()
-        emit(HostMsg.TurnEnd("preview-turn", "end_turn"))
+        emit(HostMsg.TurnEnd(TurnId("preview-turn"), StopReason.EndTurn))
       case WebviewMsg.Queue(text) =>
-        emit(HostMsg.Queued(List(QueuedPrompt("preview-q", text))))
+        emit(HostMsg.Queued(List(QueuedPrompt(QueueId("preview-q"), text))))
       case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionSubmit(_, _) |
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
-        emit(HostMsg.TurnEnd("t2", "end_turn"))
+        emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.EndTurn))
       case WebviewMsg.MentionPick(path, absPath) =>
-        emit(HostMsg.chip(PromptChip(path, absPath, source = "mention")))
+        emit(HostMsg.chip(PromptChip(path, absPath, source = ChipSource.Mention)))
       case WebviewMsg.SlashPick(name) =>
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
       case WebviewMsg.NewSession =>
-        currentId = ""
+        currentId = SessionId.empty
         pickerOpen = false
         emit(HostMsg.ClearTranscript)
-        emitMeta("", "Grok's Beard")
-        emit(HostMsg.SessionList(sessions, "", openPicker = false))
+        emitMeta(SessionId.empty, "Grok's Beard")
+        emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
       case WebviewMsg.ResumeSession(id) =>
         currentId = id
         pickerOpen = false
-        val title = sessions.find(_.id == id).map(_.title).getOrElse(id)
+        val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
         emit(HostMsg.ClearTranscript)
         emitMeta(id, title)
         emit(
           HostMsg.Transcript(
             List(
               TurnView(
-                "resume-turn",
+                TurnId("resume-turn"),
                 user = Some(TurnUser("hello from disk")),
                 agent = s"Resumed **$title**.",
-                stopReason = Some("end_turn"),
+                stopReason = Some(StopReason.EndTurn),
               )
             )
           )
@@ -200,11 +200,11 @@ final class PreviewBridge extends HostBridge:
         val target = if id.nonEmpty then id else currentId
         sessions = sessions.filterNot(_.id == target)
         if target == currentId then
-          currentId = ""
+          currentId = SessionId.empty
           pickerOpen = false
           emit(HostMsg.ClearTranscript)
-          emitMeta("", "Grok's Beard")
-          emit(HostMsg.SessionList(sessions, "", openPicker = false))
+          emitMeta(SessionId.empty, "Grok's Beard")
+          emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
         else emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
       case WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
         ()
@@ -250,7 +250,7 @@ final class PreviewBridge extends HostBridge:
   private def emit(msg: HostMsg): Unit =
     listener(msg)
 
-  private def emitMeta(sessionId: String = currentId, title: String = "Grok's Beard"): Unit =
+  private def emitMeta(sessionId: SessionId = currentId, title: String = "Grok's Beard"): Unit =
     emit(
       HostMsg.SessionMeta(sessionId, title, modeId, modes, modelId = modelId, availableModels = models, effort = effort)
     )

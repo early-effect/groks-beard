@@ -267,14 +267,18 @@ object McpTools:
     )
   end selectionResult
 
-  def sidecarFile(path: String, kind: String): FileChange =
+  def sidecarFile(path: String, kind: FileKind): FileChange =
     FileChange(
       path = path,
-      kind = ChangeKind.fromWire(kind),
+      kind = kind match
+        case FileKind.add    => ChangeKind.Add
+        case FileKind.modify => ChangeKind.Modify
+        case FileKind.delete => ChangeKind.Delete
+        case FileKind.move   => ChangeKind.Move,
       additions = 0,
       deletions = 0,
       wholeFile = false,
-      toolCallId = "sidecar",
+      toolCallId = ToolCallId("sidecar"),
       undoDisabled = Some("Undo needs an editor chat snapshot."),
     )
 end McpTools

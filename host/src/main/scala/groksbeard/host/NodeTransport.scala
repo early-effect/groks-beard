@@ -5,13 +5,16 @@ import groksbeard.core.BeardError
 import groksbeard.core.BeardError.orSystem
 import zio.*
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.scalajs.js
 
 final class NodeTransport(
     child: ChildProcessHandle,
     log: String => Unit,
     onErr: String => UIO[Unit],
+    onExit: Int => UIO[Unit],
     run: UIO[Any] => Unit,
+    stopping: AtomicBoolean,
 ) extends AcpTransport:
   private var ingest: String => UIO[Unit] = _ => ZIO.unit
   child.stdout.setEncoding("utf8")
@@ -25,6 +28,14 @@ final class NodeTransport(
       if line.nonEmpty then run(onErr(line)),
   )
   child.on("error", (err: js.Any) => log("grok spawn error: " + err))
+  child.on(
+    "exit",
+    (code: js.Any) =>
+      if !stopping.get() then
+        val parsed = js.Dynamic.global.parseInt(code, 10).asInstanceOf[Double]
+        val n      = if parsed.isNaN then -1 else parsed.toInt
+        run(onExit(n)),
+  )
 
   def attach(next: String => UIO[Unit]): UIO[Unit] =
     ZIO.succeed { ingest = next }
@@ -34,6 +45,7 @@ final class NodeTransport(
 
   def close: UIO[Unit] =
     ZIO.succeed {
+      stopping.set(true)
       child.stdin.end()
       val _ = child.kill()
     }
@@ -46,6 +58,7 @@ object NodeTransport:
       cwd: String,
       log: String => Unit,
       onErr: String => UIO[Unit] = _ => ZIO.unit,
+      onExit: Int => UIO[Unit] = _ => ZIO.unit,
       run: UIO[Any] => Unit,
   ): ZIO[Scope, BeardError, NodeTransport] =
     ZIO.acquireRelease(
@@ -55,7 +68,7 @@ object NodeTransport:
           js.Array(args*),
           js.Dynamic.literal(cwd = cwd, stdio = js.Array("pipe", "pipe", "pipe")),
         )
-        new NodeTransport(child, log, onErr, run)
+        new NodeTransport(child, log, onErr, onExit, run, new AtomicBoolean(false))
       }.orSystem
     )(_.close)
 end NodeTransport

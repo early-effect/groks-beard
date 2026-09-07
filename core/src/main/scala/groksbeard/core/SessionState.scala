@@ -3,17 +3,17 @@ package groksbeard.core
 import zio.json.ast.Json
 
 final class SessionState:
-  var modeId: Option[String] = None
+  var modeId: Option[ModeId] = None
   var planActive: Boolean    = false
 
-  def commitMode(id: String): Unit =
+  def commitMode(id: ModeId): Unit =
     modeId = Some(id)
-    planActive = id.toLowerCase.contains("plan")
+    planActive = id.value.toLowerCase.contains("plan")
 
 object SessionState:
   val CommitBeforeContinue: Set[String] = Set("session/set_mode")
 
-  def modeIdFromSessionResult(result: Json): Option[String] =
+  def modeIdFromSessionResult(result: Json): Option[ModeId] =
     result
       .as[SessionNewResult]
       .toOption
@@ -21,7 +21,7 @@ object SessionState:
       .map(_.currentModeId)
       .filter(_.nonEmpty)
 
-  def modeIdFromSessionUpdate(params: Json): Option[String] =
+  def modeIdFromSessionUpdate(params: Json): Option[ModeId] =
     decodeUpdate(params).collect { case AcpUpdate.CurrentMode(modeId, currentModeId) =>
       modeId.orElse(currentModeId).filter(_.nonEmpty)
     }.flatten

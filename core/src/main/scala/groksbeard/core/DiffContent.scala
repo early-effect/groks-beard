@@ -13,10 +13,10 @@ final case class AcpDiffBlock(
 final case class ToolLocation(path: String, line: Option[Int] = None) derives JsonCodec
 
 final case class ToolCallDiffs(
-    toolCallId: String,
+    toolCallId: ToolCallId,
     title: String,
-    kind: String,
-    status: String,
+    kind: ToolKind,
+    status: ToolStatus,
     diffs: List[AcpDiffBlock],
     replaceAll: Boolean,
     fromPath: Option[String] = None,
@@ -30,7 +30,7 @@ final case class ReconstructedFileDiff(
     firstChangedLine: Int,
     wholeFile: Boolean,
     kind: ChangeKind,
-    toolCallId: String,
+    toolCallId: ToolCallId,
     fromPath: Option[String] = None,
     regionStandIn: Boolean = false,
 )
@@ -105,18 +105,19 @@ object DiffContent:
     )
   end diffsFromToolCall
 
-  def diskIsBefore(status: String): Boolean = status != "completed"
+  def diskIsBefore(status: ToolStatus): Boolean = status != ToolStatus.Completed
 
   def inferKind(
-      toolKind: String,
+      toolKind: ToolKind,
       fromPath: Option[String],
       oldText: String,
       newText: String,
       diskExists: Boolean,
       diskIsBeforeWrite: Boolean,
   ): ChangeKind =
-    if fromPath.isDefined || toolKind == "move" then ChangeKind.Move
-    else if toolKind == "delete" then if !diskIsBeforeWrite && diskExists then ChangeKind.Modify else ChangeKind.Delete
+    if fromPath.isDefined || toolKind == ToolKind.Move then ChangeKind.Move
+    else if toolKind == ToolKind.Delete then
+      if !diskIsBeforeWrite && diskExists then ChangeKind.Modify else ChangeKind.Delete
     else if oldText.isEmpty && newText.nonEmpty then ChangeKind.Add
     else ChangeKind.Modify
 
@@ -185,14 +186,14 @@ object DiffContent:
     )
   end fileChangeFrom
 
-  def permissionCard(params: Json, requestId: String): PermissionCard =
+  def permissionCard(params: Json, requestId: RequestId): PermissionCard =
     val parsed = params
       .as[PermissionRequestParams]
-      .getOrElse(PermissionRequestParams(toolCall = AcpToolCall(toolCallId = requestId)))
+      .getOrElse(PermissionRequestParams(toolCall = AcpToolCall(toolCallId = ToolCallId(requestId.value))))
     val tool = parsed.toolCall
     PermissionCard(
       requestId,
-      if tool.toolCallId.nonEmpty then tool.toolCallId else requestId,
+      if tool.toolCallId.nonEmpty then tool.toolCallId else ToolCallId(requestId.value),
       if tool.title.nonEmpty then tool.title else "Permission",
       parsed.options,
       hasDiff = diffsFromToolCall(tool.asJson).diffs.nonEmpty,
@@ -205,11 +206,11 @@ object DiffContent:
       diskText: Option[String],
       oldRegion: String,
       newRegion: String,
-      toolKind: String,
+      toolKind: ToolKind,
   ): DiffSides =
     if diskIsBeforeWrite || sides.wholeFile || newRegion.nonEmpty then sides
     else if diskText.contains("") then DiffSides(oldRegion, "", 0, wholeFile = true)
-    else if toolKind == "delete" && diskText.isEmpty && oldRegion.nonEmpty then
+    else if toolKind == ToolKind.Delete && diskText.isEmpty && oldRegion.nonEmpty then
       DiffSides(oldRegion, "", 0, wholeFile = true)
     else sides
 

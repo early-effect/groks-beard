@@ -53,7 +53,7 @@ final class McpHost(review: Review, refreshTree: () => Unit):
 
   def showChanges(title: Option[String], files: List[ShowChangesFile]): ShowChangesResult =
     val _ = title
-    sidecarFiles = files.map { f => McpTools.sidecarFile(abs(f.path), f.kind.toString) }
+    sidecarFiles = files.map { f => McpTools.sidecarFile(abs(f.path), f.kind) }
     refreshTree()
     ShowChangesResult(ok = true, shown = files.size)
 

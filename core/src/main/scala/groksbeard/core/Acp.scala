@@ -38,43 +38,46 @@ final case class AgentCapabilities(loadSession: Boolean = false) derives JsonCod
 final case class InitializeResult(protocolVersion: Int, agentCapabilities: AgentCapabilities) derives JsonCodec
 
 final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil) derives JsonCodec
-final case class SessionModeState(currentModeId: String, availableModes: List[ModeOption] = Nil) derives JsonCodec
-final case class SessionModelState(currentModelId: String, availableModels: List[ModelOption] = Nil) derives JsonCodec
+final case class SessionModeState(currentModeId: ModeId, availableModes: List[ModeOption] = Nil) derives JsonCodec
+final case class SessionModelState(currentModelId: ModelId, availableModels: List[ModelOption] = Nil) derives JsonCodec
 final case class SessionNewResult(
-    sessionId: String,
+    sessionId: SessionId,
     modes: Option[SessionModeState] = None,
     models: Option[SessionModelState] = None,
     _meta: Option[Json] = None,
 ) derives JsonCodec
 final case class SetModelMeta(reasoningEffort: Option[String] = None) derives JsonCodec
 final case class SessionSetModelParams(
-    sessionId: String,
-    modelId: String,
+    sessionId: SessionId,
+    modelId: ModelId,
     _meta: Option[SetModelMeta] = None,
 ) derives JsonCodec
-final case class SessionLoadParams(sessionId: String, cwd: String = ".", mcpServers: List[Json] = Nil) derives JsonCodec
-final case class SessionLoadResult(sessionId: String) derives JsonCodec
-final case class SessionSetModeParams(sessionId: String, modeId: String) derives JsonCodec
-final case class SessionCancelParams(sessionId: String) derives JsonCodec
+final case class SessionLoadParams(sessionId: SessionId, cwd: String = ".", mcpServers: List[Json] = Nil)
+    derives JsonCodec
+final case class SessionLoadResult(sessionId: SessionId) derives JsonCodec
+final case class SessionSetModeParams(sessionId: SessionId, modeId: ModeId) derives JsonCodec
+final case class SessionCancelParams(sessionId: SessionId) derives JsonCodec
 
 final case class PromptText(@jsonField("type") tpe: String = "text", text: String) derives JsonCodec
-final case class SessionPromptParams(sessionId: String, prompt: List[PromptText]) derives JsonCodec
-final case class SessionPromptResult(stopReason: String) derives JsonCodec
-final case class TerminalCreateParams(sessionId: String, command: String, args: List[String] = Nil) derives JsonCodec
+final case class SessionPromptParams(sessionId: SessionId, prompt: List[PromptText]) derives JsonCodec
+final case class SessionPromptResult(stopReason: StopReason) derives JsonCodec
 
 @jsonDiscriminator("type")
 enum AcpContent derives JsonCodec:
   @jsonHint("text") case Text(text: String)
   @jsonHint("diff") case Diff(path: String, oldText: Option[String] = None, newText: Option[String] = None)
+  @jsonHint("content") case Block(content: AcpContent)
+  @jsonHint("terminal") case Terminal(terminalId: String)
 
 final case class AcpToolCall(
-    toolCallId: String = "tool",
+    toolCallId: ToolCallId = ToolCallId("tool"),
     title: String = "Tool",
-    kind: String = "other",
-    status: String = "pending",
+    kind: ToolKind = ToolKind.Other,
+    status: ToolStatus = ToolStatus.Pending,
     content: List[AcpContent] = Nil,
     rawInput: Option[Json] = None,
     locations: List[ToolLocation] = Nil,
+    rawOutput: Option[Json] = None,
 ) derives JsonCodec
 
 @jsonDiscriminator("sessionUpdate")
@@ -84,32 +87,34 @@ enum AcpUpdate derives JsonCodec:
   @jsonHint("user_message_chunk") case User(content: AcpContent)
   @jsonHint("available_commands_update") case Commands(availableCommands: List[SlashCommand] = Nil)
   @jsonHint("tool_call") case ToolCall(
-      toolCallId: String = "tool",
+      toolCallId: ToolCallId = ToolCallId("tool"),
       title: String = "Tool",
-      kind: String = "other",
-      status: String = "pending",
+      kind: ToolKind = ToolKind.Other,
+      status: ToolStatus = ToolStatus.Pending,
       content: List[AcpContent] = Nil,
       rawInput: Option[Json] = None,
       locations: List[ToolLocation] = Nil,
+      rawOutput: Option[Json] = None,
   )
   @jsonHint("tool_call_update") case ToolCallUpdate(
-      toolCallId: String = "tool",
-      title: String = "Tool",
-      kind: String = "other",
-      status: String = "pending",
+      toolCallId: ToolCallId = ToolCallId("tool"),
+      title: String = "",
+      kind: ToolKind = ToolKind.Other,
+      status: ToolStatus = ToolStatus.Pending,
       content: List[AcpContent] = Nil,
       rawInput: Option[Json] = None,
       locations: List[ToolLocation] = Nil,
+      rawOutput: Option[Json] = None,
   )
   @jsonHint("current_mode_update") case CurrentMode(
-      modeId: Option[String] = None,
-      currentModeId: Option[String] = None,
+      modeId: Option[ModeId] = None,
+      currentModeId: Option[ModeId] = None,
   )
   @jsonHint("usage_update") case Usage(used: Option[Int] = None, size: Option[Int] = None)
   @jsonHint("plan") case Plan(entries: List[TodoEntry] = Nil)
 end AcpUpdate
 
-final case class AcpSessionNotify(sessionId: String = "", update: AcpUpdate) derives JsonCodec
+final case class AcpSessionNotify(sessionId: SessionId = SessionId.empty, update: AcpUpdate) derives JsonCodec
 
 final case class PermissionRequestParams(
     toolCall: AcpToolCall = AcpToolCall(),

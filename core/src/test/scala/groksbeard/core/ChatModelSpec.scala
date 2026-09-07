@@ -34,12 +34,52 @@ object ChatModelSpec extends ZIOSpecDefault:
         yield assertTrue(
           turn.user.exists(_.text == "hello"),
           turn.agent == "Hi there.",
-          turn.stopReason.contains("end_turn"),
+          turn.stopReason.contains(StopReason.EndTurn),
           !ChatModel.turnIsRunning(done),
           model.runningSinceMs.contains(now),
           done.runningSinceMs.isEmpty,
         )
       } @@ TestAspect.withLiveClock,
+      test("a finished execute keeps command and stdout after a sparse completed update") {
+        val command = "echo beard-terminal-probe\npwd\nuname -s"
+        val stream  = "beard-terminal-probe\n/tmp"
+        val stdout  = "beard-terminal-probe\n/Users/russ/projects/fun/groks-beard\nDarwin\n"
+        val live    = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.ToolGroup(
+            "t1",
+            List(
+              ToolRow(
+                "term-1",
+                "run_terminal_command",
+                "execute",
+                "in_progress",
+                input = Some(command),
+                output = Some(stream),
+              )
+            ),
+          ),
+        )
+        val done = ChatModel.applyMsg(
+          live,
+          HostMsg.ToolGroup(
+            "t1",
+            List(
+              ToolRow("term-1", "Tool", "other", "completed", output = Some(stdout))
+            ),
+          ),
+        )
+        val row = done.turns.head.tools.head
+        assertTrue(
+          live.turns.head.tools.head.status == ToolStatus.InProgress,
+          row.title == "run_terminal_command",
+          row.kind == ToolKind.Execute,
+          row.status == ToolStatus.Completed,
+          row.input.contains(command),
+          row.output.contains(stdout),
+          ToolView.liveTail(stream).contains("/tmp"),
+        )
+      },
       test("thought chunks concatenate and tools merge by id") {
         val start = ChatModel.applyMsg(ChatModel.empty, HostMsg.ThoughtChunk("t1", "hmm"))
         val more  = ChatModel.applyMsg(start, HostMsg.ThoughtChunk("t1", " ok"))
@@ -78,7 +118,7 @@ object ChatModelSpec extends ZIOSpecDefault:
         assertTrue(
           next.permission.isEmpty,
           next.queue.map(_.text) == List("later"),
-          next.turns.head.stopReason.contains("end_turn"),
+          next.turns.head.stopReason.contains(StopReason.EndTurn),
         )
       },
       test("copied toast uses the status slot") {
@@ -226,7 +266,7 @@ object ChatModelSpec extends ZIOSpecDefault:
         val snap = ChatModel.snapshotTurns(raw)
         assertTrue(
           snap.head.thought.isEmpty,
-          snap.head.stopReason.contains("end_turn"),
+          snap.head.stopReason.contains(StopReason.EndTurn),
           snap.head.tools.head.input.isEmpty,
           snap.head.tools.head.output.isEmpty,
           snap.head.agent == "hello",
@@ -304,6 +344,21 @@ object ChatModelSpec extends ZIOSpecDefault:
           !ChatModel.isLoading(home),
         )
       },
+      test("MCP auth notice and elicit stay visible while a session is loading") {
+        val awaiting = ChatModel.adopt(ChatModel.empty, "b", "B")
+        val notice   = ChatModel.applyMsg(awaiting, HostMsg.Error("atlassian MCP needs authentication."))
+        val elicit   = ChatModel.applyMsg(
+          notice,
+          HostMsg.elicit(ElicitCard(RequestId("el-1"), "atlassian", ElicitMode.Url, "Sign in", None)),
+        )
+        assertTrue(
+          ChatModel.isLoading(notice),
+          notice.error.exists(_.contains("atlassian")),
+          ChatModel.isLoading(elicit),
+          elicit.elicit.exists(_.serverName == "atlassian"),
+          elicit.awaitingSession.contains("b"),
+        )
+      },
       test("awaiting a session drops the previous transcript chunks") {
         val awaiting = ChatModel.adopt(ChatModel.empty.copy(sessionId = "a", title = "A"), "b", "B")
         val stale    = ChatModel.applyMsg(awaiting, HostMsg.UserMessage("t1", "from A"))
@@ -355,7 +410,7 @@ object ChatModelSpec extends ZIOSpecDefault:
           turn.user.exists(_.text == "hello"),
           turn.thought.contains("wants"),
           turn.agent == "Hi.",
-          turn.stopReason.contains("end_turn"),
+          turn.stopReason.contains(StopReason.EndTurn),
           model.commands.size == 40,
         )
       },

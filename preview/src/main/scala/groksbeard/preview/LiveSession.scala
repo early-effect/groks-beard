@@ -44,23 +44,32 @@ object LiveSession:
           val args = Spawn.grokAgentStdioArgs()
           log(s"spawning $cmd ${args.mkString(" ")}")
           val note     = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
+          val gone     = new java.util.concurrent.atomic.AtomicReference[UIO[Unit]](ZIO.unit)
           val home     = GrokHome(env)
-          val caps     = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = false)
+          val caps     = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = true)
           val envLayer =
             HostOut.layer(emit) ++
               SessionRepo.of(NioSessionFs, home, cwd) ++
               Mentions.layer(q => ZIO.attemptBlocking(MentionWalk.fromDisk(cwd, q)).orSystem) ++
               ChangesPersist.noop ++
               TranscriptOut.of(NioSessionFs, home, cwd, env) ++
-              ReviewOps.ignore
+              ReviewOps.ignore ++
+              ProcessTerminals.layer(cwd)
           ProcessTransport
-            .spawn(cmd, args, cwd, onErr = line => note.get()(line))
+            .spawn(
+              cmd,
+              args,
+              cwd,
+              onErr = line => note.get()(line),
+              onExit = _ => gone.get(),
+            )
             .flatMap { transport =>
               ChatRuntime
                 .make(transport, cwd, caps, includeActiveFile = () => true)
                 .provideSome[Scope](envLayer)
                 .flatMap { rt =>
                   note.set(rt.noteAgentLine)
+                  gone.set(rt.noteAgentGone)
                   val shutdown =
                     ZIO.logInfo(s"closing grok agent (pid ${transport.pid})") *> rt.close
                   handle.set(msg => HostDispatch(rt, msg, emit)).as(shutdown)

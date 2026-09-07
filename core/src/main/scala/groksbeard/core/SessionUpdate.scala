@@ -3,7 +3,7 @@ package groksbeard.core
 import zio.json.ast.Json
 
 object SessionUpdate:
-  def hostMsgs(params: Json, turnId: String): List[HostMsg] =
+  def hostMsgs(params: Json, turnId: TurnId): List[HostMsg] =
     SessionState.decodeUpdate(params) match
       case Some(AcpUpdate.Thought(content)) =>
         textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.ThoughtChunk(turnId, t))
@@ -18,11 +18,11 @@ object SessionUpdate:
       case Some(call: AcpUpdate.ToolCallUpdate) =>
         List(HostMsg.ToolGroup(turnId, List(toolRow(toBody(call)))))
       case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
-        val mode = modeId.orElse(currentModeId).getOrElse("")
-        if mode.isEmpty then Nil else List(HostMsg.SessionMeta("", "", mode, Nil))
+        val mode = modeId.orElse(currentModeId).getOrElse(ModeId.empty)
+        if mode.isEmpty then Nil else List(HostMsg.SessionMeta(SessionId.empty, "", mode, Nil))
       case Some(AcpUpdate.Usage(used, size)) =>
         occupancyMsg(used, size).orElse(Occupancy.fromJson(params)).toList.map { occ =>
-          HostMsg.SessionMeta("", "", "", occupancy = Some(occ))
+          HostMsg.SessionMeta(SessionId.empty, "", ModeId.empty, occupancy = Some(occ))
         }
       case Some(AcpUpdate.Plan(entries)) =>
         List(HostMsg.Todos(Todos.fromEntries(entries)))
@@ -39,10 +39,28 @@ object SessionUpdate:
       case _                     => None
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
-    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
+    AcpToolCall(
+      call.toolCallId,
+      call.title,
+      call.kind,
+      call.status,
+      call.content,
+      call.rawInput,
+      call.locations,
+      call.rawOutput,
+    )
 
   private def toBody(call: AcpUpdate.ToolCallUpdate): AcpToolCall =
-    AcpToolCall(call.toolCallId, call.title, call.kind, call.status, call.content, call.rawInput, call.locations)
+    AcpToolCall(
+      call.toolCallId,
+      call.title,
+      call.kind,
+      call.status,
+      call.content,
+      call.rawInput,
+      call.locations,
+      call.rawOutput,
+    )
 
   private def toolRow(toolCall: AcpToolCall): ToolRow =
     val extracted = DiffContent.diffsFromToolCall(toolCall.asJson)
@@ -54,7 +72,8 @@ object SessionUpdate:
       extracted.status,
       additions = stats.map(_._1),
       deletions = stats.map(_._2),
-      input = extracted.diffs.headOption.map(_.path),
+      input = ToolView.inputOf(toolCall, extracted.diffs),
+      output = ToolView.outputOf(toolCall),
     )
   end toolRow
 end SessionUpdate

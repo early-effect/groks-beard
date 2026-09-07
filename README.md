@@ -66,7 +66,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): terminal handlers, rewind.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): rewind.
 
 ## Shortcuts
 

@@ -5,7 +5,7 @@ import zio.json.*
 final case class PromptChip(
     path: String,
     absPath: String,
-    source: String,
+    source: ChipSource,
     startLine: Option[Int] = None,
     endLine: Option[Int] = None,
     @jsonExclude languageId: Option[String] = None,
@@ -41,7 +41,7 @@ object PromptChip:
     PromptChip(
       path = workspaceRelativePath(absPath, workspaceRoot),
       absPath = absPath,
-      source = "selection",
+      source = ChipSource.Selection,
       startLine = startLine,
       endLine = endLine,
       languageId = languageId.filter(_.nonEmpty),
@@ -52,7 +52,7 @@ object PromptChip:
       absPath: String,
       workspaceRoot: Option[String] = None,
       languageId: Option[String] = None,
-      source: String = "file",
+      source: ChipSource = ChipSource.File,
   ): PromptChip =
     PromptChip(
       path = workspaceRelativePath(absPath, workspaceRoot),

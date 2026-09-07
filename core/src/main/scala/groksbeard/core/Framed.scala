@@ -4,7 +4,7 @@ import zio.json.ast.Json
 
 final class Framed(val state: SessionState):
   private var buffer  = ""
-  private var pending = Map.empty[String, (String, Option[String])]
+  private var pending = Map.empty[String, (String, Option[ModeId])]
 
   def recordOutgoing(msg: Rpc): Unit =
     msg match

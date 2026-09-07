@@ -19,9 +19,9 @@ object SessionEdit:
       Left("/rename --auto must be the only argument")
     else Right(RenameOp.Manual(t))
 
-  def findDir(fs: SessionFs, home: String, cwd: String, id: String): BeardError.Result[Option[String]] =
+  def findDir(fs: SessionFs, home: String, cwd: String, id: SessionId): BeardError.Result[Option[String]] =
     SessionIndex.groupDirs(fs, home, cwd).flatMap { groups =>
-      val candidates = groups.map(g => SessionIndex.join(g, id))
+      val candidates = groups.map(g => SessionIndex.join(g, id.value))
       ZIO
         .filter(candidates)(fs.isDirectory)
         .map(_.headOption)
@@ -44,7 +44,7 @@ object SessionEdit:
       upsert(obj, List("title_is_manual" -> Json.Bool(false))).toJson
     }
 
-  def seedManual(id: String, cwd: String, title: String): String =
+  def seedManual(id: SessionId, cwd: String, title: String): String =
     SessionSummary(
       SessionInfo(id, cwd),
       session_summary = Some(title),
@@ -55,7 +55,7 @@ object SessionEdit:
       fs: SessionFs,
       home: String,
       cwd: String,
-      id: String,
+      id: SessionId,
       op: RenameOp,
   ): BeardError.Result[Option[SessionRow]] =
     findDir(fs, home, cwd, id).flatMap {
@@ -87,7 +87,7 @@ object SessionEdit:
         }
     }
 
-  def delete(fs: SessionFs, home: String, cwd: String, id: String): BeardError.Result[Boolean] =
+  def delete(fs: SessionFs, home: String, cwd: String, id: SessionId): BeardError.Result[Boolean] =
     findDir(fs, home, cwd, id).flatMap {
       case None      => ZIO.succeed(false)
       case Some(dir) => fs.deleteTree(dir).as(true)

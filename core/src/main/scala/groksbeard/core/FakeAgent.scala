@@ -3,7 +3,7 @@ package groksbeard.core
 import zio.json.*
 
 final class FakeAgent(
-    val sessionId: String = "sess_test",
+    val sessionId: SessionId = SessionId("sess_test"),
     pairSetModeWithTerminal: Boolean = false,
     lockLoad: Boolean = false,
     hangPrompt: Boolean = false,
@@ -40,21 +40,21 @@ final class FakeAgent(
               sessionId,
               Some(
                 SessionModeState(
-                  "normal",
+                  ModeId.Normal,
                   List(
-                    ModeOption("normal", "Normal"),
-                    ModeOption("plan", "Plan"),
-                    ModeOption("auto", "Auto"),
-                    ModeOption("always-approve", "Always approve"),
+                    ModeOption(ModeId.Normal, "Normal"),
+                    ModeOption(ModeId.Plan, "Plan"),
+                    ModeOption(ModeId.Auto, "Auto"),
+                    ModeOption(ModeId.AlwaysApprove, "Always approve"),
                   ),
                 )
               ),
               Some(
                 SessionModelState(
-                  "grok-4.6",
+                  ModelId("grok-4.6"),
                   List(
-                    ModelOption("grok-4.6", "Grok 4.6", _meta = Some(Effort.grokMeta())),
-                    ModelOption("grok-code-fast-1", "Grok Code Fast"),
+                    ModelOption(ModelId("grok-4.6"), "Grok 4.6", _meta = Some(Effort.grokMeta())),
+                    ModelOption(ModelId("grok-code-fast-1"), "Grok Code Fast"),
                   ),
                 )
               ),
@@ -71,8 +71,8 @@ final class FakeAgent(
             chunk(
               AcpUpdate.Plan(
                 List(
-                  TodoEntry("Replay the disk snapshot", Todos.Completed, "medium"),
-                  TodoEntry("Continue the work", Todos.InProgress, "high"),
+                  TodoEntry("Replay the disk snapshot", Todos.Completed, TodoPriority.Medium),
+                  TodoEntry("Continue the work", Todos.InProgress, TodoPriority.High),
                 )
               ),
               sid,
@@ -106,10 +106,10 @@ final class FakeAgent(
             "session/request_permission",
             PermissionRequestParams(
               toolCall = AcpToolCall(
-                toolCallId = "call_1",
+                toolCallId = ToolCallId("call_1"),
                 title = "Edit Main.scala",
-                kind = "edit",
-                status = "pending",
+                kind = ToolKind.Edit,
+                status = ToolStatus.Pending,
                 content = List(
                   AcpContent.Diff(
                     path = "/tmp/Main.scala",
@@ -119,7 +119,7 @@ final class FakeAgent(
                 ),
                 locations = List(ToolLocation("/tmp/Main.scala", Some(1))),
               ),
-              options = List(PermissionOption("allow-once", "Allow once", "allow_once")),
+              options = List(PermissionOption("allow-once", "Allow once", PermissionKind.AllowOnce)),
             ),
           ),
           Rpc.notifyOf(
@@ -127,10 +127,10 @@ final class FakeAgent(
             AcpSessionNotify(
               sessionId,
               AcpUpdate.ToolCall(
-                toolCallId = "call_1",
+                toolCallId = ToolCallId("call_1"),
                 title = "Edit Main.scala",
-                kind = "edit",
-                status = "pending",
+                kind = ToolKind.Edit,
+                status = ToolStatus.Pending,
                 content = List(
                   AcpContent.Diff(
                     path = "/tmp/Main.scala",
@@ -142,7 +142,7 @@ final class FakeAgent(
               ),
             ),
           ),
-          Rpc.ok(id, SessionPromptResult("end_turn").asJson),
+          Rpc.ok(id, SessionPromptResult(StopReason.EndTurn).asJson),
         )
       case _ =>
         List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
@@ -153,6 +153,6 @@ final class FakeAgent(
   private def agent(text: String): Rpc.Notify =
     chunk(AcpUpdate.Agent(AcpContent.Text(text)))
 
-  private def chunk(update: AcpUpdate, sid: String = sessionId): Rpc.Notify =
+  private def chunk(update: AcpUpdate, sid: SessionId = sessionId): Rpc.Notify =
     Rpc.notifyOf("session/update", AcpSessionNotify(sid, update))
 end FakeAgent

@@ -2,7 +2,7 @@ package groksbeard.core
 
 import zio.json.*
 
-final case class SessionInfo(id: String, cwd: String) derives JsonCodec
+final case class SessionInfo(id: SessionId, cwd: String) derives JsonCodec
 
 final case class SessionSummary(
     info: SessionInfo,
@@ -14,8 +14,8 @@ final case class SessionSummary(
     last_active_at: Option[String] = None,
     num_messages: Option[Int] = None,
     num_chat_messages: Option[Int] = None,
-    current_model_id: Option[String] = None,
-    parent_session_id: Option[String] = None,
+    current_model_id: Option[ModelId] = None,
+    parent_session_id: Option[SessionId] = None,
     agent_name: Option[String] = None,
     last_turn_summary: Option[String] = None,
     last_recap: Option[String] = None,
@@ -51,9 +51,9 @@ object SessionSummary:
       .orElse(summary.flatMap(_.created_at).flatMap(epochMs))
       .getOrElse(summaryMtimeMs)
 
-  def row(id: String, activityMs: Long, summary: Option[SessionSummary]): SessionRow =
+  def row(id: SessionId, activityMs: Long, summary: Option[SessionSummary]): SessionRow =
     summary match
-      case None    => SessionRow(id, id, activityMs)
+      case None    => SessionRow(id, id.value, activityMs)
       case Some(s) =>
         SessionRow(
           id = id,

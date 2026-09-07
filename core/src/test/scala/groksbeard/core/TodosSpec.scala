@@ -17,8 +17,8 @@ object TodosSpec extends ZIOSpecDefault:
         assertTrue(
           got.map(_.content) == List("Checkout branch", "Write tests", "Ship it"),
           got.map(_.status) == List(Todos.InProgress, Todos.Pending, Todos.Completed),
-          got.head.priority == "high",
-          got.last.priority == "low",
+          got.head.priority == TodoPriority.High,
+          got.last.priority == TodoPriority.Low,
           Todos.headline(got) == "Todos 1/3",
           Todos.mark(got.head.status) == "▶",
           Todos.mark(got.last.status) == "☑",
@@ -32,7 +32,7 @@ object TodosSpec extends ZIOSpecDefault:
           got.map(_.content) == List("Read ROADMAP", "Wire ACP plan"),
           got.map(_.id) == List(Some("1"), Some("2")),
           got.map(_.status) == List(Todos.Completed, Todos.InProgress),
-          got(1).priority == "high",
+          got(1).priority == TodoPriority.High,
         )
       },
       test("empty plan.json is no todos") {

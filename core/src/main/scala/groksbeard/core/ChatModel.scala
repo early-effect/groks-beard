@@ -3,10 +3,10 @@ package groksbeard.core
 import zio.json.*
 
 final case class ToolRow(
-    id: String,
+    id: ToolCallId,
     title: String,
-    kind: String,
-    status: String,
+    kind: ToolKind,
+    status: ToolStatus,
     additions: Option[Int] = None,
     deletions: Option[Int] = None,
     input: Option[String] = None,
@@ -14,34 +14,34 @@ final case class ToolRow(
 ) derives JsonCodec
 
 final case class TurnView(
-    id: String,
+    id: TurnId,
     user: Option[TurnUser] = None,
     thought: String = "",
     agent: String = "",
     tools: List[ToolRow] = Nil,
-    stopReason: Option[String] = None,
+    stopReason: Option[StopReason] = None,
 ) derives JsonCodec
 
 final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false) derives JsonCodec
 
-final case class QueuedPrompt(id: String, text: String, chips: List[PromptChip] = Nil) derives JsonCodec
+final case class QueuedPrompt(id: QueueId, text: String, chips: List[PromptChip] = Nil) derives JsonCodec
 
 object QueuedPrompt:
   def display(item: QueuedPrompt): String =
     val refs = item.chips.map(PromptChip.formatAtRef).filter(_.nonEmpty)
     (refs :+ item.text).filter(_.nonEmpty).mkString("\n")
 
-final case class PermissionOption(optionId: String, name: String, kind: String) derives JsonCodec
+final case class PermissionOption(optionId: String, name: String, kind: PermissionKind) derives JsonCodec
 
 final case class PermissionCard(
-    requestId: String,
-    toolCallId: String,
+    requestId: RequestId,
+    toolCallId: ToolCallId,
     title: String,
     options: List[PermissionOption],
     hasDiff: Boolean,
 ) derives JsonCodec
 
-final case class PlanCard(requestId: String, planMarkdown: String) derives JsonCodec
+final case class PlanCard(requestId: RequestId, planMarkdown: String) derives JsonCodec
 
 final case class QuestionOption(id: String, label: String) derives JsonCodec
 
@@ -53,24 +53,24 @@ final case class AgentQuestion(
     allowFreeText: Boolean = false,
 ) derives JsonCodec
 
-final case class QuestionCard(requestId: String, questions: List[AgentQuestion]) derives JsonCodec
+final case class QuestionCard(requestId: RequestId, questions: List[AgentQuestion]) derives JsonCodec
 
 final case class ElicitCard(
-    requestId: String,
+    requestId: RequestId,
     serverName: String,
-    mode: String,
+    mode: ElicitMode,
     title: String,
     url: Option[String] = None,
 ) derives JsonCodec
 
 final case class ChangeFileView(
     path: String,
-    kind: String,
+    kind: ChangeKind,
     additions: Int,
     deletions: Int,
     wholeFile: Boolean = true,
     undoDisabled: Option[String] = None,
-    turnId: String = "",
+    turnId: TurnId = TurnId.empty,
     turnTitle: String = "",
 ) derives JsonCodec
 
@@ -89,11 +89,11 @@ final case class DiffView(
 )
 
 final case class ChatModel(
-    sessionId: String = "",
+    sessionId: SessionId = SessionId.empty,
     title: String = "Grok's Beard",
-    modeId: String = "normal",
+    modeId: ModeId = ModeId.Normal,
     modes: List[ModeOption] = Nil,
-    modelId: String = "",
+    modelId: ModelId = ModelId.empty,
     models: List[ModelOption] = Nil,
     effort: String = "",
     commands: List[SlashCommand] = Nil,
@@ -116,9 +116,9 @@ final case class ChatModel(
     todos: List[TodoEntry] = Nil,
     error: Option[String] = None,
     runningSinceMs: Option[Long] = None,
-    awaitingSession: Option[String] = None,
+    awaitingSession: Option[SessionId] = None,
     inSession: Boolean = false,
-    sessionOrder: Option[List[String]] = None,
+    sessionOrder: Option[List[SessionId]] = None,
 )
 
 object ChatModel:
@@ -149,12 +149,12 @@ object ChatModel:
     turns.map { t =>
       t.copy(
         thought = "",
-        stopReason = t.stopReason.orElse(Some("end_turn")),
+        stopReason = t.stopReason.orElse(Some(StopReason.EndTurn)),
         tools = t.tools.map(r => r.copy(input = None, output = None)),
       )
     }
 
-  def adopt(model: ChatModel, sessionId: String, title: String): ChatModel =
+  def adopt(model: ChatModel, sessionId: SessionId, title: String): ChatModel =
     val order = if sessionId.nonEmpty then Some(listed(model).map(_.id)) else None
     model.copy(
       sessionId = sessionId,
@@ -179,14 +179,15 @@ object ChatModel:
     )
   end adopt
 
-  def dropHost(waiting: Option[String], msg: HostMsg): Boolean =
+  def dropHost(waiting: Option[SessionId], msg: HostMsg): Boolean =
     waiting match
       case None       => false
       case Some(want) =>
         msg match
           case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | _: HostMsg.Transcript |
               _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings |
-              _: HostMsg.MentionResults | _: HostMsg.SessionList =>
+              _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission |
+              _: HostMsg.Plan | _: HostMsg.Question =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -194,7 +195,7 @@ object ChatModel:
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
           case _ => true
 
-  def catchesUp(waiting: Option[String], msg: HostMsg): Boolean =
+  def catchesUp(waiting: Option[SessionId], msg: HostMsg): Boolean =
     msg match
       case _: HostMsg.Transcript    => waiting.nonEmpty
       case m: HostMsg.SessionLocked =>
@@ -318,7 +319,7 @@ object ChatModel:
     if ChatModel.turnIsRunning(model) then model.copy(runningSinceMs = model.runningSinceMs.orElse(Some(nowMs)))
     else model.copy(runningSinceMs = None)
 
-  private def upsert(model: ChatModel, turnId: String)(patch: TurnView => TurnView): ChatModel =
+  private def upsert(model: ChatModel, turnId: TurnId)(patch: TurnView => TurnView): ChatModel =
     val idx = model.turns.indexWhere(_.id == turnId)
     if idx < 0 then model.copy(turns = model.turns :+ patch(TurnView(turnId)))
     else
@@ -330,17 +331,16 @@ object ChatModel:
       val idx = acc.indexWhere(_.id == row.id)
       if idx < 0 then
         acc :+ row.copy(
-          title = if row.title.nonEmpty then row.title else "Tool",
-          kind = if row.kind.nonEmpty then row.kind else "other",
+          title = if row.title.nonEmpty then row.title else "Tool"
         )
       else
         val prev = acc(idx)
         acc.updated(
           idx,
           prev.copy(
-            title = if row.title.nonEmpty then row.title else prev.title,
-            kind = if row.kind.nonEmpty then row.kind else prev.kind,
-            status = if row.status.nonEmpty then row.status else prev.status,
+            title = mergeToolTitle(prev, row),
+            kind = mergeToolKind(prev, row),
+            status = row.status,
             additions = row.additions.orElse(prev.additions),
             deletions = row.deletions.orElse(prev.deletions),
             input = row.input.filter(_.nonEmpty).orElse(prev.input),
@@ -349,4 +349,15 @@ object ChatModel:
         )
       end if
     }
+
+  private def mergeToolTitle(prev: ToolRow, row: ToolRow): String =
+    val incoming = row.title.trim
+    val had      = prev.title.trim
+    if had.nonEmpty && (incoming.isEmpty || incoming == "Tool" || incoming.startsWith("Execute `")) then had
+    else if incoming.nonEmpty then incoming
+    else if had.nonEmpty then had
+    else "Tool"
+
+  private def mergeToolKind(prev: ToolRow, row: ToolRow): ToolKind =
+    if row.kind == ToolKind.Other && prev.kind != ToolKind.Other then prev.kind else row.kind
 end ChatModel

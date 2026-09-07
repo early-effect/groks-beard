@@ -8,19 +8,19 @@ final case class SlashCommand(name: String, description: String, @jsonExclude hi
 
 final case class MentionFile(path: String, absPath: String) derives JsonCodec
 
-final case class ModeOption(id: String, name: String) derives JsonCodec
+final case class ModeOption(id: ModeId, name: String) derives JsonCodec
 
 final case class ModelOption(
-    modelId: String,
+    modelId: ModelId,
     name: String,
     description: Option[String] = None,
     _meta: Option[Json] = None,
 ) derives JsonCodec
 
 object ModelOption:
-  def label(id: String, models: List[ModelOption]): String =
+  def label(id: ModelId, models: List[ModelOption]): String =
     models.find(_.modelId == id).map(_.name).filter(_.nonEmpty).getOrElse {
-      if id.nonEmpty then id else "Model"
+      if id.nonEmpty then id.value else "Model"
     }
 
   def pick(query: String, models: List[ModelOption]): Option[ModelOption] =
@@ -28,10 +28,10 @@ object ModelOption:
     if q.isEmpty || models.isEmpty then None
     else
       models
-        .find(_.modelId.toLowerCase == q)
+        .find(_.modelId.value.toLowerCase == q)
         .orElse(models.find(_.name.toLowerCase == q))
         .orElse(models.find(_.name.toLowerCase.contains(q)))
-        .orElse(models.find(_.modelId.toLowerCase.contains(q)))
+        .orElse(models.find(_.modelId.value.toLowerCase.contains(q)))
 end ModelOption
 
 object ComposerQuery:

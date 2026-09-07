@@ -44,6 +44,7 @@ object Scene:
 end Scene
 
 object ChatApp:
+  given toolOutEq: Eq[Map[ToolCallId, String]] = (a, b) => a == b
 
   private def isMenuNav(key: String, shift: Boolean): Boolean =
     key == "ArrowUp" || key == "ArrowDown" || key == "Home" || key == "End" ||
@@ -894,6 +895,7 @@ object ChatApp:
       historyBrowse  <- sq(Option.empty[Int])
       historyPickIdx <- sq(Option.empty[Int])
       nowMs          <- wallMs.flatMap(sq(_))
+      toolOut        <- sq(Map.empty[ToolCallId, String])(using ChatApp.toolOutEq)
       lastHref       <- Ref.make("")
       bound          <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[SessionId])
@@ -928,7 +930,19 @@ object ChatApp:
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
-              case _                             => ZIO.unit
+              case HostMsg.ToolCall(_, row)      =>
+                toolOut.update { m =>
+                  m.updated(row.id, m.getOrElse(row.id, row.output.getOrElse("")))
+                }
+              case HostMsg.ToolChunk(_, id, text, snap) =>
+                toolOut.update(m => m.updated(id, ToolOutput.pull(m.getOrElse(id, ""), text, snap)))
+              case HostMsg.ClearTranscript | _: HostMsg.Rewound =>
+                toolOut.set(Map.empty)
+              case HostMsg.Transcript(turns) =>
+                toolOut.set(turns.flatMap(_.tools).map(t => t.id -> t.output.getOrElse("")).toMap)
+              case HostMsg.Error(message, Some(Wire.Decode)) =>
+                ZIO.succeed(js.Dynamic.global.console.error(message)).unit
+              case _ => ZIO.unit
             } *> chat.get.flatMap { before =>
               val next = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
               val auto = before.todos.isEmpty && next.todos.nonEmpty
@@ -1607,7 +1621,7 @@ object ChatApp:
               TestId("transcript"),
               Lifecycle.onMountScoped[ascent.dom.Element, Any](TranscriptScroll.bind),
               forEachSignal(chat.map(_.turns))(_.id.value) { (id, _, turn) =>
-                renderTurn(bridge, id, turn)
+                renderTurn(bridge, id, turn, toolOut)
               },
               forEach(chat.map(_.queue))(_.id.value) { item =>
                 renderQueued(item)
@@ -1967,10 +1981,9 @@ object ChatApp:
     )
 
   private def renderActivityStrip(chat: ascent.Source[ChatModel], nowMs: ascent.Source[Long]): ascent.ast.UI[Any] =
-    forEach(Squawk.zipWith(chat, nowMs)((c, n) => TurnActivity.of(c, n).toList))(a =>
-      s"${a.kind}-${a.label}-${a.detail.getOrElse("")}-${a.elapsedMs / 1000}"
-    ) { a =>
-      renderActivity(a)
+    forEachSignal(Squawk.zipWith(chat, nowMs)((c, n) => TurnActivity.of(c, n).toList))(a => s"${a.kind}-${a.label}") {
+      (_, _, activity) =>
+        renderActivity(activity)
     }
 
   private def renderChipRow(chat: ascent.Source[ChatModel], dropChip: PromptChip => UIO[Unit]): ascent.ast.UI[Any] =
@@ -2155,32 +2168,23 @@ object ChatApp:
     end for
   end onDraftKey
 
-  private def renderActivity(a: TurnActivity): ascent.ast.UI[Any] =
-    val tone = a.kind match
-      case ActivityKind.Think   => ActivityThink
-      case ActivityKind.Edit    => ActivityEdit
-      case ActivityKind.Read    => ActivityRead
-      case ActivityKind.Execute => ActivityRun
-      case ActivityKind.Search  => ActivitySearch
-      case ActivityKind.Delete  => ActivityDelete
-      case ActivityKind.Move    => ActivityMove
-      case ActivityKind.Wait    => ActivityWait
-      case ActivityKind.Other   => ActivityOther
+  private def renderActivity(activity: Squawk[TurnActivity]): ascent.ast.UI[Any] =
+    val detail = activity.map(_.detail.getOrElse(""))
+    val timer  = activity.map(a => TurnActivity.timerLabel(a.elapsedMs).getOrElse(""))
     E.div(
       ActivityRow,
       TestId("activity"),
       E.span(
         ActivityIcon,
-        tone,
-        A.title(a.label),
+        A.title(activity.map(_.label)),
         E.span(SpinGlyph, "⋅"),
         E.span(SpinGlyph, ":"),
         E.span(SpinGlyph, "⸬"),
         E.span(SpinGlyph, "⁙"),
       ),
-      E.span(a.label),
-      a.detail.filter(_.nonEmpty).fold(E.span())(d => E.pre(TestId("activity-detail"), d)),
-      TurnActivity.timerLabel(a.elapsedMs).fold(E.span())(t => E.span(TestId("activity-timer"), t)),
+      E.span(activity.map(_.label)),
+      when(detail.map(_.nonEmpty))(E.pre(TestId("activity-detail"), detail)),
+      when(timer.map(_.nonEmpty))(E.span(TestId("activity-timer"), timer)),
     )
   end renderActivity
 
@@ -2205,7 +2209,12 @@ object ChatApp:
       QueuedPrompt.display(item),
     )
 
-  private def renderTurn(bridge: HostBridge, id: String, turn: Squawk[TurnView]): ascent.ast.UI[Any] =
+  private def renderTurn(
+      bridge: HostBridge,
+      id: String,
+      turn: Squawk[TurnView],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): ascent.ast.UI[Any] =
     val parts = turn.map(ChatMarkdown.parts)
     val tail  = parts.map(_._2)
     E.section(
@@ -2222,7 +2231,7 @@ object ChatApp:
           E.pre(ThoughtBody, turn.map(_.thought)),
         )
       ),
-      renderTools(bridge, turn.map(_.tools)),
+      renderTools(bridge, turn.map(_.tools), outputs),
       when(turn.map(_.agent.nonEmpty))(
         E.div(
           AgentMsg,
@@ -2248,7 +2257,11 @@ object ChatApp:
       }
       .getOrElse("")
 
-  private def renderTools(bridge: HostBridge, tools: Squawk[List[ToolRow]]): ascent.ast.UI[Any] =
+  private def renderTools(
+      bridge: HostBridge,
+      tools: Squawk[List[ToolRow]],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): ascent.ast.UI[Any] =
     val split = tools.map(ToolView.splitTail(_))
     E.div(
       when(split.map(_._1.nonEmpty))(
@@ -2256,21 +2269,41 @@ object ChatApp:
           ToolBox,
           E.summary(split.map { case (earlier, _) => ToolView.rollupLabel(earlier.size) }),
           forEachSignal(split.map(_._1))(_.id.value) { (id, _, tool) =>
-            renderTool(bridge, id, tool)
+            renderTool(bridge, id, tool, outputOf(id, tool, outputs))
           },
         )
       ),
       forEachSignal(split.map(_._2))(_.id.value) { (id, _, tool) =>
-        renderTool(bridge, id, tool)
+        renderTool(bridge, id, tool, outputOf(id, tool, outputs))
       },
     )
   end renderTools
 
-  private def renderTool(bridge: HostBridge, id: String, tool: Squawk[ToolRow]): ascent.ast.UI[Any] =
+  private def outputOf(
+      id: String,
+      tool: Squawk[ToolRow],
+      outputs: Squawk[Map[ToolCallId, String]],
+  ): Squawk[String] =
+    Squawk.zipWith(tool, outputs) { (t, m) =>
+      val live = m.getOrElse(ToolCallId(id), "")
+      if live.nonEmpty then live else t.output.getOrElse("")
+    }
+
+  private def renderTool(
+      bridge: HostBridge,
+      id: String,
+      tool: Squawk[ToolRow],
+      output: Squawk[String],
+  ): ascent.ast.UI[Any] =
     val hasStats = tool.map(t => t.additions.isDefined && t.deletions.isDefined)
-    val liveTail = tool.map { t =>
+    val liveTail = Squawk.zipWith(tool, output) { (t, out) =>
       if !ToolStatus.isLive(t.status) then ""
-      else ToolView.watchText(t).map(ToolView.liveTail(_)).filter(_.nonEmpty).getOrElse("")
+      else
+        Option(out)
+          .filter(_.nonEmpty)
+          .orElse(t.input.filter(_.nonEmpty))
+          .map(s => ToolView.liveTail(s))
+          .getOrElse("")
     }
     E.div(
       when(hasStats)(
@@ -2302,8 +2335,8 @@ object ChatApp:
           when(tool.map(_.input.exists(_.nonEmpty)))(
             E.pre(TestId(s"tool-input-$id"), tool.map(_.input.map(s => ToolView.clip(s)).getOrElse("")))
           ),
-          when(tool.map(_.output.exists(_.nonEmpty)))(
-            E.pre(TestId(s"tool-output-$id"), tool.map(_.output.map(s => ToolView.clip(s)).getOrElse("")))
+          when(output.map(_.nonEmpty))(
+            E.pre(TestId(s"tool-output-$id"), output.map(s => ToolView.clip(s)))
           ),
         )
       ),

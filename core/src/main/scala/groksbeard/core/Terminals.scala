@@ -2,6 +2,7 @@ package groksbeard.core
 
 import zio.*
 import zio.json.*
+import zio.stream.ZStream
 
 final class TerminalSeq:
   private val lock       = new Object
@@ -56,6 +57,7 @@ trait Terminals:
       limit: Option[Int],
   ): BeardError.Result[TerminalId]
   def output(id: TerminalId): UIO[Option[TerminalOutputResult]]
+  def stream(id: TerminalId): UIO[Option[ZStream[Any, Nothing, String]]]
   def waitForExit(id: TerminalId): UIO[Option[TerminalExitStatus]]
   def kill(id: TerminalId): UIO[Boolean]
   def release(id: TerminalId): UIO[Boolean]
@@ -103,6 +105,14 @@ object Terminals:
             }
           }
         }
+      def stream(id: TerminalId): UIO[Option[ZStream[Any, Nothing, String]]] =
+        ZIO.succeed {
+          lock.synchronized {
+            out.get(id).map { text =>
+              if text.isEmpty then ZStream.empty else ZStream.succeed(text)
+            }
+          }
+        }
       def waitForExit(id: TerminalId): UIO[Option[TerminalExitStatus]] =
         ZIO.succeed {
           lock.synchronized {
@@ -121,6 +131,54 @@ object Terminals:
             val had = out.contains(id)
             out -= id
             if had then gone += id
+            had
+          }
+        })
+
+  def streaming(chunks: Queue[String]): ULayer[Terminals] =
+    ZLayer.succeed(new Terminals:
+      private val ids  = TerminalSeq()
+      private val lock = new Object
+      private var live = Set.empty[TerminalId]
+      def create(
+          command: String,
+          args: List[String],
+          cwd: Option[String],
+          env: List[EnvVar],
+          limit: Option[Int],
+      ): BeardError.Result[TerminalId] =
+        ZIO.succeed {
+          lock.synchronized {
+            val id = ids.next()
+            live += id
+            id
+          }
+        }
+      def output(id: TerminalId): UIO[Option[TerminalOutputResult]] =
+        ZIO.succeed {
+          lock.synchronized {
+            if live.contains(id) then Some(TerminalOutputResult("", truncated = false, None)) else None
+          }
+        }
+      def stream(id: TerminalId): UIO[Option[ZStream[Any, Nothing, String]]] =
+        ZIO.succeed {
+          lock.synchronized {
+            if live.contains(id) then Some(ZStream.fromQueue(chunks)) else None
+          }
+        }
+      def waitForExit(id: TerminalId): UIO[Option[TerminalExitStatus]] =
+        ZIO.succeed {
+          lock.synchronized {
+            if live.contains(id) then Some(TerminalExitStatus(Some(0), None)) else None
+          }
+        }
+      def kill(id: TerminalId): UIO[Boolean] =
+        ZIO.succeed(lock.synchronized(live.contains(id)))
+      def release(id: TerminalId): UIO[Boolean] =
+        ZIO.succeed {
+          lock.synchronized {
+            val had = live.contains(id)
+            live -= id
             had
           }
         })

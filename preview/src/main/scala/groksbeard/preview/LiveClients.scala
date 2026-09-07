@@ -12,6 +12,9 @@ final class LiveClients(
   def post(id: String, msg: WebviewMsg): UIO[Unit] =
     getOrCreate(id).flatMap(_.session.post(msg))
 
+  def emit(id: String, msg: HostMsg): UIO[Unit] =
+    getOrCreate(id).flatMap(_.session.events.publish(msg).unit)
+
   def eventStream(id: String): ZStream[Any, Nothing, HostMsg] =
     ZStream.unwrapScoped {
       subscribe(id).map(c => ZStream.fromHub(c.session.events))

@@ -47,7 +47,7 @@ object SessionUpdateSpec extends ZIOSpecDefault:
       test("execute tool_call keeps the shell command as input") {
         val command = "echo beard-terminal-probe\npwd\nuname -s"
         val msgs    = SessionUpdate.hostMsgs(executeStart("call_1", command), "t1")
-        val row     = msgs.collectFirst { case HostMsg.ToolGroup(_, tools) => tools.head }
+        val row     = msgs.collectFirst { case HostMsg.ToolCall(_, tool) => tool }
         assertTrue(
           row.exists(_.title == "run_terminal_command"),
           row.exists(_.input.contains(command)),
@@ -107,6 +107,30 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           row.output.exists(_.contains("beard-terminal-probe")),
           row.output.exists(_.contains("Darwin")),
           !row.output.exists(_.contains("exit: 0")),
+        )
+      },
+      test("a live grok run_terminal_command tool_call becomes ToolCall") {
+        val msgs = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("tool_call"),
+              "toolCallId"    -> Json.Str("call-92323aaa-c2e0-44e8-9bb8-84804ea1684b-0"),
+              "title"         -> Json.Str("run_terminal_command"),
+              "rawInput"      -> Json.Obj(
+                "command"     -> Json.Str("echo hi"),
+                "description" -> Json.Str("Echo"),
+                "timeout"     -> Json.Num(15000),
+              ),
+            ),
+          ),
+          "t1",
+        )
+        val row = msgs.collectFirst { case HostMsg.ToolCall(_, tool) => tool }
+        assertTrue(
+          row.exists(_.id.value == "call-92323aaa-c2e0-44e8-9bb8-84804ea1684b-0"),
+          row.exists(_.title == "run_terminal_command"),
+          row.exists(_.input.contains("echo hi")),
         )
       },
       test("unknown sessionUpdate is ignored") {

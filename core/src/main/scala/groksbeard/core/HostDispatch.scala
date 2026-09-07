@@ -48,4 +48,10 @@ object HostDispatch:
       case WebviewMsg.OpenRewind                       => runtime.openRewind
       case WebviewMsg.CloseRewind                      => runtime.closeRewind
       case WebviewMsg.RewindTo(index)                  => runtime.rewindTo(index)
+      case WebviewMsg.Log(message, level)              =>
+        level.toLowerCase match
+          case "warn" | "warning" => ZIO.logWarning(message)
+          case "info"             => ZIO.logInfo(message)
+          case "debug"            => ZIO.logDebug(message)
+          case _                  => ZIO.logError(message)
 end HostDispatch

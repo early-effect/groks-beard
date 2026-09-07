@@ -282,8 +282,10 @@ object ChatModel:
         markRunning(upsert(model, turnId)(t => t.copy(agent = t.agent + text)), nowMs)
       case HostMsg.ThoughtChunk(turnId, text) =>
         markRunning(upsert(model, turnId)(t => t.copy(thought = t.thought + text)), nowMs)
-      case HostMsg.ToolGroup(turnId, tools) =>
-        markRunning(upsert(model, turnId)(t => t.copy(tools = mergeTools(t.tools, tools))), nowMs)
+      case HostMsg.ToolCall(turnId, row) =>
+        markRunning(upsert(model, turnId)(t => t.copy(tools = mergeTool(t.tools, row))), nowMs)
+      case HostMsg.ToolChunk(turnId, id, text, snapshot) =>
+        markRunning(upsert(model, turnId)(t => t.copy(tools = pullToolOutput(t.tools, id, text, snapshot))), nowMs)
       case HostMsg.Permission(requestId, toolCallId, title, options, hasDiff) =>
         model.copy(permission = Some(PermissionCard(requestId, toolCallId, title, options, hasDiff)))
       case HostMsg.Plan(requestId, markdown) =>
@@ -367,29 +369,51 @@ object ChatModel:
       val next = model.turns.updated(idx, patch(model.turns(idx)))
       model.copy(turns = next)
 
-  private def mergeTools(existing: List[ToolRow], incoming: List[ToolRow]): List[ToolRow] =
-    incoming.foldLeft(existing) { (acc, row) =>
-      val idx = acc.indexWhere(_.id == row.id)
-      if idx < 0 then
-        acc :+ row.copy(
-          title = if row.title.nonEmpty then row.title else "Tool"
-        )
-      else
-        val prev = acc(idx)
-        acc.updated(
-          idx,
-          prev.copy(
-            title = mergeToolTitle(prev, row),
-            kind = mergeToolKind(prev, row),
-            status = row.status,
-            additions = row.additions.orElse(prev.additions),
-            deletions = row.deletions.orElse(prev.deletions),
-            input = row.input.filter(_.nonEmpty).orElse(prev.input),
-            output = row.output.filter(_.nonEmpty).orElse(prev.output),
-          ),
-        )
-      end if
-    }
+  private def mergeTool(existing: List[ToolRow], row: ToolRow): List[ToolRow] =
+    val idx = existing.indexWhere(_.id == row.id)
+    if idx < 0 then
+      existing :+ row.copy(
+        title = if row.title.nonEmpty then row.title else "Tool",
+        output = None,
+      )
+    else
+      val prev = existing(idx)
+      existing.updated(
+        idx,
+        prev.copy(
+          title = mergeToolTitle(prev, row),
+          kind = mergeToolKind(prev, row),
+          status = row.status,
+          additions = row.additions.orElse(prev.additions),
+          deletions = row.deletions.orElse(prev.deletions),
+          input = row.input.filter(_.nonEmpty).orElse(prev.input),
+        ),
+      )
+    end if
+  end mergeTool
+
+  private def pullToolOutput(
+      existing: List[ToolRow],
+      id: ToolCallId,
+      text: String,
+      snapshot: Boolean,
+  ): List[ToolRow] =
+    val idx = existing.indexWhere(_.id == id)
+    if idx < 0 then
+      val out = ToolOutput.pull("", text, snapshot)
+      existing :+ ToolRow(
+        id,
+        "run_terminal_command",
+        ToolKind.Execute,
+        ToolStatus.InProgress,
+        output = Some(out).filter(_.nonEmpty),
+      )
+    else
+      val prev = existing(idx)
+      val out  = ToolOutput.pull(prev.output.getOrElse(""), text, snapshot)
+      existing.updated(idx, prev.copy(output = Some(out).filter(_.nonEmpty)))
+    end if
+  end pullToolOutput
 
   private def mergeToolTitle(prev: ToolRow, row: ToolRow): String =
     val incoming = row.title.trim

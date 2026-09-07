@@ -358,6 +358,19 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("a host decode error is visible") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- ZIO.succeed(bridge.push(HostMsg.Error("Could not read host message (boom).", Some(Wire.Decode))))
+              text <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+            yield assertTrue(text.contains("Could not read host message"))
+          }
+        yield result
+        end for
+      },
       test("transcript scene shows the user turn") {
         val bridge = PreviewBridge()
         for
@@ -958,38 +971,34 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- ZIO.succeed {
                 bridge.push(HostMsg.UserMessage("t1", "probe"))
                 bridge.push(
-                  HostMsg.ToolGroup(
+                  HostMsg.ToolCall(
                     "t1",
-                    List(
-                      ToolRow(
-                        ToolCallId("term-1"),
-                        "run_terminal_command",
-                        ToolKind.Execute,
-                        ToolStatus.InProgress,
-                        input = Some(command),
-                        output = Some(stream),
-                      )
+                    ToolRow(
+                      ToolCallId("term-1"),
+                      "run_terminal_command",
+                      ToolKind.Execute,
+                      ToolStatus.InProgress,
+                      input = Some(command),
                     ),
                   )
                 )
+                bridge.push(HostMsg.ToolChunk("t1", ToolCallId("term-1"), stream, snapshot = true))
               }
               tail <- waitPresent(root, "tool-tail-term-1") *>
                 root.getByTestId("tool-tail-term-1").innerText
               _ <- ZIO.succeed {
                 bridge.push(
-                  HostMsg.ToolGroup(
+                  HostMsg.ToolCall(
                     "t1",
-                    List(
-                      ToolRow(
-                        ToolCallId("term-1"),
-                        "Tool",
-                        ToolKind.Other,
-                        ToolStatus.Completed,
-                        output = Some(stdout),
-                      )
+                    ToolRow(
+                      ToolCallId("term-1"),
+                      "Tool",
+                      ToolKind.Other,
+                      ToolStatus.Completed,
                     ),
                   )
                 )
+                bridge.push(HostMsg.ToolChunk("t1", ToolCallId("term-1"), stdout, snapshot = true))
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitGone(root, "tool-tail-term-1")
@@ -1019,33 +1028,35 @@ object ChatChromeSpec extends ZIOSpecDefault:
         end for
       },
       test("a running execute tool's live tail updates as stdout grows") {
-        val bridge                                                                = PushBridge()
-        def row(out: String, status: ToolStatus = ToolStatus.InProgress): ToolRow =
-          ToolRow(
-            ToolCallId("term-1"),
-            "run_terminal_command",
-            ToolKind.Execute,
-            status,
-            input = Some("echo beard-terminal-probe"),
-            output = Some(out),
+        val bridge                                                    = PushBridge()
+        def call(status: ToolStatus = ToolStatus.InProgress): HostMsg =
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow(
+              ToolCallId("term-1"),
+              "run_terminal_command",
+              ToolKind.Execute,
+              status,
+              input = Some("echo beard-terminal-probe"),
+            ),
           )
+        def chunk(out: String): HostMsg = HostMsg.ToolChunk("t1", ToolCallId("term-1"), out)
         for
           ui     <- ChatApp.component(bridge, None, Scene.Empty)
           result <- withMounted(ui) { root =>
             for
               _ <- ZIO.succeed {
                 bridge.push(HostMsg.UserMessage("t1", "probe"))
-                bridge.push(HostMsg.ToolGroup("t1", List(row((1 to 6).map(i => s"line-$i").mkString("\n")))))
+                bridge.push(call())
+                bridge.push(chunk((1 to 6).map(i => s"line-$i").mkString("\n")))
               }
               first <- waitContains(root, "tool-tail-term-1", "line-6")
               _     <- ZIO.succeed {
-                bridge.push(HostMsg.ToolGroup("t1", List(row((1 to 8).map(i => s"line-$i").mkString("\n")))))
+                bridge.push(chunk("\nline-7\nline-8"))
               }
               grown <- waitContains(root, "tool-tail-term-1", "line-8")
               _     <- ZIO.succeed {
-                bridge.push(
-                  HostMsg.ToolGroup("t1", List(row((1 to 8).map(i => s"line-$i").mkString("\n"), ToolStatus.Completed)))
-                )
+                bridge.push(call(ToolStatus.Completed))
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitGone(root, "tool-tail-term-1")
@@ -1077,20 +1088,18 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- ZIO.succeed {
                 bridge.push(HostMsg.UserMessage("t1", "probe"))
                 bridge.push(
-                  HostMsg.ToolGroup(
+                  HostMsg.ToolCall(
                     "t1",
-                    List(
-                      ToolRow(
-                        ToolCallId("term-1"),
-                        "run_terminal_command",
-                        ToolKind.Execute,
-                        ToolStatus.InProgress,
-                        input = Some(command),
-                        output = Some(stdout),
-                      )
+                    ToolRow(
+                      ToolCallId("term-1"),
+                      "run_terminal_command",
+                      ToolKind.Execute,
+                      ToolStatus.InProgress,
+                      input = Some(command),
                     ),
                   )
                 )
+                bridge.push(HostMsg.ToolChunk("t1", ToolCallId("term-1"), stdout))
               }
               tail <- waitPresent(root, "tool-tail-term-1") *>
                 root.getByTestId("tool-tail-term-1").innerText
@@ -1127,20 +1136,18 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- ZIO.succeed {
                 bridge.push(HostMsg.UserMessage("t1", "probe"))
                 bridge.push(
-                  HostMsg.ToolGroup(
+                  HostMsg.ToolCall(
                     "t1",
-                    List(
-                      ToolRow(
-                        ToolCallId("term-1"),
-                        "run_terminal_command",
-                        ToolKind.Execute,
-                        ToolStatus.Completed,
-                        input = Some(command),
-                        output = Some(stdout),
-                      )
+                    ToolRow(
+                      ToolCallId("term-1"),
+                      "run_terminal_command",
+                      ToolKind.Execute,
+                      ToolStatus.Completed,
+                      input = Some(command),
                     ),
                   )
                 )
+                bridge.push(HostMsg.ToolChunk("t1", ToolCallId("term-1"), stdout))
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitPresent(root, "tool-term-1")

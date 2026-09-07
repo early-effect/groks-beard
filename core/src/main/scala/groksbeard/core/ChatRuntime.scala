@@ -59,6 +59,7 @@ final class ChatRuntime private (
   private var live                         = false
   private var agentGone                    = false
   private var lastFollow                   = Option.empty[FollowTarget]
+  private var liveExecute                  = Option.empty[ToolCallId]
 
   private def exclusive(body: UIO[Unit]): UIO[Unit] =
     reentrant.get.flatMap { held =>
@@ -547,6 +548,7 @@ final class ChatRuntime private (
   private def runTurn(text: String, chosen: List[PromptChip]): UIO[Unit] =
     ZIO.suspendSucceed {
       running = true
+      liveExecute = None
       turnSeq += 1
       currentTurn = TurnId.mint(turnSeq)
       currentTitle =
@@ -575,6 +577,7 @@ final class ChatRuntime private (
     queueSeq = 0
     occupancy = None
     running = false
+    liveExecute = None
     loadModel = ChatModel.empty
     lastFollow = None
   end resetTurnState
@@ -625,9 +628,46 @@ final class ChatRuntime private (
           .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
           .foldZIO(
             e => reject(requestId, e.message),
-            id => respond(requestId, TerminalCreateResult(id).asJson),
+            id => bindTerminal(requestId, id, p),
           )
   end handleTerminalCreate
+
+  private def bindTerminal(requestId: RequestId, id: TerminalId, p: TerminalCreateParams): UIO[Unit] =
+    val toolId = liveExecute.getOrElse(ToolCallId(id.value))
+    val start  =
+      if liveExecute.isDefined then ZIO.unit
+      else
+        val cmd =
+          if p.args.isEmpty then p.command
+          else s"${p.command} ${p.args.mkString(" ")}"
+        liveExecute = Some(toolId)
+        post(
+          HostMsg.ToolCall(
+            currentTurn,
+            ToolRow(
+              toolId,
+              "run_terminal_command",
+              ToolKind.Execute,
+              ToolStatus.InProgress,
+              input = Some(cmd).filter(_.nonEmpty),
+            ),
+          )
+        )
+    start *> respond(requestId, TerminalCreateResult(id).asJson) *> watchTerminal(id, toolId)
+  end bindTerminal
+
+  private def watchTerminal(id: TerminalId, toolId: ToolCallId): UIO[Unit] =
+    val turn = currentTurn
+    terminals.stream(id).flatMap {
+      case None         => ZIO.unit
+      case Some(chunks) =>
+        chunks
+          .filter(_.nonEmpty)
+          .foreach(text => exclusive(post(HostMsg.ToolChunk(turn, toolId, text))))
+          .forkIn(scope)
+          .unit
+    }
+  end watchTerminal
 
   private def handleTerminalOutput(requestId: RequestId, params: Json): UIO[Unit] =
     terminalIdOf(params) match
@@ -774,15 +814,33 @@ final class ChatRuntime private (
     }
 
   private def ingestLive(p: Json): UIO[Unit] =
-    ZIO.foreachDiscard(SessionUpdate.hostMsgs(p, currentTurn)) { msg =>
+    val msgs = SessionUpdate.hostMsgs(p, currentTurn)
+    val note =
+      if msgs.nonEmpty then ZIO.unit
+      else
+        SessionState.decodeUpdate(p) match
+          case Some(_) => ZIO.unit
+          case None    => ZIO.logWarning(s"ignored session/update ${sessionUpdateKind(p)}")
+    note *> ZIO.foreachDiscard(msgs) { msg =>
       val out = msg match
         case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
         case other                           => other
       out match
-        case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
-        case _                      => ()
+        case m: HostMsg.SessionMeta   => m.occupancy.foreach(o => occupancy = Some(o))
+        case HostMsg.ToolCall(_, row) => noteLiveTool(row)
+        case _                        => ()
       post(out)
     }
+  end ingestLive
+
+  private def noteLiveTool(row: ToolRow): Unit =
+    if ToolStatus.isLive(row.status) && isExecuteTool(row) then liveExecute = Some(row.id)
+    else if liveExecute.contains(row.id) && !ToolStatus.isLive(row.status) then liveExecute = None
+
+  private def isExecuteTool(row: ToolRow): Boolean =
+    row.kind == ToolKind.Execute ||
+      row.title.contains("terminal") ||
+      row.title.toLowerCase.contains("execute")
 
   private def ingestResponse(id: RpcId, result: Option[Json], error: Option[RpcError]): UIO[Unit] =
     ZIO.suspendSucceed {
@@ -1036,6 +1094,19 @@ final class ChatRuntime private (
         post(HostMsg.SessionMeta(sid, named, modeId, modes, occupancy, modelId, models, effort))
       }
   end postMeta
+
+  private def sessionUpdateKind(params: Json): String =
+    def field(obj: Json.Obj, key: String): Option[Json] =
+      obj.fields.collectFirst { case (k, v) if k == key => v }
+    params match
+      case obj: Json.Obj =>
+        field(obj, "update")
+          .collect { case inner: Json.Obj => inner }
+          .flatMap(u => field(u, "sessionUpdate"))
+          .collect { case Json.Str(s) => s }
+          .getOrElse("unknown")
+      case _ => "unknown"
+  end sessionUpdateKind
 
   private def jsonStr(json: Json, key: String): Option[String] =
     json match

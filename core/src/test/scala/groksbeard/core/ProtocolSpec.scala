@@ -152,6 +152,16 @@ object ProtocolSpec extends ZIOSpecDefault:
         val end: HostMsg   = HostMsg.TurnEnd("t1", "end_turn")
         assertTrue(chunk.toJson.fromJson[HostMsg] == Right(chunk), end.toJson.fromJson[HostMsg] == Right(end))
       },
+      test("tool call and tool chunk round-trip") {
+        val call: HostMsg =
+          HostMsg.ToolCall("t1", ToolRow("term-1", "run_terminal_command", "execute", "in_progress"))
+        val chunk: HostMsg = HostMsg.ToolChunk("t1", "term-1", "line-1\n")
+        assertTrue(call.toJson.fromJson[HostMsg] == Right(call), chunk.toJson.fromJson[HostMsg] == Right(chunk))
+      },
+      test("webview log round-trips") {
+        val msg: WebviewMsg = WebviewMsg.Log("Could not read host message.", "error")
+        assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
+      },
       test("changes summary and keep/undo round-trip") {
         val summary: HostMsg = HostMsg.changes(
           ChangesSummary(

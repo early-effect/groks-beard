@@ -1,6 +1,6 @@
 package groksbeard.ui
 
-import groksbeard.core.{HostBridge, HostMsg, WebviewMsg}
+import groksbeard.core.{HostBridge, HostMsg, WebviewMsg, Wire}
 import groksbeard.facade.VsCodeApi
 import zio.json.*
 
@@ -16,6 +16,11 @@ final class VsCodeBridge(api: VsCodeApi) extends HostBridge:
       (event: ascent.dom.Event) =>
         val data = event.asInstanceOf[ascent.dom.MessageEvent].data
         val raw  = js.JSON.stringify(data)
-        raw.fromJson[HostMsg].foreach(f),
+        Wire.hostMsgs(raw) match
+          case Right(msgs) => msgs.foreach(f)
+          case Left(err)   =>
+            js.Dynamic.global.console.error(err, raw)
+            post(WebviewMsg.Log(err))
+            f(HostMsg.Error(err, Some(Wire.Decode))),
     )
 end VsCodeBridge

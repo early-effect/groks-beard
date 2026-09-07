@@ -1,6 +1,6 @@
 package groksbeard.ui
 
-import groksbeard.core.{HostBridge, HostMsg, WebviewMsg}
+import groksbeard.core.{HostBridge, HostMsg, WebviewMsg, Wire}
 import zio.json.*
 
 import scala.scalajs.js
@@ -23,7 +23,11 @@ final class LivePreviewBridge extends HostBridge:
     val es = js.Dynamic.newInstance(js.Dynamic.global.EventSource)(LivePreviewBridge.eventsPath(client))
     es.onmessage = (event: js.Dynamic) =>
       val data = "" + event.data
-      data.fromJson[HostMsg].foreach(f)
+      Wire.hostMsgs(data) match
+        case Right(msgs) => msgs.foreach(f)
+        case Left(err)   =>
+          js.Dynamic.global.console.error(err, data)
+          f(HostMsg.Error(err, Some(Wire.Decode)))
 end LivePreviewBridge
 
 object LivePreviewBridge:

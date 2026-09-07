@@ -127,18 +127,16 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.UserMessage(TurnId("preview-turn"), text))
         emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Echo: **$text**"))
         emit(
-          HostMsg.ToolGroup(
+          HostMsg.ToolCall(
             TurnId("preview-turn"),
-            List(
-              ToolRow(
-                ToolCallId("call_1"),
-                "Edit Main.scala",
-                ToolKind.Edit,
-                ToolStatus.Completed,
-                additions = Some(2),
-                deletions = Some(1),
-                input = Some(PreviewDiffs.MainPath),
-              )
+            ToolRow(
+              ToolCallId("call_1"),
+              "Edit Main.scala",
+              ToolKind.Edit,
+              ToolStatus.Completed,
+              additions = Some(2),
+              deletions = Some(1),
+              input = Some(PreviewDiffs.MainPath),
             ),
           )
         )
@@ -241,6 +239,8 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.ClearDiff)
       case WebviewMsg.CopyOut(_, path, _, conversation) =>
         emit(HostMsg.Copied(TranscriptCopy.toast(path, conversation)))
+      case WebviewMsg.Log(message, _) =>
+        emit(HostMsg.Error(message, Some(Wire.Decode)))
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f

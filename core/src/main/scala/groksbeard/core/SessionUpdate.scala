@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.json.*
 import zio.json.ast.Json
 
 object SessionUpdate:
@@ -14,9 +15,9 @@ object SessionUpdate:
       case Some(AcpUpdate.Commands(commands)) =>
         List(HostMsg.AvailableCommands(commands))
       case Some(call: AcpUpdate.ToolCall) =>
-        List(HostMsg.ToolGroup(turnId, List(toolRow(toBody(call)))))
+        toolMsgs(turnId, toBody(call))
       case Some(call: AcpUpdate.ToolCallUpdate) =>
-        List(HostMsg.ToolGroup(turnId, List(toolRow(toBody(call)))))
+        toolMsgs(turnId, toBody(call))
       case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
         val mode = modeId.orElse(currentModeId).getOrElse(ModeId.empty)
         if mode.isEmpty then Nil else List(HostMsg.SessionMeta(SessionId.empty, "", mode, Nil))
@@ -62,6 +63,11 @@ object SessionUpdate:
       call.rawOutput,
     )
 
+  private def toolMsgs(turnId: TurnId, toolCall: AcpToolCall): List[HostMsg] =
+    val row = toolRow(toolCall)
+    val out = ToolView.outputOf(toolCall)
+    HostMsg.ToolCall(turnId, row) :: out.toList.map(t => HostMsg.ToolChunk(turnId, row.id, t, snapshot = true))
+
   private def toolRow(toolCall: AcpToolCall): ToolRow =
     val extracted = DiffContent.diffsFromToolCall(toolCall.asJson)
     val stats     = extracted.diffs.headOption.map(d => ChangeSet.lineDiffStats(d.oldText, d.newText))
@@ -73,7 +79,6 @@ object SessionUpdate:
       additions = stats.map(_._1),
       deletions = stats.map(_._2),
       input = ToolView.inputOf(toolCall, extracted.diffs),
-      output = ToolView.outputOf(toolCall),
     )
   end toolRow
 end SessionUpdate

@@ -29,6 +29,10 @@ object TerminalsSpec extends ZIOSpecDefault:
             terms  <- ZIO.service[Terminals]
             id     <- terms.create("echo", List("hi"), None, Nil, None)
             out    <- terms.output(id)
+            chunks <- terms.stream(id).flatMap {
+              case None    => ZIO.succeed(List.empty[String])
+              case Some(s) => s.runCollect.map(_.toList)
+            }
             st     <- terms.waitForExit(id)
             killed <- terms.kill(id)
             gone   <- terms.release(id)
@@ -36,6 +40,7 @@ object TerminalsSpec extends ZIOSpecDefault:
           yield assertTrue(
             id.value == "term-1",
             out.exists(_.output.contains("echo hi")),
+            chunks.exists(_.contains("echo hi")),
             st.contains(TerminalExitStatus(Some(0), None)),
             killed,
             gone,

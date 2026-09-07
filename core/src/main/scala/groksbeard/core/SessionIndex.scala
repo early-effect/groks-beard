@@ -2,6 +2,7 @@ package groksbeard.core
 
 import ascent.squawk.Eq
 import java.nio.charset.StandardCharsets
+import scala.annotation.unused
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
@@ -29,8 +30,8 @@ trait SessionFs:
   def isDirectory(path: String): BeardError.Result[Boolean]
   def mtimeMs(path: String): BeardError.Result[Option[Long]]
   def readText(path: String): BeardError.Result[Option[String]]
-  def writeText(_path: String, _text: String): BeardError.Result[Unit] = ZIO.unit
-  def deleteTree(_path: String): BeardError.Result[Unit]               = ZIO.unit
+  def writeText(@unused path: String, @unused text: String): BeardError.Result[Unit] = ZIO.unit
+  def deleteTree(@unused path: String): BeardError.Result[Unit]                      = ZIO.unit
 
 object SessionIndex:
   val PageSize: Int              = 100

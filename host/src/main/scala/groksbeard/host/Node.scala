@@ -21,6 +21,7 @@ trait NodeServer extends js.Object:
 @JSImport("net", JSImport.Namespace)
 object nodeNet extends js.Object:
   def createServer(listener: js.Function1[NodeSocket, Any]): NodeServer = js.native
+  def connect(port: Int, host: String): NodeSocket                      = js.native
 
 @js.native
 @JSImport("fs", JSImport.Namespace)

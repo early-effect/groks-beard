@@ -12,8 +12,10 @@ trait Uri extends js.Object:
   def fsPath: String = js.native
   def scheme: String = js.native
   def path: String   = js.native
+
+  /** VS Code `Uri.toString()` is a method. Empty-parens so Scala.js emits a call, not a property read. */
   @js.annotation.JSName("toString")
-  def asString: String = js.native
+  def asString(): String = js.native
 
 @js.native
 trait UriNs extends js.Object:
@@ -142,7 +144,8 @@ trait TextEditor extends js.Object:
 
 @js.native
 trait OutputChannel extends js.Object:
-  def appendLine(value: String): Unit = js.native
+  def appendLine(value: String): Unit    = js.native
+  def show(preserveFocus: Boolean): Unit = js.native
 
 @js.native
 trait StatusBarItem extends js.Object:

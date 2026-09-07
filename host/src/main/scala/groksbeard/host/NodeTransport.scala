@@ -1,6 +1,7 @@
 package groksbeard.host
 
 import groksbeard.core.AcpTransport
+import groksbeard.core.AgentLog
 import groksbeard.core.BeardError
 import groksbeard.core.BeardError.orSystem
 import zio.*
@@ -23,7 +24,7 @@ final class NodeTransport(
   child.stderr.on(
     "data",
     (chunk: js.Any) =>
-      val line = "" + chunk
+      val line = AgentLog.stripAnsi("" + chunk)
       log(line)
       if line.nonEmpty then run(onErr(line)),
   )

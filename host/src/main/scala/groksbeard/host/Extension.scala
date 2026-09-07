@@ -13,8 +13,16 @@ object Extension:
 
   @JSExportTopLevel("activate")
   def activate(context: ExtensionContext): Unit =
-    val out = vscode.window.createOutputChannel("Grok's Beard")
-    HostRuntime.start(line => out.appendLine(line))
+    val out   = vscode.window.createOutputChannel("Grok's Beard")
+    val beard = new BeardOut(out)
+    try activateWith(context, beard)
+    catch
+      case e: Throwable =>
+        val _ = beard.error("activate", e)
+
+  private def activateWith(context: ExtensionContext, beard: BeardOut): Unit =
+    beard.line("activating")
+    HostRuntime.start(beard.line)
     val docs   = new BeardDocs
     val review = new Review(docs)
     val status = vscode.window.createStatusBarItem(2, 80)
@@ -31,7 +39,7 @@ object Extension:
         else fromChat :+ ChangeSet(SessionId.empty, TurnId("sidecar"), "TUI", side, 0L)
       )
     treeRef = Some(tree)
-    val chat = new ChatView(context, review, tree, status, line => out.appendLine(line), mcpHost.rememberSelection)
+    val chat = new ChatView(context, review, tree, status, beard, mcpHost.rememberSelection)
     chatRef = Some(chat)
     activeChat = Some(chat)
     val bridge  = new TuiBridge(mcpHost.asToolHost, _ => ())
@@ -42,6 +50,7 @@ object Extension:
     val useActivityBar =
       vscode.env.appName != "Visual Studio Code" && vscode.env.appName != "VS Code"
     val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.useActivityBar", useActivityBar)
+    val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.hasChanges", false)
     context.subscriptions.push(
       vscode.workspace.registerTextDocumentContentProvider(BeardDocs.Original, docs)
     )
@@ -211,8 +220,9 @@ object Extension:
     context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.disableTuiBridge", () => disableBridge(context, mcpHost, bridge))
     )
+    beard.line("activated")
     ()
-  end activate
+  end activateWith
 
   @JSExportTopLevel("deactivate")
   def deactivate(): Unit =

@@ -15,6 +15,14 @@ object AgentLogSpec extends ZIOSpecDefault:
           got.exists(m => !m.toLowerCase.contains("stopped") && !m.toLowerCase.contains("turn")),
           AgentLog.classify("info: ready").isEmpty,
         )
-      }
+      },
+      test("connection refused to a local MCP is a notice") {
+        val line =
+          """ERROR worker quit with fatal: Transport channel closed, when Client(reqwest::Error { kind: Request, url: "http://localhost:56126/mcp", source: ConnectError("tcp connect error", Os { code: 61, kind: ConnectionRefused, message: "Connection refused" }) })"""
+        assertTrue(
+          AgentLog.classify(line).contains(LocalMcp.timeoutNotice(Some("http://localhost:56126/mcp"))),
+          AgentLog.stripAnsi("\u001b[31mERROR\u001b[0m worker") == "ERROR worker",
+        )
+      },
     )
 end AgentLogSpec

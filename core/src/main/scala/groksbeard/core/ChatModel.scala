@@ -309,7 +309,7 @@ object ChatModel:
       case HostMsg.ClearDiff =>
         model.copy(diff = None)
       case HostMsg.Error(message, _) =>
-        model.copy(error = Some(message))
+        model.copy(error = Option(message).filter(_.nonEmpty))
       case HostMsg.Copied(message, _) =>
         model.copy(error = Some(message))
       case HostMsg.Todos(entries) =>

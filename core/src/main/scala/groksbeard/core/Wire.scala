@@ -16,8 +16,11 @@ object Wire:
   def hostMsgs(raw: String): Either[String, List[HostMsg]] =
     raw.fromJson[Json] match
       case Left(err)              => Left(s"Could not read host message ($err).")
-      case Right(Json.Str(inner)) => hostMsgs(inner)
-      case Right(obj: Json.Obj)   =>
+      case Right(Json.Str(inner)) =>
+        val trimmed = inner.trim
+        if trimmed.startsWith("{") || trimmed.startsWith("[") then hostMsgs(inner)
+        else Left("Could not read host message (expected object).")
+      case Right(obj: Json.Obj) =>
         tagOf(obj) match
           case None =>
             Left("Could not read host message (missing _tag).")

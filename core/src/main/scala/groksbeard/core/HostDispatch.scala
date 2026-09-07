@@ -48,6 +48,8 @@ object HostDispatch:
       case WebviewMsg.OpenRewind                       => runtime.openRewind
       case WebviewMsg.CloseRewind                      => runtime.closeRewind
       case WebviewMsg.RewindTo(index)                  => runtime.rewindTo(index)
+      case WebviewMsg.ListMcps                         => runtime.listMcps
+      case WebviewMsg.SetMcpEnabled(name, enabled)     => runtime.setMcpEnabled(name, enabled)
       case WebviewMsg.Log(message, level)              =>
         level.toLowerCase match
           case "warn" | "warning" => ZIO.logWarning(message)

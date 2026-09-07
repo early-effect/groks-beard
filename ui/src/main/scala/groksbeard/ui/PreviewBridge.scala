@@ -60,6 +60,7 @@ final class PreviewBridge extends HostBridge:
     )
   private var currentId  = SessionId.empty
   private var pickerOpen = false
+  private var mcps       = PreviewScenes.mcps
 
   def post(msg: WebviewMsg): Unit =
     msg match
@@ -71,6 +72,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.AvailableCommands(commands))
         emit(HostMsg.settings(settings))
         emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
+        emit(HostMsg.McpServers(mcps))
       case WebviewMsg.MentionQuery(query) =>
         val q    = query.toLowerCase
         val hits =
@@ -154,6 +156,14 @@ final class PreviewBridge extends HostBridge:
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
         else if SessionCommands.isRewind(name) then post(WebviewMsg.OpenRewind)
+        else if SessionCommands.isMcps(name) then post(WebviewMsg.ListMcps)
+      case WebviewMsg.ListMcps =>
+        emit(HostMsg.McpServers(mcps))
+      case WebviewMsg.SetMcpEnabled(name, enabled) =>
+        mcps = mcps.map { row =>
+          if row.name == name then row.copy(enabled = enabled) else row
+        }
+        emit(HostMsg.McpServers(mcps))
       case WebviewMsg.OpenRewind | WebviewMsg.CloseRewind =>
         ()
       case WebviewMsg.RewindTo(index) =>

@@ -17,9 +17,11 @@ object SessionCommands:
   val Export: SlashCommand  = SlashCommand("export", "Export this conversation")
   val Rewind: SlashCommand  = SlashCommand("rewind", "Rewind to an earlier turn")
   val Undo: SlashCommand    = SlashCommand("undo", "Rewind to an earlier turn")
+  val Mcps: SlashCommand    = SlashCommand("mcps", "View and toggle MCP servers")
+  val Mcp: SlashCommand     = SlashCommand("mcp", "View and toggle MCP servers")
 
   val All: List[SlashCommand] =
-    List(New, Clear, Resume, Home, Model, Effort, Rename, Title, Delete, History, Copy, Export, Rewind)
+    List(New, Clear, Resume, Home, Model, Effort, Rename, Title, Delete, History, Copy, Export, Rewind, Mcps)
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
     val names = advertised.map(_.name.toLowerCase).toSet
@@ -63,6 +65,10 @@ object SessionCommands:
     val n = name.stripPrefix("/").toLowerCase
     n == "rewind" || n == "undo"
 
+  def isMcps(name: String): Boolean =
+    val n = name.stripPrefix("/").toLowerCase
+    n == "mcps" || n == "mcp"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -74,7 +80,7 @@ object SessionCommands:
         else (rest.take(i), rest.drop(i).trim)
       val name = raw.toLowerCase
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
-        isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name)
+        isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name)
       then Some(ClientCommand(name, args))
       else None
     end if

@@ -154,7 +154,7 @@ object TranscriptOut:
 end TranscriptOut
 
 object ChatEnv:
-  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals
+  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals & Mcps
 
   def test(
       post: HostMsg => UIO[Unit] = _ => ZIO.unit,
@@ -174,6 +174,7 @@ object ChatEnv:
       onCopy: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
       terminals: ULayer[Terminals] = Terminals.test(),
+      mcps: ULayer[Mcps] = Mcps.none,
   ): ULayer[Env] =
     HostOut.layer(post) ++
       SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete, planOnDisk) ++
@@ -188,5 +189,6 @@ object ChatEnv:
         onFollow = (p, l) => ZIO.succeed(followFile(p, l)),
       ) ++
       TranscriptOut.test(onCopy) ++
-      terminals
+      terminals ++
+      mcps
 end ChatEnv

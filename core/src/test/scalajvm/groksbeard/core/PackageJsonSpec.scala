@@ -22,6 +22,8 @@ object PackageJsonSpec extends ZIOSpecDefault:
           json.contains("\"groksBeard.undoAll\""),
           json.contains("\"groksBeard.keepTurn\""),
           json.contains("\"groksBeard.cycleMode\""),
+          json.contains("\"groksBeard.commandPalette\""),
+          json.contains("\"groksBeard.mcpServers\""),
           json.contains("ctrl+shift+;"),
           json.contains("includeActiveFileByDefault"),
           json.contains("useCtrlEnterToSend"),

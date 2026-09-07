@@ -174,6 +174,22 @@ object PreviewScenes:
             )
           ),
         )
+      case Scene.Queue =>
+        ChatModel.empty.copy(
+          inSession = true,
+          title = "Queue",
+          turns = List(
+            TurnView(
+              id = TurnId("t-run"),
+              user = Some(TurnUser("Ship the queue pane")),
+              agent = "Working on it.",
+            )
+          ),
+          queue = List(
+            QueuedPrompt(QueueId("q1"), "then run the tests"),
+            QueuedPrompt(QueueId("q2"), "then open the PR"),
+          ),
+        )
       case Scene.Todos =>
         ChatModel.empty.copy(
           inSession = true,

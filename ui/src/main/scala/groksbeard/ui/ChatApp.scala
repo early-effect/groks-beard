@@ -25,7 +25,7 @@ final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos,
-    Palette, Mcps
+    Palette, Mcps, Queue
 
 object Scene:
   def from(name: String): Scene =
@@ -43,6 +43,7 @@ object Scene:
       case "todos"      => Scene.Todos
       case "palette"    => Scene.Palette
       case "mcps"       => Scene.Mcps
+      case "queue"      => Scene.Queue
       case _            => Scene.Empty
 end Scene
 
@@ -987,6 +988,8 @@ object ChatApp:
       pickerQuery    <- sq("")
       changesOpen    <- sq(false)
       todosOpen      <- sq(scene == Scene.Todos)
+      queueOpen      <- sq(scene == Scene.Queue)
+      queueIdx       <- sq(if scene == Scene.Queue then Some(0) else None)
       paletteOpen    <- sq(scene == Scene.Palette)
       paletteQuery   <- sq("")
       paletteIdx     <- sq(if scene == Scene.Palette then Some(0) else None)
@@ -1034,6 +1037,7 @@ object ChatApp:
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
+              case HostMsg.ToggleQueue           => queueOpen.update(!_)
               case HostMsg.OpenPalette           =>
                 mcpsOpen.set(false) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *> paletteOpen.set(true) *>
                   ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
@@ -1053,9 +1057,12 @@ object ChatApp:
                 ZIO.succeed(js.Dynamic.global.console.error(message)).unit
               case _ => ZIO.unit
             } *> chat.get.flatMap { before =>
-              val next = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
-              val auto = before.todos.isEmpty && next.todos.nonEmpty
-              chat.update(_ => next) *> ZIO.when(auto)(todosOpen.set(true)).unit
+              val next     = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
+              val autoTodo = before.todos.isEmpty && next.todos.nonEmpty
+              val autoQ    = before.queue.isEmpty && next.queue.nonEmpty
+              chat.update(_ => next) *>
+                ZIO.when(autoTodo)(todosOpen.set(true)).unit *>
+                ZIO.when(autoQ)(queueOpen.set(true) *> queueIdx.set(Some((next.queue.size - 1).max(0)))).unit
             }
           }
         }
@@ -1175,7 +1182,8 @@ object ChatApp:
                   historyBrowse.set(None) *> historyPickIdx.set(None) *> pick.fold(draft.set(""))(draft.set)
                 }
               case _ if trimmed.isEmpty && c.chips.isEmpty =>
-                ZIO.unit
+                if ChatModel.turnIsRunning(c) && c.queue.nonEmpty then sendQueuedNow(c.queue.head.id)
+                else ZIO.unit
               case _ =>
                 val msg =
                   if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed) else WebviewMsg.Send(trimmed)
@@ -1258,104 +1266,123 @@ object ChatApp:
       def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
         onPaletteKey(e).flatMap {
           case true  => ZIO.unit
-          case false => handleShellKey(e)
+          case false =>
+            onQueueKey(e).flatMap {
+              case true  => ZIO.unit
+              case false => handleShellKey(e)
+            }
         }
 
       def handleShellKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
-        val key        = e.key
-        val ctrlOrMeta = e.ctrlKey || e.metaKey
+        val key                            = e.key
+        val ctrlOrMeta                     = e.ctrlKey || e.metaKey
+        def steal(z: UIO[Unit]): UIO[Unit] =
+          e.preventDefault()
+          e.stopPropagation()
+          z
         chat.get.flatMap { c =>
           if (e.ctrlKey || e.metaKey) && !e.shiftKey && (key == "p" || key == "P") then
             if typingInField(e) then ZIO.unit
-            else
-              e.preventDefault()
-              e.stopPropagation()
-              togglePalette
+            else steal(togglePalette)
           else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
-            else
-              e.preventDefault()
-              toggleTodos
+            else steal(toggleTodos)
+          else if e.ctrlKey && !e.metaKey && !e.shiftKey && key == "4" && !c.pickerOpen then
+            if typingInField(e) then ZIO.unit
+            else steal(toggleQueue)
           else if key == "Escape" then
-            e.preventDefault()
-            openMenu.get.flatMap {
-              case Some(_) => hideMenu
-              case None    =>
-                paletteOpen.get.flatMap {
-                  case true  => closePalette
-                  case false =>
-                    mcpsOpen.get.flatMap {
-                      case true  => closeMcps
-                      case false =>
-                        pendingDelete.get.flatMap {
-                          case Some(_) => cancelDelete
-                          case None    =>
-                            if c.rewindConfirm.nonEmpty then cancelRewind
-                            else if c.rewind.nonEmpty then closeRewindPicker
-                            else
-                              mentionShown.get.flatMap { mentions =>
-                                if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                                else
-                                  draft.get.flatMap { text =>
-                                    if PromptHistory.query(text).isDefined then
-                                      draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
-                                    else
-                                      historyBrowse.get.flatMap {
-                                        case Some(_) => historyBrowse.set(None)
-                                        case None    =>
-                                          if c.pickerOpen then closePicker
-                                          else if c.permission.isDefined then parkPermission
-                                          else if c.question.isDefined then ZIO.unit
-                                          else
-                                            todosOpen.get.flatMap {
-                                              case true  => todosOpen.set(false)
-                                              case false =>
-                                                if ChatModel.turnIsRunning(c) then
-                                                  nowMs.get.flatMap { now =>
-                                                    lastCancelMs.set(Some(now)) *>
-                                                      lastIdleEsc.set(None) *>
-                                                      ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+            steal {
+              openMenu.get.flatMap {
+                case Some(_) => hideMenu
+                case None    =>
+                  paletteOpen.get.flatMap {
+                    case true  => closePalette
+                    case false =>
+                      mcpsOpen.get.flatMap {
+                        case true  => closeMcps
+                        case false =>
+                          pendingDelete.get.flatMap {
+                            case Some(_) => cancelDelete
+                            case None    =>
+                              if c.rewindConfirm.nonEmpty then cancelRewind
+                              else if c.rewind.nonEmpty then closeRewindPicker
+                              else
+                                mentionShown.get.flatMap { mentions =>
+                                  if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
+                                  else
+                                    draft.get.flatMap { text =>
+                                      if PromptHistory.query(text).isDefined then
+                                        draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
+                                      else
+                                        historyBrowse.get.flatMap {
+                                          case Some(_) => historyBrowse.set(None)
+                                          case None    =>
+                                            if c.pickerOpen then closePicker
+                                            else if c.permission.isDefined then parkPermission
+                                            else if c.question.isDefined then
+                                              ZIO.succeed(
+                                                bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))
+                                              )
+                                            else if c.plan.isDefined then
+                                              ZIO.succeed(
+                                                bridge.post(
+                                                  WebviewMsg.PlanVerdict(c.plan.get.requestId, PlanOutcome.Abandoned)
+                                                )
+                                              )
+                                            else if c.elicit.isDefined then
+                                              ZIO.succeed(
+                                                bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))
+                                              )
+                                            else
+                                              queueOpen.get.flatMap {
+                                                case true  => queueOpen.set(false)
+                                                case false =>
+                                                  todosOpen.get.flatMap {
+                                                    case true  => todosOpen.set(false)
+                                                    case false =>
+                                                      if ChatModel.turnIsRunning(c) then
+                                                        nowMs.get.flatMap { now =>
+                                                          lastCancelMs.set(Some(now)) *>
+                                                            lastIdleEsc.set(None) *>
+                                                            ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                                        }
+                                                      else idleRewindEsc(c, text)
                                                   }
-                                                else idleRewindEsc(c, text)
-                                            }
-                                      }
-                                  }
-                              }
-                        }
-                    }
-                }
+                                              }
+                                        }
+                                    }
+                                }
+                          }
+                      }
+                  }
+              }
             }
           else
             (if typingInField(e) then ZIO.succeed(false) else onMenuKey(e)).flatMap {
               case true  => ZIO.unit
               case false =>
                 if e.shiftKey && key == "Tab" && !ctrlOrMeta then
-                  e.preventDefault()
-                  if c.question.isDefined || c.permission.isDefined then ZIO.unit
-                  else hideMenu *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+                  steal {
+                    if c.question.isDefined || c.permission.isDefined then ZIO.unit
+                    else hideMenu *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+                  }
                 else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
-                  e.preventDefault()
-                  ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId)))
+                  steal(ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))))
                 else
                   pendingDelete.get.flatMap {
-                    case Some(_) if key == "y" || key == "Y" =>
-                      e.preventDefault()
-                      confirmDelete
-                    case Some(_) if key == "n" || key == "N" =>
-                      e.preventDefault()
-                      cancelDelete
+                    case Some(_) if key == "y" || key == "Y"                         => steal(confirmDelete)
+                    case Some(_) if key == "n" || key == "N"                         => steal(cancelDelete)
                     case _ if c.rewindConfirm.nonEmpty && (key == "y" || key == "Y") =>
-                      e.preventDefault()
-                      confirmRewind
+                      steal(confirmRewind)
                     case _ if c.rewindConfirm.nonEmpty && (key == "n" || key == "N") =>
-                      e.preventDefault()
-                      cancelRewind
+                      steal(cancelRewind)
                     case _ =>
                       c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
                         case Some(opt) =>
-                          e.preventDefault()
-                          ZIO.succeed(
-                            bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId))
+                          steal(
+                            ZIO.succeed(
+                              bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId))
+                            )
                           )
                         case None =>
                           c.question match
@@ -1364,21 +1391,29 @@ object ChatApp:
                               questionDraft.get.flatMap { held =>
                                 val d = QuestionDraft.align(card, held)
                                 QuestionDraft.navKey(key) match
-                                  case Some("prev") =>
-                                    e.preventDefault()
-                                    questionDraft.set(QuestionDraft.prev(card, d))
-                                  case Some("next") =>
-                                    e.preventDefault()
-                                    questionDraft.set(QuestionDraft.next(card, d))
-                                  case _ =>
+                                  case Some("prev") => steal(questionDraft.set(QuestionDraft.prev(card, d)))
+                                  case Some("next") => steal(questionDraft.set(QuestionDraft.next(card, d)))
+                                  case _            =>
                                     QuestionDraft.current(card, d).flatMap(q => QuestionDraft.optionKey(key, q)) match
-                                      case Some(oid) =>
-                                        e.preventDefault()
-                                        applyQuestionPick(card, oid)
-                                      case None => ZIO.unit
+                                      case Some(oid) => steal(applyQuestionPick(card, oid))
+                                      case None      => ZIO.unit
                                 end match
                               }
-                            case None => ZIO.unit
+                            case None =>
+                              c.plan match
+                                case Some(card) if !typingInField(e) && (key == "a" || key == "A") =>
+                                  steal(
+                                    ZIO.succeed(
+                                      bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Approved))
+                                    )
+                                  )
+                                case Some(card) if !typingInField(e) && (key == "q" || key == "Q") =>
+                                  steal(
+                                    ZIO.succeed(
+                                      bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Abandoned))
+                                    )
+                                  )
+                                case _ => ZIO.unit
                   }
             }
         }
@@ -1449,6 +1484,69 @@ object ChatApp:
       def toggleTodos: UIO[Unit] =
         todosOpen.update(!_)
 
+      def toggleQueue: UIO[Unit] =
+        chat.get.flatMap { c =>
+          if c.queue.isEmpty then ZIO.unit
+          else queueOpen.update(!_)
+        }
+
+      def sendQueuedNow(id: QueueId): UIO[Unit] =
+        chat.update(m => m.copy(queue = m.queue.filterNot(_.id == id))) *>
+          queueIdx.set(Some(0)) *>
+          ZIO.succeed(bridge.post(WebviewMsg.QueueSendNow(id)))
+
+      def dropQueued(id: QueueId): UIO[Unit] =
+        chat.update { m =>
+          val next = m.queue.filterNot(_.id == id)
+          m.copy(queue = next)
+        } *>
+          chat.get.flatMap { m =>
+            queueIdx.set(if m.queue.isEmpty then None else Some(0)) *>
+              ZIO.when(m.queue.isEmpty)(queueOpen.set(false)).unit
+          } *>
+          ZIO.succeed(bridge.post(WebviewMsg.QueueDrop(id)))
+
+      def editQueued(item: QueuedPrompt): UIO[Unit] =
+        dropQueued(item.id) *> draft.set(QueuedPrompt.display(item))
+
+      def onQueueKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
+        val key                            = e.key
+        val ctrlOrMeta                     = e.ctrlKey || e.metaKey
+        def go(z: UIO[Unit]): UIO[Boolean] =
+          e.preventDefault()
+          e.stopPropagation()
+          z.as(true)
+        draft.get.flatMap { text =>
+          chat.get.flatMap { c =>
+            if c.queue.isEmpty then ZIO.succeed(false)
+            else if e.ctrlKey && !e.metaKey && !e.shiftKey && key == "4" then go(toggleQueue)
+            else if text.nonEmpty then ZIO.succeed(false)
+            else
+              queueOpen.get.flatMap { open =>
+                queueIdx.get.flatMap { idx =>
+                  if key == "ArrowUp" && idx.isEmpty && c.chips.isEmpty then
+                    go(queueOpen.set(true) *> queueIdx.set(Some(c.queue.size - 1)))
+                  else if open && (key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End") then
+                    go(queueIdx.set(ComposerQuery.moveIndex(idx.orElse(Some(0)), key, c.queue.size)))
+                  else if open && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
+                    c.queue.lift(idx.getOrElse(0)) match
+                      case Some(item) => go(sendQueuedNow(item.id))
+                      case None       => ZIO.succeed(false)
+                  else if open && !ctrlOrMeta && (key == "e" || key == "E") then
+                    c.queue.lift(idx.getOrElse(0)) match
+                      case Some(item) => go(editQueued(item))
+                      case None       => ZIO.succeed(false)
+                  else if open && (key == "Backspace" || key == "Delete") then
+                    c.queue.lift(idx.getOrElse(0)) match
+                      case Some(item) => go(dropQueued(item.id))
+                      case None       => ZIO.succeed(false)
+                  else ZIO.succeed(false)
+                }
+              }
+          }
+        }
+      end onQueueKey
+
       def toggleMenu(menu: OpenMenu): UIO[Unit] =
         openMenu.get.flatMap {
           case Some(m) if m == menu => hideMenu
@@ -1514,6 +1612,7 @@ object ChatApp:
                 if ids.isEmpty then ZIO.succeed(false)
                 else if key == "Enter" || key == "Tab" then
                   e.preventDefault()
+                  e.stopPropagation()
                   menuIdx.get.flatMap { idx =>
                     ids.lift(idx.getOrElse(0)) match
                       case None     => ZIO.succeed(true)
@@ -1521,6 +1620,7 @@ object ChatApp:
                   }
                 else
                   e.preventDefault()
+                  e.stopPropagation()
                   menuIdx.update(i => ComposerQuery.moveIndex(i, key, ids.size)).as(true)
                 end if
               }
@@ -1750,6 +1850,9 @@ object ChatApp:
         Shell,
         Page,
         Ev.onKeyDown(onCardKey),
+        Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
+          onCardKey(ev.raw.asInstanceOf[ascent.dom.KeyboardEvent])
+        },
         renderToolbar(chat, toggleMenu, openPicker, startNew),
         E.div(
           Stage,
@@ -1822,9 +1925,7 @@ object ChatApp:
             )
           ),
           when(
-            Squawk.zipWith(chat, leaving)((c, l) =>
-              stageIdle(l) && !c.pickerOpen && (c.turns.nonEmpty || c.queue.nonEmpty)
-            )
+            Squawk.zipWith(chat, leaving)((c, l) => stageIdle(l) && !c.pickerOpen && c.turns.nonEmpty)
           )(
             E.div(
               Transcript,
@@ -1832,9 +1933,6 @@ object ChatApp:
               Lifecycle.onMountScoped[ascent.dom.Element, Any](TranscriptScroll.bind),
               forEachSignal(chat.map(_.turns))(_.id.value) { (id, _, turn) =>
                 renderTurn(bridge, id, turn, toolOut)
-              },
-              forEach(chat.map(_.queue))(_.id.value) { item =>
-                renderQueued(item)
               },
             )
           ),
@@ -1874,6 +1972,7 @@ object ChatApp:
         ),
         renderDiff(bridge, chat),
         renderTodos(chat, todosOpen, toggleTodos),
+        renderQueue(chat, queueOpen, queueIdx, toggleQueue, sendQueuedNow, dropQueued, editQueued),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
         when(chat.map(_.error.nonEmpty))(
           E.div(
@@ -1980,6 +2079,7 @@ object ChatApp:
           togglePalette,
           openPalette,
           onPaletteKey,
+          onQueueKey,
         ),
       )
     end for
@@ -2181,6 +2281,7 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -2207,6 +2308,7 @@ object ChatApp:
         togglePalette,
         openPalette,
         onPaletteKey,
+        onQueueKey,
       ),
       renderComposerBar(bridge, chat, sendDraft),
     )
@@ -2262,6 +2364,7 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): ascent.ast.UI[Any] =
     E.textarea(
       Draft,
@@ -2297,6 +2400,7 @@ object ChatApp:
           togglePalette,
           openPalette,
           onPaletteKey,
+          onQueueKey,
         )
       ),
     )
@@ -2346,6 +2450,7 @@ object ChatApp:
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
+      onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
   ): UIO[Unit] =
     val key                         = e.key
     val ctrlOrMeta                  = e.ctrlKey || e.metaKey
@@ -2355,6 +2460,7 @@ object ChatApp:
       z
     for
       stolen    <- onPaletteKey(e)
+      queued    <- onQueueKey(e)
       slash     <- slashShown.get
       mentions  <- mentionShown.get
       history   <- historyShown.get
@@ -2369,7 +2475,7 @@ object ChatApp:
       list = PromptHistory.entries(c)
       step = key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End"
       out <-
-        if stolen then ZIO.unit
+        if stolen || queued then ZIO.unit
         else if menu.isDefined && isMenuNav(key, e.shiftKey) then onMenuKey(e).unit
         else if mentions.nonEmpty && step then go(mentionIdx.set(ComposerQuery.moveIndex(idx, key, mentions.size)))
         else if mentions.nonEmpty && (key == "Enter" || key == "Tab") && !e.shiftKey && !ctrlOrMeta then
@@ -2446,13 +2552,77 @@ object ChatApp:
     val src = logoSrc.filter(_.nonEmpty).getOrElse("/logo.png")
     E.img(Logo, TestId("hero-logo"), A.src(src), A.alt("Grok's Beard"))
 
-  private def renderQueued(item: QueuedPrompt): ascent.ast.UI[Any] =
-    E.div(
-      UserMsg,
-      TestId(s"queue-${item.id}"),
-      E.div(SessionMetaLine, "Queued"),
-      QueuedPrompt.display(item),
+  private def renderQueue(
+      chat: ascent.Source[ChatModel],
+      open: ascent.Source[Boolean],
+      idx: ascent.Source[Option[Int]],
+      toggle: UIO[Unit],
+      sendNow: QueueId => UIO[Unit],
+      drop: QueueId => UIO[Unit],
+      edit: QueuedPrompt => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(chat.map(_.queue.nonEmpty))(
+      E.div(
+        ChangesPane,
+        TestId("queue"),
+        E.button(
+          ChangesHead,
+          TestId("queue-toggle"),
+          A.`type`("button"),
+          A.title("Toggle queue (Ctrl+4)"),
+          Ev.onClick(_ => toggle),
+          E.strong(
+            chat.map { c =>
+              val n = c.queue.size
+              if n == 1 then "1 queued" else s"$n queued"
+            }
+          ),
+          E.span(open.map(on => if on then "Hide" else "Show")),
+        ),
+        when(open)(
+          E.div(
+            ChangesList,
+            TestId("queue-list"),
+            A.role("listbox"),
+            forEach(
+              Squawk.zipWith(chat, idx) { (c, i) =>
+                c.queue.zipWithIndex.map { (item, n) => (item, n, i.contains(n)) }
+              }
+            )(t => s"${t._1.id}-${t._3}") { t =>
+              val (item, n, on) = t
+              E.div(
+                if on then PaletteItemOn else FileRow,
+                TestId(s"queue-${item.id}"),
+                Ev.onClick(_ => idx.set(Some(n))),
+                E.span(QueuedPrompt.display(item)),
+                E.button(
+                  Chip,
+                  TestId(s"queue-now-${item.id}"),
+                  A.`type`("button"),
+                  Ev.onClick(_ => sendNow(item.id)),
+                  "Send now",
+                ),
+                E.button(
+                  Chip,
+                  TestId(s"queue-edit-${item.id}"),
+                  A.`type`("button"),
+                  Ev.onClick(_ => edit(item)),
+                  "Edit",
+                ),
+                E.button(
+                  Chip,
+                  TestId(s"queue-drop-${item.id}"),
+                  A.`type`("button"),
+                  Ev.onClick(_ => drop(item.id)),
+                  "Drop",
+                ),
+              )
+            },
+          )
+        ),
+      )
     )
+  end renderQueue
 
   private def renderTurn(
       bridge: HostBridge,
@@ -2829,9 +2999,6 @@ object ChatApp:
         PalettePanel,
         TestId("palette"),
         A.role("dialog"),
-        Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
-          onPaletteKey(ev.raw.asInstanceOf[ascent.dom.KeyboardEvent]).unit
-        },
         Ev.onClick { e =>
           e.stopPropagation()
           ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))

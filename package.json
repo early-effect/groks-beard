@@ -110,6 +110,10 @@
         "title": "Grok's Beard: Toggle Todos"
       },
       {
+        "command": "groksBeard.toggleQueue",
+        "title": "Grok's Beard: Toggle Queue"
+      },
+      {
         "command": "groksBeard.commandPalette",
         "title": "Grok's Beard: Command Palette"
       },
@@ -262,6 +266,11 @@
       {
         "command": "groksBeard.toggleTodos",
         "key": "ctrl+t",
+        "when": "focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary"
+      },
+      {
+        "command": "groksBeard.toggleQueue",
+        "key": "ctrl+4",
         "when": "focusedView == groksBeard.chat || focusedView == groksBeard.chatSecondary"
       },
       {

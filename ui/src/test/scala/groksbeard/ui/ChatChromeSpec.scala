@@ -616,6 +616,20 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("a tool path in the transcript is clickable") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "tool-open-read-1")
+              text <- root.button("tool-open-read-1").innerText
+              _    <- root.button("tool-open-read-1").click
+            yield assertTrue(text.contains("Main.scala"))
+          }
+        yield result
+        end for
+      },
       test("up on an empty composer recalls the last prompt") {
         val bridge = PreviewBridge()
         for
@@ -802,9 +816,10 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _      <- root.button("tasks-toggle").click
               _      <- waitGone(root, "tasks-list")
             yield assertTrue(
-              head.contains("Tasks 2 running"),
+              head.contains("Tasks 3 running"),
               status.contains("1 command"),
               status.contains("1 loop"),
+              status.contains("1 subagent"),
               row.contains("Check CI"),
             )
           }
@@ -827,6 +842,25 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("tasks scene groups subagents and pins a transcript block") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Tasks)
+          result <- withMounted(ui) { root =>
+            for
+              group <- waitPresent(root, "tasks-group-subagents") *> root.getByTestId("tasks-group-subagents").innerText
+              pane  <- waitPresent(root, "task-sub-1") *> root.getByTestId("task-sub-1").innerText
+              block <- waitPresent(root, "subagent-sub-1") *> root.getByTestId("subagent-sub-1").innerText
+            yield assertTrue(
+              group.contains("Subagents"),
+              pane.contains("Research spawn_subagent"),
+              block.contains("Subagent running"),
+              block.contains("Research spawn_subagent"),
+            )
+          }
+        yield result
+        end for
+      },
       test("a live task update opens the tasks pane") {
         val bridge = PushBridge()
         for
@@ -844,6 +878,37 @@ object ChatChromeSpec extends ZIOSpecDefault:
               head <- waitPresent(root, "tasks") *> root.getByTestId("tasks").innerText
               row  <- waitPresent(root, "task-t1") *> root.getByTestId("task-t1").innerText
             yield assertTrue(head.contains("Tasks 1 running"), row.contains("sbt compile"))
+          }
+        yield result
+        end for
+      },
+      test("a live subagent update pins a transcript block and completes in place") {
+        val bridge = PushBridge()
+        val live   =
+          TaskRow(
+            TaskId("sub-1"),
+            TaskKind.Subagent,
+            TaskStatus.Running,
+            "Research spawn_subagent",
+            "explore · grok-4.6",
+          )
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage("t1", "research")))
+              _     <- waitPresent(root, "turn-t1")
+              _     <- ZIO.succeed(bridge.push(HostMsg.Tasks(List(live))))
+              group <- waitContains(root, "tasks-group-subagents", "Subagents")
+              block <- waitContains(root, "subagent-sub-1", "Subagent running")
+              _     <- ZIO.succeed(bridge.push(HostMsg.Tasks(List(live.copy(status = TaskStatus.Completed)))))
+              done  <- waitContains(root, "subagent-sub-1", "Subagent completed")
+            yield assertTrue(
+              group.contains("Subagents"),
+              block.contains("Subagent running"),
+              done.contains("Subagent completed"),
+              !done.contains("Task completed"),
+            )
           }
         yield result
         end for

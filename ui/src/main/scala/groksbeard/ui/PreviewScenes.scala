@@ -44,6 +44,8 @@ object PreviewScenes:
                   ToolStatus.Completed,
                   input = Some("src/Main.scala"),
                   output = Some("object Main"),
+                  path = Some("src/Main.scala"),
+                  line = Some(1),
                 ),
                 ToolRow(
                   ToolCallId("term-1"),
@@ -201,10 +203,28 @@ object PreviewScenes:
           ),
         )
       case Scene.Tasks =>
+        val sub =
+          TaskRow(
+            TaskId("sub-1"),
+            TaskKind.Subagent,
+            TaskStatus.Running,
+            "Research spawn_subagent",
+            "explore · grok-4.6",
+          )
         ChatModel.empty.copy(
           inSession = true,
           title = "Tasks",
+          turns = List(
+            TurnView(
+              id = TurnId("t-sub"),
+              user = Some(TurnUser("Research the spawn path")),
+              agent = "Delegating research.",
+              subagents = List(sub),
+              stopReason = Some(StopReason.EndTurn),
+            )
+          ),
           tasks = List(
+            sub,
             TaskRow(
               TaskId("loop-1"),
               TaskKind.Loop,

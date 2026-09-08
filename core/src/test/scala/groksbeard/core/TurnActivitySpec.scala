@@ -52,7 +52,25 @@ object TurnActivitySpec extends ZIOSpecDefault:
           tools = List(ToolRow("e1", "Edit Main.scala", "edit", "pending")),
         )
         val got = TurnActivity.fromTurn(turn, 2000)
-        assertTrue(got.kind == ActivityKind.Edit, got.label == "Editing...")
+        assertTrue(
+          got.kind == ActivityKind.Edit,
+          got.label == "Editing...",
+          got.path.isEmpty,
+        )
+      },
+      test("a live read carries the file so the activity chip can open it") {
+        val turn = TurnView(
+          "t1",
+          tools = List(
+            ToolRow("r1", "Read Main.scala", "read", "in_progress", path = Some("src/Main.scala"), line = Some(12))
+          ),
+        )
+        val got = TurnActivity.fromTurn(turn, 0)
+        assertTrue(
+          got.kind == ActivityKind.Read,
+          got.path.contains("src/Main.scala"),
+          got.line.contains(12),
+        )
       },
       test("completed tools fall back to waiting") {
         val turn = TurnView(

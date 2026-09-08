@@ -2456,7 +2456,7 @@ object ChatApp:
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
-      renderActivityStrip(chat, nowMs),
+      renderActivityStrip(bridge, chat, nowMs),
       when(chat.map(c => Tasks.running(c.tasks).nonEmpty))(
         E.p(SessionMetaLine, TestId("tasks-status"), chat.map(c => Tasks.statusLine(c.tasks)))
       ),
@@ -2489,10 +2489,14 @@ object ChatApp:
       renderComposerBar(bridge, chat, sendDraft, openContext),
     )
 
-  private def renderActivityStrip(chat: ascent.Source[ChatModel], nowMs: ascent.Source[Long]): ascent.ast.UI[Any] =
+  private def renderActivityStrip(
+      bridge: HostBridge,
+      chat: ascent.Source[ChatModel],
+      nowMs: ascent.Source[Long],
+  ): ascent.ast.UI[Any] =
     forEachSignal(Squawk.zipWith(chat, nowMs)((c, n) => TurnActivity.of(c, n).toList))(a => s"${a.kind}-${a.label}") {
       (_, _, activity) =>
-        renderActivity(activity)
+        renderActivity(bridge, activity)
     }
 
   private def renderChipRow(chat: ascent.Source[ChatModel], dropChip: PromptChip => UIO[Unit]): ascent.ast.UI[Any] =
@@ -2705,9 +2709,10 @@ object ChatApp:
     end for
   end onDraftKey
 
-  private def renderActivity(activity: Squawk[TurnActivity]): ascent.ast.UI[Any] =
+  private def renderActivity(bridge: HostBridge, activity: Squawk[TurnActivity]): ascent.ast.UI[Any] =
     val detail = activity.map(_.detail.getOrElse(""))
     val timer  = activity.map(a => TurnActivity.timerLabel(a.elapsedMs).getOrElse(""))
+    val file   = activity.map(_.path.filter(_.nonEmpty).fold("")(UnifiedDiff.fileName))
     E.div(
       ActivityRow,
       TestId("activity"),
@@ -2720,6 +2725,15 @@ object ChatApp:
         E.span(SpinGlyph, "⁙"),
       ),
       E.span(activity.map(_.label)),
+      when(file.map(_.nonEmpty))(
+        E.button(
+          Chip,
+          TestId("activity-file"),
+          A.title(activity.map(_.path.getOrElse(""))),
+          Ev.onClick(_ => activity.get.flatMap(a => openLocated(bridge, a.path, a.line))),
+          file,
+        )
+      ),
       when(detail.map(_.nonEmpty))(E.pre(TestId("activity-detail"), detail)),
       when(timer.map(_.nonEmpty))(E.span(TestId("activity-timer"), timer)),
     )
@@ -2842,6 +2856,20 @@ object ChatApp:
           when(tail.map(t => t.nonEmpty && !t.startsWith("```")))(E.p(tail)),
         )
       ),
+      when(turn.map(_.subagents.nonEmpty))(
+        E.div(
+          TestId(s"subagents-$id"),
+          forEachSignal(turn.map(_.subagents))(_.id.value) { (sid, _, row) =>
+            E.div(
+              ToolBox,
+              FileRow,
+              TestId(s"subagent-$sid"),
+              E.span(TodoMark, row.map(r => Tasks.mark(r.status))),
+              E.span(row.map(Tasks.lifecycle)),
+            )
+          },
+        )
+      ),
       when(turn.map(t => t.stopReason.exists(_ != groksbeard.core.StopReason.EndTurn)))(
         E.div(StopReason, turn.map(_.stopReason.map(groksbeard.core.StopReason.wire).getOrElse("")))
       ),
@@ -2888,6 +2916,30 @@ object ChatApp:
       if live.nonEmpty then live else t.output.getOrElse("")
     }
 
+  private def openLocated(bridge: HostBridge, path: Option[String], line: Option[Int]): UIO[Unit] =
+    path.filter(_.nonEmpty) match
+      case Some(p) => ZIO.succeed(bridge.post(WebviewMsg.OpenFile(p, line)))
+      case None    => ZIO.unit
+
+  private def toolTitle(
+      bridge: HostBridge,
+      id: String,
+      tool: Squawk[ToolRow],
+      located: Squawk[Boolean],
+  ): ascent.ast.UI[Any] =
+    E.span(
+      when(located)(
+        E.button(
+          Chip,
+          TestId(s"tool-open-$id"),
+          A.title(tool.map(_.path.getOrElse(""))),
+          Ev.onClick(_ => tool.get.flatMap(t => openLocated(bridge, t.path, t.line))),
+          tool.map(_.title),
+        )
+      ),
+      when(located.map(!_))(E.span(tool.map(_.title))),
+    )
+
   private def renderTool(
       bridge: HostBridge,
       id: String,
@@ -2904,13 +2956,14 @@ object ChatApp:
           .map(s => ToolView.liveTail(s))
           .getOrElse("")
     }
+    val located = tool.map(_.path.exists(_.nonEmpty))
     E.div(
       when(hasStats)(
         E.div(
           ToolBox,
           FileRow,
           TestId(s"tool-$id"),
-          E.span(tool.map(_.title)),
+          toolTitle(bridge, id, tool, located),
           E.span(StatAdd, tool.map(t => t.additions.fold("")(a => s"+$a"))),
           E.span(StatDel, tool.map(t => t.deletions.fold("")(d => s"/-$d"))),
           E.button(
@@ -2926,7 +2979,7 @@ object ChatApp:
           ToolBox,
           TestId(s"tool-$id"),
           E.summary(
-            E.span(tool.map(_.title)),
+            toolTitle(bridge, id, tool, located),
             when(liveTail.map(_.nonEmpty))(
               E.pre(TestId(s"tool-tail-$id"), liveTail)
             ),
@@ -3395,24 +3448,20 @@ object ChatApp:
             when(chat.map(_.tasks.isEmpty))(
               E.p(Copy, TestId("tasks-empty"), "No tasks")
             ),
-            forEach(chat.map(_.tasks.zipWithIndex))(p => s"${p._2}-${p._1.id.value}") { pair =>
-              val (row, i) = pair
-              val key      = Tasks.rowKey(row, i)
+            forEach(chat.map(c => Tasks.grouped(c.tasks)))(g => g._1.getOrElse("rest")) { group =>
+              val (heading, rows) = group
               E.div(
-                FileRow,
-                TestId(s"task-$key"),
-                E.span(TodoMark, Tasks.mark(row.status)),
-                E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
-                if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
-                if row.owned && TaskStatus.isLive(row.status) then
-                  E.button(
-                    Chip,
-                    TestId(s"task-stop-$key"),
-                    A.`type`("button"),
-                    Ev.onClick(_ => stopTask(row.id)),
-                    "Stop",
-                  )
-                else E.span(),
+                ChangesTurn,
+                TestId(heading.fold("tasks-group-rest")(_ => "tasks-group-subagents")),
+                heading match
+                  case Some(title) => E.div(SessionMetaLine, title)
+                  case None        => E.span()
+                ,
+                Arg.ArgsArg(
+                  rows.zipWithIndex.map { (row, i) =>
+                    Arg.ChildArg(renderTaskRow(row, i, stopTask))
+                  }
+                ),
               )
             },
           )
@@ -3420,6 +3469,26 @@ object ChatApp:
       )
     )
   end renderTasks
+
+  private def renderTaskRow(row: TaskRow, index: Int, stopTask: TaskId => UIO[Unit]): ascent.ast.UI[Any] =
+    val key = Tasks.rowKey(row, index)
+    E.div(
+      FileRow,
+      TestId(s"task-$key"),
+      E.span(TodoMark, Tasks.mark(row.status)),
+      E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
+      if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
+      if row.owned && TaskStatus.isLive(row.status) then
+        E.button(
+          Chip,
+          TestId(s"task-stop-$key"),
+          A.`type`("button"),
+          Ev.onClick(_ => stopTask(row.id)),
+          "Stop",
+        )
+      else E.span(),
+    )
+  end renderTaskRow
 
   private def renderChanges(
       bridge: HostBridge,

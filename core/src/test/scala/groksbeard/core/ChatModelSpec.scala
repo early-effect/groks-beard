@@ -138,6 +138,33 @@ object ChatModelSpec extends ZIOSpecDefault:
           row.title == "Read",
         )
       },
+      test("tool locations merge onto the row and survive a title-only update") {
+        val start = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow("a", "Read", "read", "in_progress", path = Some("src/Foo.scala"), line = Some(3)),
+          ),
+        )
+        val moved = ChatModel.applyMsg(
+          start,
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow("a", "Read", "read", "in_progress", path = Some("src/Foo.scala"), line = Some(9)),
+          ),
+        )
+        val keep = ChatModel.applyMsg(
+          moved,
+          HostMsg.ToolCall("t1", ToolRow("a", "", "read", "completed")),
+        )
+        val row = keep.turns.head.tools.head
+        assertTrue(
+          moved.turns.head.tools.head.line.contains(9),
+          row.path.contains("src/Foo.scala"),
+          row.line.contains(9),
+          row.title == "Read",
+        )
+      },
       test("turnEnd clears cards and leaves parked follow-ups") {
         val withCard = ChatModel.empty.copy(
           permission = Some(
@@ -313,6 +340,37 @@ object ChatModelSpec extends ZIOSpecDefault:
           snap.head.tools.head.input.isEmpty,
           snap.head.tools.head.output.isEmpty,
           snap.head.agent == "hello",
+        )
+      },
+      test("Tasks pins a subagent onto the last turn and updates in place") {
+        val user   = ChatModel.applyMsg(ChatModel.empty, HostMsg.UserMessage("t1", "research"))
+        val live   = TaskRow("s1", TaskKind.Subagent, TaskStatus.Running, "do the thing", "explore · grok-4.6")
+        val pinned = ChatModel.applyMsg(user, HostMsg.Tasks(List(live)))
+        val done   = ChatModel.applyMsg(pinned, HostMsg.Tasks(List(live.copy(status = TaskStatus.Completed))))
+        val notice = ChatModel.applyMsg(done, HostMsg.TaskNotice("Task completed · sbt compile"))
+        assertTrue(
+          pinned.turns.size == 1,
+          pinned.turns.head.subagents.headOption.exists(r => r.id.value == "s1" && r.status == TaskStatus.Running),
+          done.turns.size == 1,
+          done.turns.head.subagents.headOption.exists(_.status == TaskStatus.Completed),
+          notice.turns.size == 2,
+          notice.turns.last.agent == "Task completed · sbt compile",
+        )
+      },
+      test("snapshotTurns keeps pinned subagents") {
+        val raw = List(
+          TurnView(
+            "t1",
+            user = Some(TurnUser("hi")),
+            thought = "secret",
+            agent = "hello",
+            subagents = List(TaskRow("s1", TaskKind.Subagent, TaskStatus.Completed, "do the thing")),
+          )
+        )
+        val snap = ChatModel.snapshotTurns(raw)
+        assertTrue(
+          snap.head.thought.isEmpty,
+          snap.head.subagents.headOption.exists(r => r.id.value == "s1" && r.label == "do the thing"),
         )
       },
       test("opening a session freezes list order across a last-accessed bump") {

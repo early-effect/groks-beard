@@ -351,6 +351,65 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           })
         }
       },
+      test("x.ai subagent_spawned posts Tasks and finish skips TaskNotice") {
+        chat() { (rt, posted) =>
+          val spawn = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "_x.ai/session/update",
+                Json.Obj(
+                  "sessionId" -> Json.Str("sess_test"),
+                  "update"    -> Json.Obj(
+                    "sessionUpdate" -> Json.Str("subagent_spawned"),
+                    "subagent_id"   -> Json.Str("sub-1"),
+                    "description"   -> Json.Str("Research spawn_subagent"),
+                    "subagent_type" -> Json.Str("explore"),
+                    "model"         -> Json.Str("grok-4.6"),
+                  ),
+                ),
+              )
+            )
+          )
+          val finish = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "_x.ai/session/update",
+                Json.Obj(
+                  "sessionId" -> Json.Str("sess_test"),
+                  "update"    -> Json.Obj(
+                    "sessionUpdate" -> Json.Str("subagent_finished"),
+                    "subagent_id"   -> Json.Str("sub-1"),
+                    "status"        -> Json.Str("completed"),
+                  ),
+                ),
+              )
+            )
+          )
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(spawn)
+            _    <- rt.ingestData(finish)
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Tasks(rows) =>
+                rows.exists(r => r.id.value == "sub-1" && r.kind == TaskKind.Subagent && r.status == TaskStatus.Running)
+              case _ => false
+            },
+            msgs.exists {
+              case HostMsg.Tasks(rows) =>
+                rows.exists(r => r.id.value == "sub-1" && r.status == TaskStatus.Completed)
+              case _ => false
+            },
+            !msgs.exists {
+              case _: HostMsg.TaskNotice => true
+              case _                     => false
+            },
+          )
+          end for
+        }
+      },
       test("send /rewind intercepts and lists points") {
         chat() { (rt, posted) =>
           for
@@ -758,7 +817,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
-      test("tool_call locations follow the current file once per tool") {
+      test("tool_call locations do not reveal the editor") {
         var followed = List.empty[(String, Option[Int])]
         chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
           for
@@ -780,6 +839,15 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 )
               )
             )
+          yield assertTrue(followed.isEmpty)
+        }
+      },
+      test("tool_call locations stamp the tool path") {
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("hello")
+            _ <- posted.set(Nil)
             _ <- rt.ingestData(
               Ndjson.encode(
                 Rpc.toLine(
@@ -796,9 +864,19 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 )
               )
             )
-          yield assertTrue(
-            followed == List("/tmp/Main.scala" -> Some(1), "/tmp/Main.scala" -> Some(4))
-          )
+            msgs <- posted.get
+            paths = msgs.collect { case HostMsg.ToolCall(_, row) => (row.path, row.line) }
+          yield assertTrue(paths.contains((Some("/tmp/Main.scala"), Some(4))))
+        }
+      },
+      test("openFile reveals the path") {
+        var followed = List.empty[(String, Option[Int])]
+        chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.openFile("/tmp/Main.scala", Some(4))
+            _ <- rt.openFile("  ", None)
+          yield assertTrue(followed == List("/tmp/Main.scala" -> Some(4)))
         }
       },
       test("openDiff posts a sidebar preview of the pending file") {
@@ -862,6 +940,40 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             },
             lines.exists(l => l.contains("@src/Foo.scala:10-50") && l.contains("explain")),
           )
+        }
+      },
+      test("mentionPick stores the chip without echoing ComposerChip") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.mentionPick("src/Main.scala", "/repo/src/Main.scala")
+            echo <- posted.get
+            _    <- rt.send("look")
+            msgs <- posted.get
+          yield assertTrue(
+            !echo.exists {
+              case _: HostMsg.ComposerChip => true
+              case _                       => false
+            },
+            msgs.exists {
+              case HostMsg.UserMessage(_, "look", chips, _) => chips.exists(_.path == "src/Main.scala")
+              case _                                        => false
+            },
+          )
+        }
+      },
+      test("addChip posts ComposerChip so the editor selection appears in chat") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.addChip(PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo")))
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.ComposerChip(path, _, _, _, _) => path == "src/Foo.scala"
+            case _                                      => false
+          })
         }
       },
       test("mentionQuery uses the search port") {

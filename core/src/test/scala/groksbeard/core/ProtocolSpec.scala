@@ -172,6 +172,10 @@ object ProtocolSpec extends ZIOSpecDefault:
         val chunk: HostMsg = HostMsg.ToolChunk("t1", "term-1", "line-1\n")
         assertTrue(call.toJson.fromJson[HostMsg] == Right(call), chunk.toJson.fromJson[HostMsg] == Right(chunk))
       },
+      test("openFile round-trips") {
+        val msg: WebviewMsg = WebviewMsg.OpenFile("/tmp/Main.scala", Some(4))
+        assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
+      },
       test("webview log round-trips") {
         val msg: WebviewMsg = WebviewMsg.Log("Could not read host message.", "error")
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))

@@ -34,6 +34,25 @@ object Tasks:
   def running(rows: List[TaskRow]): List[TaskRow] =
     rows.filter(r => TaskStatus.isLive(r.status))
 
+  def grouped(rows: List[TaskRow]): List[(Option[String], List[TaskRow])] =
+    val subs = rows.filter(_.kind == TaskKind.Subagent)
+    val rest = rows.filterNot(_.kind == TaskKind.Subagent)
+    val head = if subs.isEmpty then Nil else List(Some("Subagents") -> subs)
+    val tail = if rest.isEmpty then Nil else List(None -> rest)
+    head ++ tail
+
+  def lifecycle(row: TaskRow): String =
+    val quoted = "\"" + clip(row.label, 60) + "\""
+    val extra  = if row.detail.nonEmpty then s" (${row.detail})" else ""
+    val word   =
+      row.status match
+        case TaskStatus.Running   => "running"
+        case TaskStatus.Completed => "completed"
+        case TaskStatus.Failed    => "failed"
+        case TaskStatus.Cancelled => "cancelled"
+    s"Subagent $word: $quoted$extra"
+  end lifecycle
+
   def headline(rows: List[TaskRow]): String =
     val live = running(rows).size
     if rows.isEmpty then "Tasks"
@@ -74,6 +93,7 @@ object Tasks:
       val was = before.find(_.id == row.id)
       if TaskStatus.isLive(row.status) then None
       else if was.exists(w => !TaskStatus.isLive(w.status) && w.status == row.status) then None
+      else if row.kind == TaskKind.Subagent then None
       else if was.exists(w => TaskStatus.isLive(w.status)) || was.isEmpty then
         Some(HostMsg.TaskNotice(noticeLabel(row)))
       else None
@@ -186,13 +206,16 @@ object Tasks:
       str(obj, "description").orElse(str(obj, "subagent_type")).getOrElse("")
     if id.isEmpty || label.isEmpty then None
     else
+      val kind  = str(obj, "role").orElse(str(obj, "subagent_type"))
+      val model = str(obj, "model")
+      val bits  = List(kind, model).flatten
       Some(
         TaskRow(
           id = TaskId(id),
           kind = TaskKind.Subagent,
           status = TaskStatus.Running,
           label = label,
-          detail = str(obj, "model").getOrElse(""),
+          detail = bits.mkString(" · "),
         )
       )
     end if
@@ -227,17 +250,19 @@ object Tasks:
     else Some(s"$n $many")
 
   private def noticeLabel(row: TaskRow): String =
-    val word =
-      row.status match
-        case TaskStatus.Completed => "completed"
-        case TaskStatus.Failed    => "failed"
-        case TaskStatus.Cancelled => "cancelled"
-        case TaskStatus.Running   => "running"
-    s"Task $word · ${clip(row.label)}"
+    if row.kind == TaskKind.Subagent then lifecycle(row)
+    else
+      val word =
+        row.status match
+          case TaskStatus.Completed => "completed"
+          case TaskStatus.Failed    => "failed"
+          case TaskStatus.Cancelled => "cancelled"
+          case TaskStatus.Running   => "running"
+      s"Task $word · ${clip(row.label)}"
 
-  private def clip(s: String): String =
+  private def clip(s: String, cap: Int = 80): String =
     val t = s.linesIterator.map(_.trim).filter(_.nonEmpty).mkString(" ")
-    if t.length <= 80 then t else t.take(77) + "…"
+    if t.length <= cap then t else t.take((cap - 1).max(0)) + "…"
 
   private def updateObj(params: Json): Option[Json.Obj] =
     params match

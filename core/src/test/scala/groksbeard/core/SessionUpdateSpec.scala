@@ -133,6 +133,28 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           row.exists(_.input.contains("echo hi")),
         )
       },
+      test("tool_call locations become a clickable path") {
+        val msgs = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("tool_call"),
+              "toolCallId"    -> Json.Str("call_1"),
+              "title"         -> Json.Str("Read Main.scala"),
+              "kind"          -> Json.Str("read"),
+              "locations"     -> Json.Arr(
+                Json.Obj("path" -> Json.Str("src/Main.scala"), "line" -> Json.Num(12))
+              ),
+            ),
+          ),
+          "t1",
+        )
+        val row = msgs.collectFirst { case HostMsg.ToolCall(_, tool) => tool }
+        assertTrue(
+          row.exists(_.path.contains("src/Main.scala")),
+          row.exists(_.line.contains(12)),
+        )
+      },
       test("x.ai session update is a session notify") {
         assertTrue(
           SessionUpdate.isSessionNotify("session/update"),

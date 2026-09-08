@@ -76,6 +76,7 @@ object SessionUpdate:
   private def toolRow(toolCall: AcpToolCall): ToolRow =
     val extracted = DiffContent.diffsFromToolCall(toolCall.asJson)
     val stats     = extracted.diffs.headOption.map(d => ChangeSet.lineDiffStats(d.oldText, d.newText))
+    val loc       = FollowAlong.pick(toolCall.locations, extracted.toolCallId)
     ToolRow(
       extracted.toolCallId,
       extracted.title,
@@ -84,6 +85,8 @@ object SessionUpdate:
       additions = stats.map(_._1),
       deletions = stats.map(_._2),
       input = ToolView.inputOf(toolCall, extracted.diffs),
+      path = loc.map(_.path),
+      line = loc.flatMap(_.line),
     )
   end toolRow
 end SessionUpdate

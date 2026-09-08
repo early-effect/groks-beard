@@ -12,6 +12,8 @@ final case class ToolRow(
     deletions: Option[Int] = None,
     input: Option[String] = None,
     output: Option[String] = None,
+    path: Option[String] = None,
+    line: Option[Int] = None,
 ) derives JsonCodec
 
 object ToolRow:
@@ -23,6 +25,7 @@ final case class TurnView(
     thought: String = "",
     agent: String = "",
     tools: List[ToolRow] = Nil,
+    subagents: List[TaskRow] = Nil,
     stopReason: Option[StopReason] = None,
 ) derives JsonCodec,
       Eq
@@ -170,6 +173,7 @@ object ChatModel:
         thought = "",
         stopReason = t.stopReason.orElse(Some(StopReason.EndTurn)),
         tools = t.tools.map(r => r.copy(input = None, output = None)),
+        subagents = t.subagents,
       )
     }
 
@@ -325,7 +329,7 @@ object ChatModel:
       case HostMsg.Todos(entries) =>
         model.copy(todos = Todos.fromEntries(entries))
       case HostMsg.Tasks(entries) =>
-        model.copy(tasks = entries)
+        pinSubagents(model.copy(tasks = entries), entries)
       case HostMsg.TaskNotice(text) =>
         if text.isEmpty then model
         else
@@ -388,6 +392,25 @@ object ChatModel:
     if ChatModel.turnIsRunning(model) then model.copy(runningSinceMs = model.runningSinceMs.orElse(Some(nowMs)))
     else model.copy(runningSinceMs = None)
 
+  private def pinSubagents(model: ChatModel, entries: List[TaskRow]): ChatModel =
+    entries.filter(_.kind == TaskKind.Subagent).foldLeft(model)(pinSubagent)
+
+  private def pinSubagent(model: ChatModel, row: TaskRow): ChatModel =
+    val idx = model.turns.lastIndexWhere(_.subagents.exists(_.id == row.id))
+    if idx >= 0 then model.copy(turns = model.turns.updated(idx, mergeSubagent(model.turns(idx), row)))
+    else if model.turns.nonEmpty then
+      val last = model.turns.size - 1
+      model.copy(turns = model.turns.updated(last, mergeSubagent(model.turns(last), row)))
+    else
+      model.copy(
+        turns = List(TurnView(TurnId("subagent-1"), subagents = List(row))),
+        inSession = true,
+      )
+  end pinSubagent
+
+  private def mergeSubagent(turn: TurnView, row: TaskRow): TurnView =
+    turn.copy(subagents = Tasks.upsert(turn.subagents, row))
+
   private def upsert(model: ChatModel, turnId: TurnId)(patch: TurnView => TurnView): ChatModel =
     val idx = model.turns.indexWhere(_.id == turnId)
     if idx < 0 then model.copy(turns = model.turns :+ patch(TurnView(turnId)))
@@ -403,7 +426,8 @@ object ChatModel:
         output = None,
       )
     else
-      val prev = existing(idx)
+      val prev    = existing(idx)
+      val located = row.path.filter(_.nonEmpty)
       existing.updated(
         idx,
         prev.copy(
@@ -413,6 +437,8 @@ object ChatModel:
           additions = row.additions.orElse(prev.additions),
           deletions = row.deletions.orElse(prev.deletions),
           input = row.input.filter(_.nonEmpty).orElse(prev.input),
+          path = located.orElse(prev.path),
+          line = located.fold(prev.line)(_ => row.line),
         ),
       )
     end if

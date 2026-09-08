@@ -51,6 +51,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- waitPresent(root, "fork-ask")
               _ <- root.button("fork-same").click
               _ <- waitGone(root, "fork-ask")
+              _ <- waitPresent(root, "user-preview-turn")
             yield assertTrue(true)
           }
         yield result

@@ -1074,12 +1074,12 @@ object ChatApp:
       bound          <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[SessionId])
       leaveGen = new AtomicInteger(0)
-      _ <- ZStream
+      clockFib <- ZStream
         .tick(1.second)
         .mapZIO(_ => wallMs.flatMap(nowMs.set))
         .runDrain
         .forkScoped
-      _ <- FrameBurst(
+      burstFib <- FrameBurst(
         ZStream
           .asyncScoped[Any, Nothing, HostMsg](
             emit =>
@@ -1168,6 +1168,9 @@ object ChatApp:
       }
       _ <- ZIO.addFinalizer(locSub.cancel)
     yield
+
+      def stopHost: UIO[Unit] =
+        clockFib.interrupt.unit *> burstFib.interrupt.unit *> locSub.cancel
 
       val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
         if PromptHistory.query(d).isDefined then Nil
@@ -2006,6 +2009,7 @@ object ChatApp:
         Shell,
         Page,
         Ev.onKeyDown(onCardKey),
+        Lifecycle.onMountScoped[ascent.dom.Element, Any](_ => ZIO.addFinalizer(stopHost).unit),
         Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
           ev.keyboard.fold(ZIO.unit)(onCardKey)
         },

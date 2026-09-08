@@ -1127,6 +1127,10 @@ object ChatApp:
                 toolOut.set(turns.flatMap(_.tools).map(t => t.id -> t.output.getOrElse("")).toMap)
               case HostMsg.Error(message, Some(Wire.Decode)) =>
                 ZIO.succeed(js.Dynamic.global.console.error(message)).unit
+              case HostMsg.Ready =>
+                waiting.get() match
+                  case Some(id) if id.nonEmpty => ZIO.succeed(bridge.post(WebviewMsg.ResumeSession(id)))
+                  case _                       => ZIO.unit
               case _ => ZIO.unit
             } *> chat.get.flatMap { before =>
               val next     = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))

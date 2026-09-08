@@ -42,7 +42,7 @@ final class McpHost(review: Review, refreshTree: () => Unit):
     val uri = vscode.Uri.file(abs(path))
     val _   = vscode.commands.executeCommand[js.Any]("vscode.open", uri)
     line.foreach { n =>
-      val _ = vscode.commands.executeCommand[js.Any]("revealLine", js.Dynamic.literal(lineNumber = n, at = "center"))
+      val _ = vscode.commands.executeCommand[js.Any]("revealLine", RevealLineArgs(lineNumber = n, at = "center"))
     }
     OkResult()
 

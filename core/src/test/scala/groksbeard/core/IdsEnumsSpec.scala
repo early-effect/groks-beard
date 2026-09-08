@@ -31,6 +31,9 @@ object IdsEnumsSpec extends ZIOSpecDefault:
         "\"nope\"".fromJson[PlanOutcome].isLeft,
         ChangeKind.Modify.toJson == "\"modify\"",
         ChipSource.Mention.toJson == "\"mention\"",
+        TaskKind.Loop.toJson == "\"loop\"",
+        "\"monitor\"".fromJson[TaskKind] == Right(TaskKind.Monitor),
+        TaskStatus.Running.toJson == "\"running\"",
       )
     },
   )

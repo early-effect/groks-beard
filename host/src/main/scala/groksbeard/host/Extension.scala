@@ -203,6 +203,9 @@ object Extension:
       vscode.commands.registerCommand("groksBeard.toggleTodos", () => chat.toggleTodos())
     )
     context.subscriptions.push(
+      vscode.commands.registerCommand("groksBeard.toggleTasks", () => chat.toggleTasks())
+    )
+    context.subscriptions.push(
       vscode.commands.registerCommand("groksBeard.toggleQueue", () => chat.toggleQueue())
     )
     context.subscriptions.push(
@@ -277,7 +280,7 @@ object Extension:
               pick.toOption match
                 case Some(p) if p == write =>
                   val configPath = McpToml.projectConfigPath(ws)
-                  nodeFs.mkdirSync(nodePath.dirname(configPath), js.Dynamic.literal(recursive = true))
+                  nodeFs.mkdirSync(nodePath.dirname(configPath), MkdirSyncOptions(recursive = true))
                   val existing =
                     try nodeFs.readFileSync(configPath, "utf8")
                     catch case _: Throwable => ""
@@ -313,5 +316,6 @@ object Extension:
   end disableBridge
 
   private def asString(arg: js.Any): String =
-    arg.asInstanceOf[js.UndefOr[String]].toOption.filter(s => s != null && s.nonEmpty).getOrElse("")
+    import groksbeard.facade.asNonEmptyString
+    arg.asNonEmptyString
 end Extension

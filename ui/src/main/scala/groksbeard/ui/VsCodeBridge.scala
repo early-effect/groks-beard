@@ -1,7 +1,7 @@
 package groksbeard.ui
 
 import groksbeard.core.{HostBridge, HostMsg, WebviewMsg, Wire}
-import groksbeard.facade.VsCodeApi
+import groksbeard.facade.{Browser, VsCodeApi}
 import zio.json.*
 
 import scala.scalajs.js
@@ -14,24 +14,25 @@ final class VsCodeBridge(api: VsCodeApi) extends HostBridge:
     ascent.dom.window.addEventListener(
       "message",
       (event: ascent.dom.Event) =>
-        val data = event.asInstanceOf[ascent.dom.MessageEvent].data
-        // VS Code posts its own window messages (strings, style, etc). Treating
-        // those as HostMsg decode errors re-renders, which posts more, until SIGKILL.
-        if !VsCodeBridge.isHostPayload(data) then ()
-        else
-          val raw = js.JSON.stringify(data)
-          Wire.hostMsgs(raw) match
-            case Right(msgs) => msgs.foreach(f)
-            case Left(err)   =>
-              js.Dynamic.global.console.error(err, raw)
-              post(WebviewMsg.Log(err))
-              f(HostMsg.Error(err, Some(Wire.Decode))),
+        event match
+          case m: ascent.dom.MessageEvent =>
+            val data = m.data
+            // VS Code posts its own window messages (strings, style, etc). Treating
+            // those as HostMsg decode errors re-renders, which posts more, until SIGKILL.
+            if !VsCodeBridge.isHostPayload(data) then ()
+            else
+              val raw = js.JSON.stringify(data)
+              Wire.hostMsgs(raw) match
+                case Right(msgs) => msgs.foreach(f)
+                case Left(err)   =>
+                  Browser.console.error(err, raw)
+                  post(WebviewMsg.Log(err))
+                  f(HostMsg.Error(err, Some(Wire.Decode)))
+          case _ => (),
     )
 end VsCodeBridge
 
 object VsCodeBridge:
   def isHostPayload(data: js.Any): Boolean =
-    if data == null || js.isUndefined(data) then false
-    else
-      js.typeOf(data) == "object" &&
-      js.Object.hasProperty(data.asInstanceOf[js.Object], "_tag")
+    import groksbeard.facade.hasField
+    data.hasField("_tag")

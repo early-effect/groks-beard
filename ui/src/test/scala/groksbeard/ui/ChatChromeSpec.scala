@@ -5,7 +5,6 @@ import ascent.chekhov.AscentChekhov.withMounted
 import ascent.chekhov.AscentRoot
 import ascent.chekhov.value
 import groksbeard.core.*
-import scala.scalajs.js
 import zio.*
 import zio.test.*
 
@@ -707,7 +706,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               }
               _  <- waitPresent(root, "transcript")
               el <- ZIO.succeed(
-                root.element.querySelector("""[data-testid="transcript"]""").asInstanceOf[ascent.dom.HTMLElement]
+                root.element.queryHtml("""[data-testid="transcript"]""")
               )
               _ <- ZIO.succeed(el.setAttribute("style", "max-height:140px;overflow-y:auto"))
               _ <- ZIO.succeed {
@@ -771,6 +770,64 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- ZIO.succeed(fireCtrlT(root, "draft"))
               _ <- waitPresent(root, "todos-list")
             yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("tasks scene lists running work and Hide collapses them") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Tasks)
+          result <- withMounted(ui) { root =>
+            for
+              head   <- waitPresent(root, "tasks") *> root.getByTestId("tasks").innerText
+              status <- waitPresent(root, "tasks-status") *> root.getByTestId("tasks-status").innerText
+              row    <- waitPresent(root, "task-loop-1") *> root.getByTestId("task-loop-1").innerText
+              _      <- root.button("tasks-toggle").click
+              _      <- waitGone(root, "tasks-list")
+            yield assertTrue(
+              head.contains("Tasks 2 running"),
+              status.contains("1 command"),
+              status.contains("1 loop"),
+              row.contains("Check CI"),
+            )
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+G toggles the tasks pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Tasks)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "tasks-list")
+              _ <- ZIO.succeed(fireCtrlG(root, "draft"))
+              _ <- waitGone(root, "tasks-list")
+              _ <- ZIO.succeed(fireCtrlG(root, "draft"))
+              _ <- waitPresent(root, "tasks-list")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("a live task update opens the tasks pane") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitGone(root, "tasks")
+              _ <- ZIO.succeed {
+                bridge.push(
+                  HostMsg.Tasks(
+                    List(TaskRow(TaskId("t1"), TaskKind.Command, TaskStatus.Running, "sbt compile"))
+                  )
+                )
+              }
+              head <- waitPresent(root, "tasks") *> root.getByTestId("tasks").innerText
+              row  <- waitPresent(root, "task-t1") *> root.getByTestId("task-t1").innerText
+            yield assertTrue(head.contains("Tasks 1 running"), row.contains("sbt compile"))
           }
         yield result
         end for
@@ -1223,14 +1280,10 @@ object ChatChromeSpec extends ZIOSpecDefault:
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitGone(root, "tool-tail-term-1")
-              details = root.element
-                .querySelector("""[data-testid="tool-term-1"]""")
-                .asInstanceOf[ascent.dom.HTMLElement]
+              details = root.element.queryHtml("""[data-testid="tool-term-1"]""")
               _       <- ZIO.succeed { details.setAttribute("open", "") }
-              summary <- ZIO.succeed(
-                details.querySelector("summary").asInstanceOf[ascent.dom.HTMLElement].innerText
-              )
-              input <- waitPresent(root, "tool-input-term-1") *>
+              summary <- ZIO.succeed(details.queryHtml("summary").innerText)
+              input   <- waitPresent(root, "tool-input-term-1") *>
                 root.getByTestId("tool-input-term-1").innerText
               output <- waitPresent(root, "tool-output-term-1") *>
                 root.getByTestId("tool-output-term-1").innerText
@@ -1281,9 +1334,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitGone(root, "tool-tail-term-1")
-              details = root.element
-                .querySelector("""[data-testid="tool-term-1"]""")
-                .asInstanceOf[ascent.dom.HTMLElement]
+              details = root.element.queryHtml("""[data-testid="tool-term-1"]""")
               _      <- ZIO.succeed { details.setAttribute("open", "") }
               output <- waitContains(root, "tool-output-term-1", "line-1")
             yield assertTrue(
@@ -1326,9 +1377,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
                 root.getByTestId("tool-tail-term-1").innerText
               activity <- waitPresent(root, "activity-detail") *>
                 root.getByTestId("activity-detail").innerText
-              details = root.element
-                .querySelector("""[data-testid="tool-term-1"]""")
-                .asInstanceOf[ascent.dom.HTMLElement]
+              details = root.element.queryHtml("""[data-testid="tool-term-1"]""")
               _     <- ZIO.succeed { details.setAttribute("open", "") }
               input <- waitPresent(root, "tool-input-term-1") *>
                 root.getByTestId("tool-input-term-1").innerText
@@ -1372,14 +1421,10 @@ object ChatChromeSpec extends ZIOSpecDefault:
                 bridge.push(HostMsg.TurnEnd("t1", "end_turn"))
               }
               _ <- waitPresent(root, "tool-term-1")
-              details = root.element
-                .querySelector("""[data-testid="tool-term-1"]""")
-                .asInstanceOf[ascent.dom.HTMLElement]
+              details = root.element.queryHtml("""[data-testid="tool-term-1"]""")
               _       <- ZIO.succeed { details.setAttribute("open", "") }
-              summary <- ZIO.succeed(
-                details.querySelector("summary").asInstanceOf[ascent.dom.HTMLElement].innerText
-              )
-              input <- waitPresent(root, "tool-input-term-1") *>
+              summary <- ZIO.succeed(details.queryHtml("summary").innerText)
+              input   <- waitPresent(root, "tool-input-term-1") *>
                 root.getByTestId("tool-input-term-1").innerText
               output <- waitPresent(root, "tool-output-term-1") *>
                 root.getByTestId("tool-output-term-1").innerText
@@ -1410,9 +1455,9 @@ object ChatChromeSpec extends ZIOSpecDefault:
               }
               _       <- waitPresent(root, "thought-t1")
               thought <- ZIO.succeed(
-                root.element.querySelector("""[data-testid="thought-t1"]""").asInstanceOf[ascent.dom.HTMLElement]
+                root.element.queryHtml("""[data-testid="thought-t1"]""")
               )
-              pre <- ZIO.succeed(thought.querySelector("pre").asInstanceOf[ascent.dom.HTMLElement])
+              pre <- ZIO.succeed(thought.queryHtml("pre"))
               cls = Option(pre.getAttribute("class")).getOrElse("")
               text <- ZIO.succeed(thought.innerText)
             yield assertTrue(cls.contains("ThoughtBody"), text.contains("thinking"))
@@ -1730,16 +1775,17 @@ object ChatChromeSpec extends ZIOSpecDefault:
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to disappear"))(5.seconds)
 
   private def fireScroll(el: ascent.dom.HTMLElement): Unit =
-    val ev = js.Dynamic.newInstance(js.Dynamic.global.Event)("scroll")
-    val _  = el.dispatchEvent(ev.asInstanceOf[ascent.dom.Event])
+    val _ = el.dispatchEvent(new ascent.dom.Event("scroll"))
 
   private def fireCtrlT(root: AscentRoot, testId: String): Unit =
-    val el = root.element.querySelector(s"""[data-testid="$testId"]""")
-    val ev = js.Dynamic.newInstance(js.Dynamic.global.KeyboardEvent)(
-      "keydown",
-      js.Dynamic.literal(key = "t", code = "KeyT", ctrlKey = true, bubbles = true, cancelable = true),
-    )
-    val _ = el.asInstanceOf[ascent.dom.HTMLElement].dispatchEvent(ev.asInstanceOf[ascent.dom.Event])
+    fireCtrlKey(root, testId, "t", "KeyT")
+
+  private def fireCtrlG(root: AscentRoot, testId: String): Unit =
+    fireCtrlKey(root, testId, "g", "KeyG")
+
+  private def fireCtrlKey(root: AscentRoot, testId: String, key: String, code: String): Unit =
+    val el = root.element.queryHtml(s"""[data-testid="$testId"]""")
+    val _  = el.dispatchEvent(JsDom.keyDown(key, code, ctrl = true))
 end ChatChromeSpec
 
 /** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */

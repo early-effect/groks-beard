@@ -4,8 +4,9 @@ import zio.*
 import zio.json.ast.Json
 import zio.json.*
 
-/** Wait for project `.mcp.json` HTTP servers on localhost before ACP initialize. Metals and other editor MCP endpoints
-  * often listen only after the window is up.
+/** Probe project `.mcp.json` HTTP servers on localhost. Metals often listens only after the window is up.
+  *
+  * [[ChatRuntime.ready]] runs this in the background so ACP initialize is not blocked.
   */
 object LocalMcp:
   val Attempt: Duration = 400.millis

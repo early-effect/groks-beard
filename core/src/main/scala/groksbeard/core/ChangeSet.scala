@@ -21,7 +21,7 @@ object ChangeKind:
       case _        => ChangeKind.Modify
 
   given zio.json.JsonCodec[ChangeKind] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[ChangeKind]                 = (a, b) => a == b
+  given Eq[ChangeKind]                 = Eq.derived
 end ChangeKind
 
 final case class FileChange(

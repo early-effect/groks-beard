@@ -68,7 +68,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork`, tasks / `/loop`.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork`.
 
 ## Shortcuts
 
@@ -77,6 +77,7 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork
 | Open Grok's Beard | `Ctrl+;` / `Cmd+;` |
 | Add selection to chat | `Ctrl+Shift+;` / `Cmd+Shift+;` |
 | Toggle todos | `Ctrl+T` (chat focused) |
+| Toggle tasks | `Ctrl+G` (chat focused) |
 | Toggle queue | `Ctrl+4` (chat focused, when something is queued) |
 | Command palette | `Ctrl+P` / `Cmd+P` (chat focused), or `?` on an empty prompt |
 | Stop the running turn | `Escape` (chat focused) |

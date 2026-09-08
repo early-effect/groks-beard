@@ -67,4 +67,4 @@ end Review
 
 object Review:
   def utf8(text: String): Uint8Array =
-    js.Dynamic.newInstance(js.Dynamic.global.TextEncoder)().encode(text).asInstanceOf[Uint8Array]
+    new groksbeard.facade.TextEncoder().encode(text)

@@ -23,10 +23,26 @@ object nodeNet extends js.Object:
   def createServer(listener: js.Function1[NodeSocket, Any]): NodeServer = js.native
   def connect(port: Int, host: String): NodeSocket                      = js.native
 
+class MkdirSyncOptions(
+    val recursive: Boolean = false,
+    val mode: js.UndefOr[Int] = js.undefined,
+) extends js.Object
+
+class RmSyncOptions(
+    val recursive: Boolean = false,
+    val force: Boolean = false,
+) extends js.Object
+
+class SpawnOptions(
+    val cwd: js.UndefOr[String] = js.undefined,
+    val env: js.UndefOr[js.Dictionary[String]] = js.undefined,
+    val stdio: js.UndefOr[js.Array[String]] = js.undefined,
+) extends js.Object
+
 @js.native
 @JSImport("fs", JSImport.Namespace)
 object nodeFs extends js.Object:
-  def mkdirSync(path: String, options: js.Dynamic): Unit           = js.native
+  def mkdirSync(path: String, options: MkdirSyncOptions): Unit     = js.native
   def unlinkSync(path: String): Unit                               = js.native
   def chmodSync(path: String, mode: Int): Unit                     = js.native
   def existsSync(path: String): Boolean                            = js.native
@@ -34,7 +50,7 @@ object nodeFs extends js.Object:
   def writeFileSync(path: String, data: String, enc: String): Unit = js.native
   def readdirSync(path: String): js.Array[String]                  = js.native
   def statSync(path: String): NodeFsStats                          = js.native
-  def rmSync(path: String, options: js.Dynamic): Unit              = js.native
+  def rmSync(path: String, options: RmSyncOptions): Unit           = js.native
 end nodeFs
 
 @js.native
@@ -89,5 +105,5 @@ trait ChildProcessHandle extends js.Object:
 @js.native
 @JSImport("child_process", JSImport.Namespace)
 object nodeChildProcess extends js.Object:
-  def spawn(command: String, args: js.Array[String], options: js.Dynamic): ChildProcessHandle =
+  def spawn(command: String, args: js.Array[String], options: SpawnOptions): ChildProcessHandle =
     js.native

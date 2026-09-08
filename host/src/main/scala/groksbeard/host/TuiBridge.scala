@@ -29,7 +29,10 @@ final class TuiBridge(host: McpToolHost, log: String => Unit):
   private def bind(workspace: String): Unit =
     val addr = address(workspace)
     if !addr.startsWith("\\\\.\\pipe\\") then
-      nodeFs.mkdirSync(nodePath.dirname(addr), js.Dynamic.literal(recursive = true, mode = SocketAddress.SocketDirMode))
+      nodeFs.mkdirSync(
+        nodePath.dirname(addr),
+        MkdirSyncOptions(recursive = true, mode = SocketAddress.SocketDirMode),
+      )
       try nodeFs.unlinkSync(addr)
       catch case _: Throwable => ()
     val srv = nodeNet.createServer { (socket: NodeSocket) =>

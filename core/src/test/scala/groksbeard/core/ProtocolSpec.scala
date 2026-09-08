@@ -230,7 +230,8 @@ object ProtocolSpec extends ZIOSpecDefault:
             TodoEntry("Write tests", Todos.Pending, "high"),
           )
         )
-        val toggle: HostMsg      = HostMsg.ToggleTodos
+        val tasks: HostMsg  = HostMsg.Tasks(List(TaskRow("t1", TaskKind.Command, TaskStatus.Running, "sbt compile")))
+        val toggle: HostMsg = HostMsg.ToggleTodos
         val queueToggle: HostMsg = HostMsg.ToggleQueue
         val palette: HostMsg     = HostMsg.OpenPalette
         val mcps: HostMsg        = HostMsg.McpServers(List(McpServerView("metals", "http", "http://localhost")))
@@ -241,6 +242,7 @@ object ProtocolSpec extends ZIOSpecDefault:
         )
         assertTrue(
           todos.toJson.fromJson[HostMsg] == Right(todos),
+          tasks.toJson.fromJson[HostMsg] == Right(tasks),
           toggle.toJson.fromJson[HostMsg] == Right(toggle),
           queueToggle.toJson.fromJson[HostMsg] == Right(queueToggle),
           palette.toJson.fromJson[HostMsg] == Right(palette),

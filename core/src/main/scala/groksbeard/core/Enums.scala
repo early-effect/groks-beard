@@ -20,8 +20,61 @@ object TodoStatus:
       case _                                                 => TodoStatus.Pending
 
   given JsonCodec[TodoStatus] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[TodoStatus]        = (a, b) => a == b
+  given Eq[TodoStatus]        = Eq.derived
 end TodoStatus
+
+enum TaskKind:
+  case Command, Monitor, Loop, Subagent
+
+object TaskKind:
+  def wire(kind: TaskKind): String =
+    kind match
+      case TaskKind.Command  => "command"
+      case TaskKind.Monitor  => "monitor"
+      case TaskKind.Loop     => "loop"
+      case TaskKind.Subagent => "subagent"
+
+  def fromWire(raw: String): TaskKind =
+    raw.trim.toLowerCase match
+      case "monitor"           => TaskKind.Monitor
+      case "loop" | "schedule" => TaskKind.Loop
+      case "subagent"          => TaskKind.Subagent
+      case _                   => TaskKind.Command
+
+  def label(kind: TaskKind): String =
+    kind match
+      case TaskKind.Command  => "command"
+      case TaskKind.Monitor  => "monitor"
+      case TaskKind.Loop     => "loop"
+      case TaskKind.Subagent => "subagent"
+
+  given JsonCodec[TaskKind] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[TaskKind]        = Eq.derived
+end TaskKind
+
+enum TaskStatus:
+  case Running, Completed, Failed, Cancelled
+
+object TaskStatus:
+  def wire(status: TaskStatus): String =
+    status match
+      case TaskStatus.Running   => "running"
+      case TaskStatus.Completed => "completed"
+      case TaskStatus.Failed    => "failed"
+      case TaskStatus.Cancelled => "cancelled"
+
+  def fromWire(raw: String): TaskStatus =
+    raw.trim.toLowerCase.replace('-', '_') match
+      case "completed" | "complete" | "success" => TaskStatus.Completed
+      case "failed" | "error"                   => TaskStatus.Failed
+      case "cancelled" | "canceled"             => TaskStatus.Cancelled
+      case _                                    => TaskStatus.Running
+
+  def isLive(status: TaskStatus): Boolean = status == TaskStatus.Running
+
+  given JsonCodec[TaskStatus] = JsonExt.stringCodec(wire, fromWire)
+  given Eq[TaskStatus]        = Eq.derived
+end TaskStatus
 
 enum TodoPriority:
   case High, Medium, Low
@@ -40,7 +93,7 @@ object TodoPriority:
       case _      => TodoPriority.Medium
 
   given JsonCodec[TodoPriority] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[TodoPriority]        = (a, b) => a == b
+  given Eq[TodoPriority]        = Eq.derived
 end TodoPriority
 
 enum PlanOutcome:
@@ -85,7 +138,7 @@ object ChipSource:
       case _           => ChipSource.File
 
   given JsonCodec[ChipSource] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[ChipSource]        = (a, b) => a == b
+  given Eq[ChipSource]        = Eq.derived
 end ChipSource
 
 enum ToolStatus:
@@ -110,7 +163,7 @@ object ToolStatus:
     status == ToolStatus.Pending || status == ToolStatus.InProgress
 
   given JsonCodec[ToolStatus] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[ToolStatus]        = (a, b) => a == b
+  given Eq[ToolStatus]        = Eq.derived
 end ToolStatus
 
 enum ToolKind:
@@ -140,7 +193,7 @@ object ToolKind:
       case _                               => ToolKind.Other
 
   given JsonCodec[ToolKind] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[ToolKind]        = (a, b) => a == b
+  given Eq[ToolKind]        = Eq.derived
 end ToolKind
 
 enum StopReason:
@@ -166,7 +219,7 @@ object StopReason:
       case _                   => StopReason.Unknown
 
   given JsonCodec[StopReason] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[StopReason]        = (a, b) => a == b
+  given Eq[StopReason]        = Eq.derived
 end StopReason
 
 enum PermissionKind:
@@ -190,7 +243,7 @@ object PermissionKind:
       case _               => PermissionKind.Other
 
   given JsonCodec[PermissionKind] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[PermissionKind]        = (a, b) => a == b
+  given Eq[PermissionKind]        = Eq.derived
 end PermissionKind
 
 enum ElicitMode:
@@ -206,5 +259,5 @@ object ElicitMode:
     if raw.trim.equalsIgnoreCase("url") then ElicitMode.Url else ElicitMode.Form
 
   given JsonCodec[ElicitMode] = JsonExt.stringCodec(wire, fromWire)
-  given Eq[ElicitMode]        = (a, b) => a == b
+  given Eq[ElicitMode]        = Eq.derived
 end ElicitMode

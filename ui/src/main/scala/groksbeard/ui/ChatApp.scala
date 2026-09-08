@@ -9,7 +9,6 @@ import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
 import java.util.concurrent.TimeUnit
-import scala.scalajs.js
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import zio.*
@@ -19,13 +18,13 @@ enum OpenMenu:
   case Mode, Settings, Model, Effort
 
 object OpenMenu:
-  given Eq[OpenMenu] = (a, b) => a == b
+  given Eq[OpenMenu] = Eq.derived
 
 final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos,
-    Palette, Mcps, Queue, SessionInfo, Context
+    Tasks, Palette, Mcps, Queue, SessionInfo, Context
 
 object Scene:
   def from(name: String): Scene =
@@ -41,6 +40,7 @@ object Scene:
       case "changes"      => Scene.Changes
       case "resume"       => Scene.Resume
       case "todos"        => Scene.Todos
+      case "tasks"        => Scene.Tasks
       case "palette"      => Scene.Palette
       case "mcps"         => Scene.Mcps
       case "queue"        => Scene.Queue
@@ -57,12 +57,6 @@ object ChatApp:
       ((key == "Enter" || key == "Tab") && !shift)
 
   private val PaletteFilterSel = """[data-testid="palette-filter"]"""
-
-  private def focusPaletteFilter(el: ascent.dom.Element): URIO[Scope, Unit] =
-    ZIO.succeed {
-      el.asInstanceOf[js.Dynamic].focus()
-      ()
-    }
 
   private val LeaveMs      = 320L
   private val fg           = Color.Keyword("var(--vscode-foreground, #f3e6d0)")
@@ -1055,6 +1049,7 @@ object ChatApp:
       pickerQuery  <- sq("")
       changesOpen  <- sq(false)
       todosOpen    <- sq(scene == Scene.Todos)
+      tasksOpen    <- sq(scene == Scene.Tasks)
       queueOpen    <- sq(scene == Scene.Queue)
       queueIdx     <- sq(if scene == Scene.Queue then Some(0) else None)
       paletteOpen  <- sq(scene == Scene.Palette)
@@ -1109,6 +1104,7 @@ object ChatApp:
             ZIO.foreachDiscard(batch) {
               case HostMsg.Copied(_, Some(text)) => writeClipboard(text)
               case HostMsg.ToggleTodos           => todosOpen.update(!_)
+              case HostMsg.ToggleTasks           => tasksOpen.update(!_)
               case HostMsg.ToggleQueue           => queueOpen.update(!_)
               case HostMsg.OpenPalette           =>
                 mcpsOpen.set(false) *> sessionPane.set(None) *> paletteQuery.set("") *> paletteIdx.set(Some(0)) *>
@@ -1126,7 +1122,7 @@ object ChatApp:
               case HostMsg.Transcript(turns) =>
                 toolOut.set(turns.flatMap(_.tools).map(t => t.id -> t.output.getOrElse("")).toMap)
               case HostMsg.Error(message, Some(Wire.Decode)) =>
-                ZIO.succeed(js.Dynamic.global.console.error(message)).unit
+                ZIO.succeed(groksbeard.facade.Browser.console.error(message)).unit
               case HostMsg.Ready =>
                 waiting.get() match
                   case Some(id) if id.nonEmpty => ZIO.succeed(bridge.post(WebviewMsg.ResumeSession(id)))
@@ -1135,9 +1131,11 @@ object ChatApp:
             } *> chat.get.flatMap { before =>
               val next     = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
               val autoTodo = before.todos.isEmpty && next.todos.nonEmpty
+              val autoTask = before.tasks.isEmpty && next.tasks.nonEmpty
               val autoQ    = before.queue.isEmpty && next.queue.nonEmpty
               chat.update(_ => next) *>
                 ZIO.when(autoTodo)(todosOpen.set(true)).unit *>
+                ZIO.when(autoTask)(tasksOpen.set(true)).unit *>
                 ZIO.when(autoQ)(queueOpen.set(true) *> queueIdx.set(Some((next.queue.size - 1).max(0)))).unit
             }
           }
@@ -1255,6 +1253,10 @@ object ChatApp:
                 draft.set("") *> openSessionPane(SessionPane.Info)
               case Some(cmd) if SessionCommands.isContext(cmd.name) =>
                 draft.set("") *> openSessionPane(SessionPane.Context)
+              case Some(cmd) if SessionCommands.isTasks(cmd.name) =>
+                draft.set("") *> toggleTasks
+              case Some(cmd) if SessionCommands.isLoop(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1388,6 +1390,9 @@ object ChatApp:
           else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
             else steal(toggleTodos)
+          else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "g" || key == "G") && !c.pickerOpen then
+            if typingInField(e) then ZIO.unit
+            else steal(toggleTasks)
           else if e.ctrlKey && !e.metaKey && !e.shiftKey && key == "4" && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
             else steal(toggleQueue)
@@ -1447,13 +1452,17 @@ object ChatApp:
                                                       todosOpen.get.flatMap {
                                                         case true  => todosOpen.set(false)
                                                         case false =>
-                                                          if ChatModel.turnIsRunning(c) then
-                                                            nowMs.get.flatMap { now =>
-                                                              lastCancelMs.set(Some(now)) *>
-                                                                lastIdleEsc.set(None) *>
-                                                                ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                                            }
-                                                          else idleRewindEsc(c, text)
+                                                          tasksOpen.get.flatMap {
+                                                            case true  => tasksOpen.set(false)
+                                                            case false =>
+                                                              if ChatModel.turnIsRunning(c) then
+                                                                nowMs.get.flatMap { now =>
+                                                                  lastCancelMs.set(Some(now)) *>
+                                                                    lastIdleEsc.set(None) *>
+                                                                    ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+                                                                }
+                                                              else idleRewindEsc(c, text)
+                                                          }
                                                       }
                                                   }
                                             }
@@ -1591,6 +1600,12 @@ object ChatApp:
 
       def toggleTodos: UIO[Unit] =
         todosOpen.update(!_)
+
+      def toggleTasks: UIO[Unit] =
+        tasksOpen.update(!_)
+
+      def stopTask(id: TaskId): UIO[Unit] =
+        ZIO.succeed(bridge.post(WebviewMsg.StopTask(id)))
 
       def toggleQueue: UIO[Unit] =
         chat.get.flatMap { c =>
@@ -1821,6 +1836,7 @@ object ChatApp:
           row.kind match
             case PaletteKind.Mcps        => openMcps
             case PaletteKind.Todos       => toggleTodos
+            case PaletteKind.Tasks       => toggleTasks
             case PaletteKind.Settings    => showMenu(OpenMenu.Settings)
             case PaletteKind.SessionInfo => openSessionPane(SessionPane.Info)
             case PaletteKind.Context     => openSessionPane(SessionPane.Context)
@@ -1844,6 +1860,8 @@ object ChatApp:
         else if SessionCommands.isMcps(name) then draft.set("") *> openMcps
         else if SessionCommands.isSessionInfo(name) then draft.set("") *> openSessionPane(SessionPane.Info)
         else if SessionCommands.isContext(name) then draft.set("") *> openSessionPane(SessionPane.Context)
+        else if SessionCommands.isTasks(name) then draft.set("") *> toggleTasks
+        else if SessionCommands.isLoop(name) then draft.set("/loop ")
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1985,7 +2003,7 @@ object ChatApp:
         Page,
         Ev.onKeyDown(onCardKey),
         Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
-          onCardKey(ev.raw.asInstanceOf[ascent.dom.KeyboardEvent])
+          ev.keyboard.fold(ZIO.unit)(onCardKey)
         },
         renderToolbar(chat, toggleMenu, openPicker, startNew),
         E.div(
@@ -2106,6 +2124,7 @@ object ChatApp:
         ),
         renderDiff(bridge, chat),
         renderTodos(chat, todosOpen, toggleTodos),
+        renderTasks(chat, tasksOpen, toggleTasks, stopTask),
         renderQueue(chat, queueOpen, queueIdx, toggleQueue, sendQueuedNow, dropQueued, editQueued),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
         when(chat.map(_.error.nonEmpty))(
@@ -2213,6 +2232,7 @@ object ChatApp:
           pickHistory,
           onMenuKey,
           toggleTodos,
+          toggleTasks,
           togglePalette,
           openPalette,
           onPaletteKey,
@@ -2417,6 +2437,7 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      toggleTasks: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
@@ -2427,6 +2448,9 @@ object ChatApp:
     E.div(
       Composer,
       renderActivityStrip(chat, nowMs),
+      when(chat.map(c => Tasks.running(c.tasks).nonEmpty))(
+        E.p(SessionMetaLine, TestId("tasks-status"), chat.map(c => Tasks.statusLine(c.tasks)))
+      ),
       renderChipRow(chat, dropChip),
       renderDraft(
         chat,
@@ -2446,6 +2470,7 @@ object ChatApp:
         pickHistory,
         onMenuKey,
         toggleTodos,
+        toggleTasks,
         togglePalette,
         openPalette,
         onPaletteKey,
@@ -2503,6 +2528,7 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      toggleTasks: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
@@ -2540,6 +2566,7 @@ object ChatApp:
           pickHistory,
           onMenuKey,
           toggleTodos,
+          toggleTasks,
           togglePalette,
           openPalette,
           onPaletteKey,
@@ -2592,6 +2619,7 @@ object ChatApp:
       pickHistory: String => UIO[Unit],
       onMenuKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       toggleTodos: UIO[Unit],
+      toggleTasks: UIO[Unit],
       togglePalette: UIO[Unit],
       openPalette: UIO[Unit],
       onPaletteKey: ascent.dom.KeyboardEvent => UIO[Boolean],
@@ -2657,6 +2685,8 @@ object ChatApp:
         else if key == "?" && !ctrlOrMeta && text.isEmpty && c.chips.isEmpty then go(openPalette)
         else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "t" || key == "T") && !c.pickerOpen then
           go(toggleTodos)
+        else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "g" || key == "G") && !c.pickerOpen then
+          go(toggleTasks)
         else
           ComposerQuery.sendOnKey(key, e.shiftKey, ctrlOrMeta, s.useCtrlEnterToSend) match
             case ComposerQuery.SendKey.Send    => go(sendDraft)
@@ -2689,9 +2719,7 @@ object ChatApp:
   private def writeClipboard(text: String): UIO[Unit] =
     ZIO.succeed {
       try
-        val clip = js.Dynamic.global.navigator.clipboard
-        if !js.isUndefined(clip) && clip != null then
-          val _ = clip.writeText(text)
+        val _ = ascent.dom.window.navigator.clipboard.writeText(text)
       catch case _: Throwable => ()
     }
 
@@ -3159,7 +3187,7 @@ object ChatApp:
           A.placeholder("Filter commands"),
           Events.onInput(e => onQuery(e.targetValue.getOrElse(""))),
           Ev.onKeyDown(e => onPaletteKey(e).unit),
-          Lifecycle.onMountScoped[ascent.dom.Element, Any](ChatApp.focusPaletteFilter),
+          Lifecycle.onMountScoped[ascent.dom.HTMLInputElement, Any](el => ZIO.succeed { el.focus(); () }),
         ),
         E.div(
           PaletteList,
@@ -3296,6 +3324,59 @@ object ChatApp:
       )
     )
   end renderTodos
+
+  private def renderTasks(
+      chat: ascent.Source[ChatModel],
+      tasksOpen: ascent.Source[Boolean],
+      toggleTasks: UIO[Unit],
+      stopTask: TaskId => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(Squawk.zipWith(chat, tasksOpen)((c, open) => open || c.tasks.nonEmpty))(
+      E.div(
+        ChangesPane,
+        TestId("tasks"),
+        E.button(
+          ChangesHead,
+          TestId("tasks-toggle"),
+          A.`type`("button"),
+          A.title("Toggle tasks (Ctrl+G)"),
+          Ev.onClick(_ => toggleTasks),
+          E.strong(chat.map(c => Tasks.headline(c.tasks))),
+          E.span(SessionMetaLine, chat.map(c => Tasks.statusLine(c.tasks))),
+          E.span(tasksOpen.map(open => if open then "Hide" else "Show")),
+        ),
+        when(tasksOpen)(
+          E.div(
+            ChangesList,
+            TestId("tasks-list"),
+            when(chat.map(_.tasks.isEmpty))(
+              E.p(Copy, TestId("tasks-empty"), "No tasks")
+            ),
+            forEach(chat.map(_.tasks.zipWithIndex))(p => s"${p._2}-${p._1.id.value}") { pair =>
+              val (row, i) = pair
+              val key      = Tasks.rowKey(row, i)
+              E.div(
+                FileRow,
+                TestId(s"task-$key"),
+                E.span(TodoMark, Tasks.mark(row.status)),
+                E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
+                if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
+                if row.owned && TaskStatus.isLive(row.status) then
+                  E.button(
+                    Chip,
+                    TestId(s"task-stop-$key"),
+                    A.`type`("button"),
+                    Ev.onClick(_ => stopTask(row.id)),
+                    "Stop",
+                  )
+                else E.span(),
+              )
+            },
+          )
+        ),
+      )
+    )
+  end renderTasks
 
   private def renderChanges(
       bridge: HostBridge,

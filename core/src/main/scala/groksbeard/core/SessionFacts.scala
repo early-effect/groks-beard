@@ -6,7 +6,7 @@ enum SessionPane:
   case Info, Context
 
 object SessionPane:
-  given Eq[SessionPane] = (a, b) => a == b
+  given Eq[SessionPane] = Eq.derived
 
   def other(pane: SessionPane): SessionPane =
     pane match

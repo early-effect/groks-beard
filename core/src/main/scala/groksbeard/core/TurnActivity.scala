@@ -6,7 +6,7 @@ enum ActivityKind:
   case Wait, Think, Edit, Read, Execute, Search, Delete, Move, Other
 
 object ActivityKind:
-  given Eq[ActivityKind] = (a, b) => a == b
+  given Eq[ActivityKind] = Eq.derived
 
 final case class TurnActivity(
     kind: ActivityKind,

@@ -23,6 +23,8 @@ object SessionCommands:
   val Status: SlashCommand      = SlashCommand("status", "Session id, model, turns, and context usage")
   val Info: SlashCommand        = SlashCommand("info", "Session id, model, turns, and context usage")
   val Context: SlashCommand     = SlashCommand("context", "How the context window is being used")
+  val Tasks: SlashCommand       = SlashCommand("tasks", "Background commands, loops, and monitors")
+  val Loop: SlashCommand        = SlashCommand("loop", "Run a prompt on a recurring interval")
 
   val All: List[SlashCommand] =
     List(
@@ -42,6 +44,8 @@ object SessionCommands:
       Mcps,
       SessionInfo,
       Context,
+      Tasks,
+      Loop,
     )
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
@@ -97,6 +101,12 @@ object SessionCommands:
   def isContext(name: String): Boolean =
     name.stripPrefix("/").toLowerCase == "context"
 
+  def isTasks(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "tasks"
+
+  def isLoop(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "loop"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -109,7 +119,7 @@ object SessionCommands:
       val name = raw.toLowerCase
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
         isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name) ||
-        isSessionInfo(name) || isContext(name)
+        isSessionInfo(name) || isContext(name) || isTasks(name) || isLoop(name)
       then Some(ClientCommand(name, args))
       else None
     end if

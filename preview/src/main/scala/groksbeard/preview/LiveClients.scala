@@ -19,7 +19,8 @@ final class LiveClients(
     ZStream.unwrapScoped {
       subscribe(id).flatMap { c =>
         c.session.events.subscribe.flatMap { q =>
-          c.session.post(WebviewMsg.Ready).as(ZStream.fromQueue(q))
+          // Flush SSE as soon as the Hub is subscribed. Ready still does ACP initialize on this fiber.
+          c.session.post(WebviewMsg.Ready).forkScoped.as(ZStream.fromQueue(q))
         }
       }
     }

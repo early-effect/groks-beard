@@ -28,9 +28,14 @@ object net extends js.Object:
   def createServer(listener: js.Function1[Socket, Any]): Server = js.native
   def connect(path: String): Socket                             = js.native
 
+class MkdirSyncOptions(
+    val recursive: Boolean = false,
+    val mode: js.UndefOr[Int] = js.undefined,
+) extends js.Object
+
 @js.native
 trait NodeFsApi extends js.Object:
-  def mkdirSync(path: String, options: js.Dynamic): Unit           = js.native
+  def mkdirSync(path: String, options: MkdirSyncOptions): Unit     = js.native
   def unlinkSync(path: String): Unit                               = js.native
   def chmodSync(path: String, mode: Int): Unit                     = js.native
   def existsSync(path: String): Boolean                            = js.native

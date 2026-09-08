@@ -64,8 +64,11 @@ final class ChatRuntime private (
   private var agentGone                    = false
   private var lastFollow                   = Option.empty[FollowTarget]
   private var liveExecute                  = Option.empty[ToolCallId]
+  private var tasks                        = List.empty[TaskRow]
+  private var loopSeq                      = 0
+  private var loopFibers                   = Map.empty[String, Fiber.Runtime[Nothing, Unit]]
 
-  private def exclusive(body: UIO[Unit]): UIO[Unit] =
+  private def exclusive[A](body: UIO[A]): UIO[A] =
     reentrant.get.flatMap { held =>
       if held then body
       else gate.withPermit(reentrant.locally(true)(body))
@@ -90,21 +93,26 @@ final class ChatRuntime private (
 
   def noteAgentGone: UIO[Unit] = exclusive(doAgentGone)
 
-  def ready: UIO[Unit] = exclusive {
-    ZIO.suspendSucceed {
-      live = true
-      val boot =
-        if initializeSent then ZIO.unit
-        else
-          initializeSent = true
-          beforeInitialize *>
-            rpc(
-              "initialize",
-              InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
-            )
-      post(HostMsg.Ready) *> boot *> (if store.list.nonEmpty then emitChanges else ZIO.unit)
+  def ready: UIO[Unit] =
+    exclusive {
+      ZIO.suspendSucceed {
+        live = true
+        val startInit = !initializeSent
+        if startInit then initializeSent = true
+        post(HostMsg.Ready) *>
+          (if store.list.nonEmpty then emitChanges else ZIO.unit).as(startInit)
+      }
+    }.flatMap { startInit =>
+      if !startInit then ZIO.unit
+      else
+        // Local MCP probes (Metals, etc.) must not gate ACP initialize or the chrome.
+        beforeInitialize.forkIn(scope) *> exclusive {
+          rpc(
+            "initialize",
+            InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
+          )
+        }
     }
-  }
 
   def restoreChanges(sets: List[ChangeSet]): UIO[Unit] = exclusive {
     ZIO.suspendSucceed {
@@ -269,8 +277,12 @@ final class ChatRuntime private (
     else if SessionCommands.isRewind(name) then doOpenRewind
     else if SessionCommands.isMcps(name) then doListMcps
     else if SessionCommands.isSessionInfo(name) || SessionCommands.isContext(name) then ZIO.unit
+    else if SessionCommands.isTasks(name) then ZIO.unit
+    else if SessionCommands.isLoop(name) then post(HostMsg.Error(Tasks.LoopUsage))
     else ZIO.unit
   }
+
+  def stopTask(id: TaskId): UIO[Unit] = exclusive(doStopTask(id))
 
   def listMcps: UIO[Unit] = exclusive(doListMcps)
 
@@ -351,10 +363,14 @@ final class ChatRuntime private (
           doListMcps
         case Some(cmd) if SessionCommands.isSessionInfo(cmd.name) || SessionCommands.isContext(cmd.name) =>
           ZIO.unit
+        case Some(cmd) if SessionCommands.isTasks(cmd.name) =>
+          ZIO.unit
+        case Some(cmd) if SessionCommands.isLoop(cmd.name) =>
+          doLoop(cmd.args)
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
-          else if running then enqueue(trimmed, chosen)
+          else if running || !initialized then enqueue(trimmed, chosen)
           else
             chips = Nil
             runTurn(trimmed, chosen)
@@ -524,7 +540,7 @@ final class ChatRuntime private (
   private def doNewSession: UIO[Unit] =
     inboundEpoch.incrementAndGet()
     pendingResume.foreach(id => cancelledLoads += id)
-    leaveCurrent *> ZIO.suspendSucceed {
+    leaveCurrent *> stopLoops *> ZIO.suspendSucceed {
       resetLocal()
       sessionId = None
       post(HostMsg.ClearTranscript) *> rpc("session/new", SessionNewParams(cwd).asJson)
@@ -537,7 +553,7 @@ final class ChatRuntime private (
     else
       inboundEpoch.incrementAndGet()
       pendingResume.foreach(prev => cancelledLoads += prev)
-      leaveCurrent *> ZIO.suspendSucceed {
+      leaveCurrent *> stopLoops *> ZIO.suspendSucceed {
         cancelledLoads -= id
         resetTurnState()
         sessionId = Some(id)
@@ -625,6 +641,7 @@ final class ChatRuntime private (
     liveExecute = None
     loadModel = ChatModel.empty
     lastFollow = None
+    tasks = Nil
   end resetTurnState
 
   private def resetLocal(): Unit =
@@ -766,6 +783,68 @@ final class ChatRuntime private (
       case RpcId.Str(s) => RequestId(s)
       case RpcId.Num(n) => RequestId(n.toString)
 
+  private def foldTasks(p: Json, loading: Boolean): UIO[Boolean] =
+    val current = if loading then loadModel.tasks else tasks
+    Tasks.fold(p, current) match
+      case None       => ZIO.succeed(false)
+      case Some(next) =>
+        val notices = Tasks.notices(current, next)
+        if loading then loadModel = loadModel.copy(tasks = next)
+        else tasks = next
+        val snap = post(HostMsg.Tasks(next))
+        val note = if loading then ZIO.unit else ZIO.foreachDiscard(notices)(post)
+        (snap *> note).as(true)
+  end foldTasks
+
+  private def doLoop(args: String): UIO[Unit] =
+    Tasks.parseLoop(args) match
+      case Left(err)   => post(HostMsg.Error(err))
+      case Right(spec) =>
+        loopSeq += 1
+        val id  = TaskId.mint(loopSeq)
+        val row =
+          TaskRow(
+            id = id,
+            kind = TaskKind.Loop,
+            status = TaskStatus.Running,
+            label = spec.prompt,
+            detail = spec.human,
+            owned = true,
+          )
+        tasks = Tasks.upsert(tasks, row)
+        post(HostMsg.Tasks(tasks)) *> startLoop(id, spec)
+
+  private def startLoop(id: TaskId, spec: LoopSpec): UIO[Unit] =
+    def fire: UIO[Unit] =
+      exclusive(
+        ZIO.suspendSucceed {
+          if running then enqueue(spec.prompt, Nil)
+          else runTurn(spec.prompt, Nil)
+        }
+      )
+    for
+      _     <- fire
+      fiber <- (ZIO.sleep(spec.interval) *> fire).forever.unit.forkIn(scope)
+    yield loopFibers = loopFibers.updated(id.value, fiber)
+  end startLoop
+
+  private def doStopTask(id: TaskId): UIO[Unit] =
+    val fiber = loopFibers.get(id.value)
+    loopFibers = loopFibers - id.value
+    val row  = tasks.find(_.id == id)
+    val next =
+      if row.exists(_.owned) then Tasks.remove(tasks, id)
+      else tasks
+    tasks = next
+    val interrupt = fiber.map(_.interrupt.unit).getOrElse(ZIO.unit)
+    interrupt *> post(HostMsg.Tasks(tasks))
+  end doStopTask
+
+  private def stopLoops: UIO[Unit] =
+    val fs = loopFibers
+    loopFibers = Map.empty
+    ZIO.foreachDiscard(fs.values)(_.interrupt.unit)
+
   private def grokMethod(method: String): String =
     if method.startsWith("x.ai/") && !method.startsWith("_x.ai/") then s"_$method" else method
 
@@ -792,7 +871,7 @@ final class ChatRuntime private (
 
   private def ingestOne(msg: Rpc): UIO[Unit] =
     msg match
-      case Rpc.Notify("session/update", p) =>
+      case Rpc.Notify(method, p) if SessionUpdate.isSessionNotify(method) =>
         val updateSid = SessionState.decodeNotify(p).map(_.sessionId).filter(_.nonEmpty)
         val stale     =
           updateSid.exists(cancelledLoads.contains) ||
@@ -849,36 +928,39 @@ final class ChatRuntime private (
           currentTurn = TurnId.mint(turnSeq)
         case _ =>
           if !loadCleared then loadCleared = true
-      ZIO.foreachDiscard(SessionUpdate.hostMsgs(p, currentTurn)) {
-        case HostMsg.AvailableCommands(cmds) =>
-          post(HostMsg.AvailableCommands(SessionCommands.merge(cmds)))
-        case other =>
-          ZIO.succeed {
-            other match
-              case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
-              case _                      => ()
-            loadModel = ChatModel.applyMsg(loadModel, other)
-          }
-      }
+      foldTasks(p, loading = true) *>
+        ZIO.foreachDiscard(SessionUpdate.hostMsgs(p, currentTurn)) {
+          case HostMsg.AvailableCommands(cmds) =>
+            post(HostMsg.AvailableCommands(SessionCommands.merge(cmds)))
+          case other =>
+            ZIO.succeed {
+              other match
+                case m: HostMsg.SessionMeta => m.occupancy.foreach(o => occupancy = Some(o))
+                case _                      => ()
+              loadModel = ChatModel.applyMsg(loadModel, other)
+            }
+        }
     }
 
   private def ingestLive(p: Json): UIO[Unit] =
-    val msgs = SessionUpdate.hostMsgs(p, currentTurn)
-    val note =
-      if msgs.nonEmpty then ZIO.unit
-      else
-        SessionState.decodeUpdate(p) match
-          case Some(_) => ZIO.unit
-          case None    => ZIO.logWarning(s"ignored session/update ${sessionUpdateKind(p)}")
-    note *> ZIO.foreachDiscard(msgs) { msg =>
-      val out = msg match
-        case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
-        case other                           => other
-      out match
-        case m: HostMsg.SessionMeta   => m.occupancy.foreach(o => occupancy = Some(o))
-        case HostMsg.ToolCall(_, row) => noteLiveTool(row)
-        case _                        => ()
-      post(out)
+    foldTasks(p, loading = false).flatMap { folded =>
+      val msgs = SessionUpdate.hostMsgs(p, currentTurn)
+      val note =
+        if msgs.nonEmpty || folded then ZIO.unit
+        else
+          SessionState.decodeUpdate(p) match
+            case Some(_) => ZIO.unit
+            case None    => ZIO.logWarning(s"ignored session/update ${sessionUpdateKind(p)}")
+      note *> ZIO.foreachDiscard(msgs) { msg =>
+        val out = msg match
+          case HostMsg.AvailableCommands(cmds) => HostMsg.AvailableCommands(SessionCommands.merge(cmds))
+          case other                           => other
+        out match
+          case m: HostMsg.SessionMeta   => m.occupancy.foreach(o => occupancy = Some(o))
+          case HostMsg.ToolCall(_, row) => noteLiveTool(row)
+          case _                        => ()
+        post(out)
+      }
     }
   end ingestLive
 
@@ -921,7 +1003,8 @@ final class ChatRuntime private (
                     else
                       applySession(json)
                       if sessionId.isEmpty then sessionId = Some(fallbackSessionId)
-                      postMeta *> post(HostMsg.settings(settingsState)) *> doPostList(open = false)
+                      postMeta *> post(HostMsg.settings(settingsState)) *> doPostList(open = false) *>
+                        (if pendingQueue.nonEmpty then drainQueue else ZIO.unit)
                   }
         case "session/load" =>
           ingestLoad(id, result, error)
@@ -967,21 +1050,25 @@ final class ChatRuntime private (
             post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
               (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
           case None =>
-            val clear = if !loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
-            val snap  = ChatModel.snapshotTurns(loadModel.turns)
-            val todos = loadModel.todos
-            val sid   = wanted.getOrElse(SessionId.empty)
+            val clear       = if !loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
+            val snap        = ChatModel.snapshotTurns(loadModel.turns)
+            val todos       = loadModel.todos
+            val loadedTasks = loadModel.tasks
+            val sid         = wanted.getOrElse(SessionId.empty)
             loadModel = ChatModel.empty
+            tasks = loadedTasks
             clear *>
               post(HostMsg.Transcript(snap)) *>
               postLoadedTodos(sid, todos) *>
+              (if loadedTasks.isEmpty then ZIO.unit else post(HostMsg.Tasks(loadedTasks))) *>
               ZIO.succeed(result.foreach(applySession)) *>
               ZIO.succeed {
                 wanted.foreach { loadId =>
                   if sessionId.isEmpty then sessionId = Some(loadId)
                   empty.markHasHistory(sessionId.getOrElse(loadId))
                 }
-              } *> postMeta *> post(HostMsg.settings(settingsState)) *> doPostList(open = false)
+              } *> postMeta *> post(HostMsg.settings(settingsState)) *> doPostList(open = false) *>
+              (if pendingQueue.nonEmpty then drainQueue else ZIO.unit)
         end match
       end if
     }

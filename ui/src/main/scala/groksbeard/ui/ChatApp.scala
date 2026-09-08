@@ -1074,12 +1074,12 @@ object ChatApp:
       bound          <- Promise.make[Nothing, Unit]
       waiting  = new AtomicReference(Option.empty[SessionId])
       leaveGen = new AtomicInteger(0)
-      _ <- ZStream
+      clockFib <- ZStream
         .tick(1.second)
         .mapZIO(_ => wallMs.flatMap(nowMs.set))
         .runDrain
         .forkScoped
-      _ <- FrameBurst(
+      burstFib <- FrameBurst(
         ZStream
           .asyncScoped[Any, Nothing, HostMsg](
             emit =>
@@ -1169,6 +1169,9 @@ object ChatApp:
       _ <- ZIO.addFinalizer(locSub.cancel)
     yield
 
+      def stopHost: UIO[Unit] =
+        clockFib.interrupt.unit *> burstFib.interrupt.unit *> locSub.cancel
+
       val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
         if PromptHistory.query(d).isDefined then Nil
         else ComposerQuery.slashQuery(d).map(q => ComposerQuery.filterSlash(c.commands, q)).getOrElse(Nil)
@@ -1256,6 +1259,8 @@ object ChatApp:
               case Some(cmd) if SessionCommands.isTasks(cmd.name) =>
                 draft.set("") *> toggleTasks
               case Some(cmd) if SessionCommands.isLoop(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
+              case Some(cmd) if SessionCommands.isFork(cmd.name) =>
                 draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
@@ -1415,6 +1420,7 @@ object ChatApp:
                                 case None    =>
                                   if c.rewindConfirm.nonEmpty then cancelRewind
                                   else if c.rewind.nonEmpty then closeRewindPicker
+                                  else if c.forkAsk.nonEmpty then chat.update(_.copy(forkAsk = None))
                                   else
                                     mentionShown.get.flatMap { mentions =>
                                       if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
@@ -1862,6 +1868,7 @@ object ChatApp:
         else if SessionCommands.isContext(name) then draft.set("") *> openSessionPane(SessionPane.Context)
         else if SessionCommands.isTasks(name) then draft.set("") *> toggleTasks
         else if SessionCommands.isLoop(name) then draft.set("/loop ")
+        else if SessionCommands.isFork(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send("/fork")))
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -2002,6 +2009,7 @@ object ChatApp:
         Shell,
         Page,
         Ev.onKeyDown(onCardKey),
+        Lifecycle.onMountScoped[ascent.dom.Element, Any](_ => ZIO.addFinalizer(stopHost).unit),
         Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
           ev.keyboard.fold(ZIO.unit)(onCardKey)
         },
@@ -2090,6 +2098,7 @@ object ChatApp:
           ),
         ),
         renderCards(bridge, chat, questionDraft, applyQuestionPick),
+        renderForkAsk(bridge, chat),
         renderRewind(chat, armRewind, confirmRewind, cancelRewind),
         when(pendingDelete.map(_.nonEmpty))(
           E.div(
@@ -3018,6 +3027,40 @@ object ChatApp:
           ),
         )
       },
+    )
+
+  private def renderForkAsk(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
+    when(chat.map(_.forkAsk.nonEmpty))(
+      E.div(
+        Card,
+        TestId("fork-ask"),
+        E.h3("Fork this session"),
+        E.p(Copy, "Same workspace or a new git worktree?"),
+        E.button(
+          Send,
+          TestId("fork-same"),
+          Ev.onClick { _ =>
+            chat.get.flatMap { c =>
+              val d = c.forkAsk.getOrElse("")
+              chat.update(_.copy(forkAsk = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = false, d)))
+            }
+          },
+          "Same workspace",
+        ),
+        E.button(
+          MenuItem,
+          TestId("fork-worktree"),
+          Ev.onClick { _ =>
+            chat.get.flatMap { c =>
+              val d = c.forkAsk.getOrElse("")
+              chat.update(_.copy(forkAsk = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = true, d)))
+            }
+          },
+          "New worktree",
+        ),
+      )
     )
 
   private def renderQuestionCard(

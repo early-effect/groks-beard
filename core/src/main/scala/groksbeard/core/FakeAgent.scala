@@ -1,6 +1,7 @@
 package groksbeard.core
 
 import zio.json.*
+import zio.json.ast.Json
 
 final class FakeAgent(
     val sessionId: SessionId = SessionId("sess_test"),
@@ -8,6 +9,8 @@ final class FakeAgent(
     pairTerminal: TerminalCreateParams = TerminalCreateParams(command = "rm", args = List("-rf", "/tmp/beard-probe")),
     lockLoad: Boolean = false,
     hangPrompt: Boolean = false,
+    rejectFork: Boolean = false,
+    worktreeMeta: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -20,7 +23,14 @@ final class FakeAgent(
   private def repliesFor(id: RpcId, method: String, params: zio.json.ast.Json): List[Rpc] =
     method match
       case "initialize" =>
-        List(Rpc.ok(id, InitializeResult(1, AgentCapabilities(loadSession = true)).asJson))
+        val caps =
+          if worktreeMeta then
+            AgentCapabilities(
+              loadSession = true,
+              _meta = Some(Json.Obj("x.ai/git/worktree/create" -> Json.Bool(true))),
+            )
+          else AgentCapabilities(loadSession = true)
+        List(Rpc.ok(id, InitializeResult(1, caps).asJson))
       case "session/new" =>
         List(
           Rpc.notifyOf(
@@ -160,6 +170,22 @@ final class FakeAgent(
         )
       case "x.ai/rewind/execute" | "_x.ai/rewind/execute" =>
         List(Rpc.ok(id, EmptyObject().asJson))
+      case "x.ai/session/fork" | "_x.ai/session/fork" if rejectFork =>
+        List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
+      case "x.ai/session/fork" | "_x.ai/session/fork" =>
+        val src = params.as[ForkSessionParams].toOption
+        val kid = SessionId("sess_fork")
+        List(
+          Rpc.ok(
+            id,
+            ForkSessionResult(
+              newSessionId = kid,
+              chatMessagesCopied = 2,
+              newCwd = src.map(_.newCwd).getOrElse("."),
+              parentSessionId = src.map(_.sourceSessionId).getOrElse(sessionId),
+            ).asJson,
+          )
+        )
       case _ =>
         List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
 

@@ -41,6 +41,22 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("picking slash fork asks same workspace or worktree") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Slash)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- root.button("slash-fork").click
+              _ <- waitPresent(root, "fork-ask")
+              _ <- root.button("fork-same").click
+              _ <- waitGone(root, "fork-ask")
+              _ <- waitPresent(root, "user-preview-turn")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("slash arrows move the highlight and Enter picks it") {
         val bridge = PreviewBridge()
         for

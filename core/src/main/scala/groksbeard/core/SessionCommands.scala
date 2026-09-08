@@ -25,6 +25,7 @@ object SessionCommands:
   val Context: SlashCommand     = SlashCommand("context", "How the context window is being used")
   val Tasks: SlashCommand       = SlashCommand("tasks", "Background commands, loops, and monitors")
   val Loop: SlashCommand        = SlashCommand("loop", "Run a prompt on a recurring interval")
+  val Fork: SlashCommand        = SlashCommand("fork", "Branch this session into a peer agent")
 
   val All: List[SlashCommand] =
     List(
@@ -46,6 +47,7 @@ object SessionCommands:
       Context,
       Tasks,
       Loop,
+      Fork,
     )
 
   def merge(advertised: List[SlashCommand]): List[SlashCommand] =
@@ -107,6 +109,9 @@ object SessionCommands:
   def isLoop(name: String): Boolean =
     name.stripPrefix("/").toLowerCase == "loop"
 
+  def isFork(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "fork"
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -119,7 +124,7 @@ object SessionCommands:
       val name = raw.toLowerCase
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
         isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name) ||
-        isSessionInfo(name) || isContext(name) || isTasks(name) || isLoop(name)
+        isSessionInfo(name) || isContext(name) || isTasks(name) || isLoop(name) || isFork(name)
       then Some(ClientCommand(name, args))
       else None
     end if

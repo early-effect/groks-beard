@@ -34,6 +34,14 @@ object ProtocolSpec extends ZIOSpecDefault:
           withEffort.toJson.fromJson[HostMsg] == Right(withEffort),
         )
       },
+      test("fork ask and choose round-trip") {
+        val ask: HostMsg       = HostMsg.ForkAsk("try the async approach")
+        val choose: WebviewMsg = WebviewMsg.Fork(worktree = true, "try the async approach")
+        assertTrue(
+          ask.toJson.fromJson[HostMsg] == Right(ask),
+          choose.toJson.fromJson[WebviewMsg] == Right(choose),
+        )
+      },
       test("queued follow-ups round-trip") {
         val msg: HostMsg        = HostMsg.Queued(List(QueuedPrompt("q1", "later")))
         val sendNow: WebviewMsg = WebviewMsg.QueueSendNow("q1")

@@ -17,6 +17,7 @@ object HostDispatch:
       case WebviewMsg.SetEffort(level)               => runtime.setEffort(level)
       case WebviewMsg.CycleMode                      => runtime.cycleMode
       case WebviewMsg.SlashPick(name)                => runtime.slashPick(name)
+      case WebviewMsg.Fork(worktree, directive)      => runtime.forkSession(worktree, directive)
       case WebviewMsg.NewSession                     => runtime.newSession
       case WebviewMsg.ResumeSession(id)              => runtime.resumeSession(id)
       case WebviewMsg.OpenSessionPicker              => runtime.openPicker

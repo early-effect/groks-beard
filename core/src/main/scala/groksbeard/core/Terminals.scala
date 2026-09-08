@@ -36,18 +36,6 @@ final case class TerminalOutputResult(
     exitStatus: Option[TerminalExitStatus] = None,
 ) derives JsonCodec
 
-object PlanTerminals:
-  /** Measured 2026-09-06 against grok 1.0.13 (5e9a58528b76).
-    *
-    * Probe spawn advertised `clientCapabilities.terminal = true`, set mode to `plan`, and prompted for
-    * `echo beard-probe > mutated.txt`. The agent did not send `terminal/create`. It edited session `plan.md` and called
-    * `_x.ai/exit_plan_mode`. No handler-side mutating-shell allowlist.
-    */
-  val MutatingCreateInPlan: Boolean = false
-
-  val DefaultByteLimit: Int = 1_048_576
-end PlanTerminals
-
 trait Terminals:
   def create(
       command: String,

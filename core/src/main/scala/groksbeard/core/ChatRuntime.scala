@@ -59,6 +59,8 @@ final class ChatRuntime private (
   private var listOpen                     = false
   private var listed                       = List.empty[SessionRow]
   private var live                         = false
+  private var initializeSent               = false
+  private var initialized                  = false
   private var agentGone                    = false
   private var lastFollow                   = Option.empty[FollowTarget]
   private var liveExecute                  = Option.empty[ToolCallId]
@@ -91,12 +93,16 @@ final class ChatRuntime private (
   def ready: UIO[Unit] = exclusive {
     ZIO.suspendSucceed {
       live = true
-      post(HostMsg.Ready) *>
-        beforeInitialize *>
-        rpc(
-          "initialize",
-          InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
-        ) *> (if store.list.nonEmpty then emitChanges else ZIO.unit)
+      val boot =
+        if initializeSent then ZIO.unit
+        else
+          initializeSent = true
+          beforeInitialize *>
+            rpc(
+              "initialize",
+              InitializeParams(1, capabilities, ClientInfo("groks-beard", title, "0.2.0")).asJson,
+            )
+      post(HostMsg.Ready) *> boot *> (if store.list.nonEmpty then emitChanges else ZIO.unit)
     }
   }
 
@@ -526,7 +532,8 @@ final class ChatRuntime private (
 
   private def doResume(id: SessionId): UIO[Unit] =
     if id.isEmpty then doPostList(open = true)
-    else if sessionId.contains(id) then doPostList(open = false)
+    else if pendingResume.contains(id) && !initialized then ZIO.unit
+    else if sessionId.contains(id) && pendingResume.isEmpty && !loading then doPostList(open = false)
     else
       inboundEpoch.incrementAndGet()
       pendingResume.foreach(prev => cancelledLoads += prev)
@@ -537,10 +544,10 @@ final class ChatRuntime private (
         loading = true
         loadCleared = true
         pendingResume = Some(id)
-        post(HostMsg.ClearTranscript) *>
-          postMeta *>
-          doPostList(open = false) *>
-          rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
+        val load =
+          if initialized then rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
+          else ZIO.unit
+        post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *> load
       }
 
   private def openChangesUnlocked: UIO[Unit] =
@@ -893,7 +900,10 @@ final class ChatRuntime private (
         else error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
       errPost *> (method match
         case "initialize" =>
-          rpc("session/new", SessionNewParams(cwd).asJson)
+          initialized = true
+          pendingResume match
+            case Some(id) => rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
+            case None     => rpc("session/new", SessionNewParams(cwd).asJson)
         case "session/new" =>
           result match
             case None       => ZIO.unit

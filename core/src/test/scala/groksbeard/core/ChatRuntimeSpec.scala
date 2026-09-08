@@ -905,6 +905,38 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           }
         yield result
       } @@ TestAspect.withLiveClock,
+      test("resume before ready loads instead of opening a new session") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.resumeSession("sess_disk")
+            _    <- rt.ready
+            msgs <- posted.get
+            blob = lines.mkString
+          yield assertTrue(
+            blob.contains("session/load"),
+            blob.contains("sess_disk"),
+            !blob.contains("\"method\":\"session/new\""),
+            msgs.exists {
+              case HostMsg.Transcript(turns) => turns.nonEmpty
+              case _                         => false
+            },
+          )
+        }
+      },
+      test("a second ready does not initialize again") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.ready
+            blob = lines.mkString
+          yield assertTrue(!blob.contains("initialize"), !blob.contains("session/new"))
+        }
+      },
       test("ready posts a sessionList after session/new") {
         val rows = List(SessionRow("disk-1", "Earlier work", activityMs = 9))
         chat(listSessions = () => rows) { (rt, posted) =>

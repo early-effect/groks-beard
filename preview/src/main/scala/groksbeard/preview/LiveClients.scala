@@ -17,7 +17,11 @@ final class LiveClients(
 
   def eventStream(id: String): ZStream[Any, Nothing, HostMsg] =
     ZStream.unwrapScoped {
-      subscribe(id).map(c => ZStream.fromHub(c.session.events))
+      subscribe(id).flatMap { c =>
+        c.session.events.subscribe.flatMap { q =>
+          c.session.post(WebviewMsg.Ready).as(ZStream.fromQueue(q))
+        }
+      }
     }
 
   def closeAll: UIO[Unit] =

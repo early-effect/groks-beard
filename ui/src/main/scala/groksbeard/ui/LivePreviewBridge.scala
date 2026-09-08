@@ -21,6 +21,7 @@ final class LivePreviewBridge extends HostBridge:
 
   def onHost(f: HostMsg => Unit): Unit =
     val es = js.Dynamic.newInstance(js.Dynamic.global.EventSource)(LivePreviewBridge.eventsPath(client))
+    es.onopen = (_: js.Dynamic) => post(WebviewMsg.Ready)
     es.onmessage = (event: js.Dynamic) =>
       val data = "" + event.data
       Wire.hostMsgs(data) match
@@ -28,6 +29,7 @@ final class LivePreviewBridge extends HostBridge:
         case Left(err)   =>
           js.Dynamic.global.console.error(err, data)
           f(HostMsg.Error(err, Some(Wire.Decode)))
+  end onHost
 end LivePreviewBridge
 
 object LivePreviewBridge:

@@ -239,6 +239,8 @@ final class PreviewBridge extends HostBridge:
         else emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
       case WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
         ()
+      case WebviewMsg.OpenFile(_, _) =>
+        ()
       case WebviewMsg.OpenDiff(_) | WebviewMsg.OpenChanges =>
         emit(
           HostMsg.DiffPreview(PreviewDiffs.MainPath, PreviewDiffs.MainOld, PreviewDiffs.MainNew, wholeFile = true)

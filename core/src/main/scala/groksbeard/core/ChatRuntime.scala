@@ -62,7 +62,6 @@ final class ChatRuntime private (
   private var initializeSent               = false
   private var initialized                  = false
   private var agentGone                    = false
-  private var lastFollow                   = Option.empty[FollowTarget]
   private var liveExecute                  = Option.empty[ToolCallId]
   private var tasks                        = List.empty[TaskRow]
   private var loopSeq                      = 0
@@ -233,6 +232,11 @@ final class ChatRuntime private (
         store.pending.find(f => f.toolCallId.value == requestId.value || f.path == requestId.value) match
           case Some(file) => showFile(file)
           case None       => openChangesUnlocked
+  }
+
+  def openFile(path: String, line: Option[Int]): UIO[Unit] = exclusive {
+    val trimmed = path.trim
+    if trimmed.isEmpty then ZIO.unit else review.follow(trimmed, line)
   }
 
   def openChanges: UIO[Unit] = exclusive(openChangesUnlocked)
@@ -652,7 +656,6 @@ final class ChatRuntime private (
     running = false
     liveExecute = None
     loadModel = ChatModel.empty
-    lastFollow = None
     tasks = Nil
   end resetTurnState
 
@@ -1166,28 +1169,20 @@ final class ChatRuntime private (
       case _                                    => ZIO.unit
 
   private def ingestTool(status: ToolStatus, body: AcpToolCall): UIO[Unit] =
-    followLocations(body) *>
-      reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
-        if diffs.isEmpty then ZIO.unit
-        else
-          ZIO.suspendSucceed {
-            store.ingest(
-              sessionId.getOrElse(fallbackSessionId),
-              currentTurn,
-              currentTitle,
-              diffs.map(DiffContent.fileChangeFrom),
-            )
-            postChanges
-          }
-      }
+    reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
+      if diffs.isEmpty then ZIO.unit
+      else
+        ZIO.suspendSucceed {
+          store.ingest(
+            sessionId.getOrElse(fallbackSessionId),
+            currentTurn,
+            currentTitle,
+            diffs.map(DiffContent.fileChangeFrom),
+          )
+          postChanges
+        }
+    }
   end ingestTool
-
-  private def followLocations(body: AcpToolCall): UIO[Unit] =
-    FollowAlong.pick(body.locations, body.toolCallId) match
-      case Some(next) if FollowAlong.changed(lastFollow, next) =>
-        lastFollow = Some(next)
-        review.follow(next.path, next.line)
-      case _ => ZIO.unit
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
     AcpToolCall(

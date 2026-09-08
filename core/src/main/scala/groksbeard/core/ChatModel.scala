@@ -12,6 +12,8 @@ final case class ToolRow(
     deletions: Option[Int] = None,
     input: Option[String] = None,
     output: Option[String] = None,
+    path: Option[String] = None,
+    line: Option[Int] = None,
 ) derives JsonCodec
 
 object ToolRow:
@@ -403,7 +405,8 @@ object ChatModel:
         output = None,
       )
     else
-      val prev = existing(idx)
+      val prev    = existing(idx)
+      val located = row.path.filter(_.nonEmpty)
       existing.updated(
         idx,
         prev.copy(
@@ -413,6 +416,8 @@ object ChatModel:
           additions = row.additions.orElse(prev.additions),
           deletions = row.deletions.orElse(prev.deletions),
           input = row.input.filter(_.nonEmpty).orElse(prev.input),
+          path = located.orElse(prev.path),
+          line = located.fold(prev.line)(_ => row.line),
         ),
       )
     end if

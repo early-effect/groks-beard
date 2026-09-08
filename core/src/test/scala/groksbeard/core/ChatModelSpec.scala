@@ -138,6 +138,33 @@ object ChatModelSpec extends ZIOSpecDefault:
           row.title == "Read",
         )
       },
+      test("tool locations merge onto the row and survive a title-only update") {
+        val start = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow("a", "Read", "read", "in_progress", path = Some("src/Foo.scala"), line = Some(3)),
+          ),
+        )
+        val moved = ChatModel.applyMsg(
+          start,
+          HostMsg.ToolCall(
+            "t1",
+            ToolRow("a", "Read", "read", "in_progress", path = Some("src/Foo.scala"), line = Some(9)),
+          ),
+        )
+        val keep = ChatModel.applyMsg(
+          moved,
+          HostMsg.ToolCall("t1", ToolRow("a", "", "read", "completed")),
+        )
+        val row = keep.turns.head.tools.head
+        assertTrue(
+          moved.turns.head.tools.head.line.contains(9),
+          row.path.contains("src/Foo.scala"),
+          row.line.contains(9),
+          row.title == "Read",
+        )
+      },
       test("turnEnd clears cards and leaves parked follow-ups") {
         val withCard = ChatModel.empty.copy(
           permission = Some(

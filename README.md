@@ -64,7 +64,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Command palette (`Ctrl+P` / `?` in chat): session actions plus MCP servers. Occupancy meter click opens `/context`.
 - Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
-- Follow-along: the editor reveals the file (and line) the agent is in, without stealing focus from a Beard diff.
+- Follow-along: the transcript shows the file the agent is in. Click it to open; the editor does not jump on its own.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 

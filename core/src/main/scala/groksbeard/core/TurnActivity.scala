@@ -13,6 +13,8 @@ final case class TurnActivity(
     label: String,
     elapsedMs: Long,
     detail: Option[String] = None,
+    path: Option[String] = None,
+    line: Option[Int] = None,
 ) derives Eq
 
 object TurnActivity:
@@ -47,7 +49,7 @@ object TurnActivity:
   private def fromTool(tool: ToolRow, elapsedMs: Long): TurnActivity =
     val kind   = kindOf(tool.kind)
     val detail = ToolView.watchText(tool).map(ToolView.liveTail(_, 1)).filter(_.nonEmpty)
-    TurnActivity(kind, labelOf(kind, tool.title), elapsedMs, detail)
+    TurnActivity(kind, labelOf(kind, tool.title), elapsedMs, detail, tool.path, tool.line)
 
   private def kindOf(kind: ToolKind): ActivityKind =
     kind match

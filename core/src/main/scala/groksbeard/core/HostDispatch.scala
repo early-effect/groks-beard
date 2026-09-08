@@ -34,6 +34,7 @@ object HostDispatch:
       case WebviewMsg.SetSetting(key, value)           => runtime.setSetting(key, value)
       case WebviewMsg.OpenSettings                     => extra(HostMsg.settings(runtime.currentSettings))
       case WebviewMsg.OpenDiff(id)                     => runtime.openDiff(id)
+      case WebviewMsg.OpenFile(path, line)             => runtime.openFile(path, line)
       case WebviewMsg.OpenChanges                      => runtime.openChanges
       case WebviewMsg.KeepChange(path)                 => runtime.keep(path)
       case WebviewMsg.UndoChange(path)                 => runtime.undo(path)

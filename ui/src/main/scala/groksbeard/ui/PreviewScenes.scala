@@ -44,6 +44,8 @@ object PreviewScenes:
                   ToolStatus.Completed,
                   input = Some("src/Main.scala"),
                   output = Some("object Main"),
+                  path = Some("src/Main.scala"),
+                  line = Some(1),
                 ),
                 ToolRow(
                   ToolCallId("term-1"),

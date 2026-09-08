@@ -758,7 +758,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
-      test("tool_call locations follow the current file once per tool") {
+      test("tool_call locations do not reveal the editor") {
         var followed = List.empty[(String, Option[Int])]
         chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
           for
@@ -780,6 +780,15 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 )
               )
             )
+          yield assertTrue(followed.isEmpty)
+        }
+      },
+      test("tool_call locations stamp the tool path") {
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- rt.send("hello")
+            _ <- posted.set(Nil)
             _ <- rt.ingestData(
               Ndjson.encode(
                 Rpc.toLine(
@@ -796,9 +805,19 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 )
               )
             )
-          yield assertTrue(
-            followed == List("/tmp/Main.scala" -> Some(1), "/tmp/Main.scala" -> Some(4))
-          )
+            msgs <- posted.get
+            paths = msgs.collect { case HostMsg.ToolCall(_, row) => (row.path, row.line) }
+          yield assertTrue(paths.contains((Some("/tmp/Main.scala"), Some(4))))
+        }
+      },
+      test("openFile reveals the path") {
+        var followed = List.empty[(String, Option[Int])]
+        chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- rt.openFile("/tmp/Main.scala", Some(4))
+            _ <- rt.openFile("  ", None)
+          yield assertTrue(followed == List("/tmp/Main.scala" -> Some(4)))
         }
       },
       test("openDiff posts a sidebar preview of the pending file") {

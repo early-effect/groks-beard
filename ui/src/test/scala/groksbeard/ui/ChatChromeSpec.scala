@@ -616,6 +616,20 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("a tool path in the transcript is clickable") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "tool-open-read-1")
+              text <- root.button("tool-open-read-1").innerText
+              _    <- root.button("tool-open-read-1").click
+            yield assertTrue(text.contains("Main.scala"))
+          }
+        yield result
+        end for
+      },
       test("up on an empty composer recalls the last prompt") {
         val bridge = PreviewBridge()
         for

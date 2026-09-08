@@ -133,6 +133,14 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           row.exists(_.input.contains("echo hi")),
         )
       },
+      test("x.ai session update is a session notify") {
+        assertTrue(
+          SessionUpdate.isSessionNotify("session/update"),
+          SessionUpdate.isSessionNotify("_x.ai/session/update"),
+          SessionUpdate.isSessionNotify("x.ai/session/update"),
+          !SessionUpdate.isSessionNotify("session/new"),
+        )
+      },
       test("unknown sessionUpdate is ignored") {
         val msgs = SessionUpdate.hostMsgs(
           Json.Obj(

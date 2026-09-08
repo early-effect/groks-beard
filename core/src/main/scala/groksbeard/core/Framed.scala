@@ -40,7 +40,7 @@ final class Framed(val state: SessionState):
             else if method == "session/new" || method == "session/load" then
               result.flatMap(SessionState.modeIdFromSessionResult).foreach(state.commitMode)
         }
-      case Rpc.Notify(method, params) if method == "session/update" =>
+      case Rpc.Notify(method, params) if SessionUpdate.isSessionNotify(method) =>
         SessionState.modeIdFromSessionUpdate(params).foreach(state.commitMode)
       case _ => ()
 end Framed

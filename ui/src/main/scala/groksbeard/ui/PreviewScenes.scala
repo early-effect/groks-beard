@@ -200,6 +200,22 @@ object PreviewScenes:
             TodoEntry("Match the TUI pane", Todos.Pending, TodoPriority.Medium, Some("3")),
           ),
         )
+      case Scene.Tasks =>
+        ChatModel.empty.copy(
+          inSession = true,
+          title = "Tasks",
+          tasks = List(
+            TaskRow(
+              TaskId("loop-1"),
+              TaskKind.Loop,
+              TaskStatus.Running,
+              "Check CI",
+              "every 5m",
+              owned = true,
+            ),
+            TaskRow(TaskId("cmd-1"), TaskKind.Command, TaskStatus.Running, "sbt --no-server ~uiJS/ascentPreview"),
+          ),
+        )
       case Scene.Mcps =>
         ChatModel.empty.copy(
           inSession = true,

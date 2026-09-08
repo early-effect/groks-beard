@@ -31,7 +31,7 @@ final class NodeTerminals(defaultCwd: String) extends Terminals:
       val child = nodeChildProcess.spawn(
         argv.head,
         js.Array(argv.drop(1)*),
-        js.Dynamic.literal(
+        SpawnOptions(
           cwd = cwd.filter(_.nonEmpty).getOrElse(defaultCwd),
           env = envMap,
         ),
@@ -107,9 +107,9 @@ object NodeTerminals:
       child.on(
         "exit",
         (code: js.Any) =>
-          val n = code match
-            case v if js.typeOf(v) == "number" => Some(v.asInstanceOf[Int])
-            case _                             => None
+          val n =
+            import groksbeard.facade.asInt
+            code.asInt
           finish(TerminalExitStatus(n, None)),
       )
     end listen

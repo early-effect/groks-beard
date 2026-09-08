@@ -4,6 +4,7 @@ enum PaletteKind:
   case Slash(name: String)
   case Mcps
   case Todos
+  case Tasks
   case Settings
   case SessionInfo
   case Context
@@ -21,6 +22,9 @@ object Palette:
 
   val TodosRow: PaletteRow =
     PaletteRow("todos", "Todos", "Ctrl+T", "Toggle the session todo list", PaletteKind.Todos)
+
+  val TasksRow: PaletteRow =
+    PaletteRow("tasks", "Tasks", "Ctrl+G", "Background commands, loops, and monitors", PaletteKind.Tasks)
 
   val SettingsRow: PaletteRow =
     PaletteRow("settings", "Settings", "", "Composer and inclusion settings", PaletteKind.Settings)
@@ -54,7 +58,7 @@ object Palette:
 
   def rows(commands: List[SlashCommand]): List[PaletteRow] =
     val advertised = SessionCommands.merge(commands).map(slashRow)
-    val extra      = List(McpsRow, TodosRow, SettingsRow).filterNot(r => advertised.exists(_.id == r.id))
+    val extra      = List(McpsRow, TodosRow, TasksRow, SettingsRow).filterNot(r => advertised.exists(_.id == r.id))
     val merged     = advertised ++ extra
     val seen       = scala.collection.mutable.LinkedHashSet.empty[String]
     val unique     = merged.filter { row =>
@@ -88,11 +92,13 @@ object Palette:
       if SessionCommands.isMcps(cmd.name) then PaletteKind.Mcps
       else if SessionCommands.isSessionInfo(cmd.name) then PaletteKind.SessionInfo
       else if SessionCommands.isContext(cmd.name) then PaletteKind.Context
+      else if SessionCommands.isTasks(cmd.name) then PaletteKind.Tasks
       else PaletteKind.Slash(cmd.name)
     val label =
       if SessionCommands.isMcps(cmd.name) then McpsRow.label
       else if SessionCommands.isSessionInfo(cmd.name) then SessionInfoRow.label
       else if SessionCommands.isContext(cmd.name) then ContextRow.label
+      else if SessionCommands.isTasks(cmd.name) then TasksRow.label
       else cmd.name
     PaletteRow(
       id = cmd.name,

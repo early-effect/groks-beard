@@ -3,6 +3,7 @@ package groksbeard.core
 import java.util.concurrent.TimeUnit
 import zio.*
 import zio.json.*
+import zio.json.ast.Json
 import zio.test.*
 
 object ChatRuntimeSpec extends ZIOSpecDefault:
@@ -30,6 +31,79 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           }
         }
       },
+      test("ready posts sessionMeta while beforeInitialize is still waiting") {
+        Promise.make[Nothing, Unit].flatMap { hold =>
+          chat(beforeInitialize = hold.await) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              msgs <- posted.get
+              _    <- hold.succeed(())
+            yield assertTrue(
+              msgs.exists {
+                case HostMsg.Ready => true
+                case _             => false
+              },
+              msgs.exists {
+                case _: HostMsg.SessionMeta => true
+                case _                      => false
+              },
+            )
+          }
+        }
+      } @@ TestAspect.timeout(5.seconds),
+      test("send during MCP wait does not wait for local MCP") {
+        Promise.make[Nothing, Unit].flatMap { hold =>
+          chat(beforeInitialize = hold.await) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.send("hello")
+              msgs <- posted.get
+              _    <- hold.succeed(())
+            yield assertTrue(msgs.exists {
+              case HostMsg.UserMessage(_, "hello", _, _) => true
+              case _                                     => false
+            })
+          }
+        }
+      } @@ TestAspect.timeout(5.seconds),
+      test("send before ready queues until the session exists") {
+        chat() { (rt, posted) =>
+          for
+            _     <- rt.send("hello")
+            early <- posted.get
+            _     <- rt.ready
+            later <- posted.get
+          yield assertTrue(
+            early.exists {
+              case HostMsg.Queued(items) => items.exists(_.text == "hello")
+              case _                     => false
+            },
+            later.exists {
+              case HostMsg.UserMessage(_, "hello", _, _) => true
+              case _                                     => false
+            },
+          )
+        }
+      },
+      test("settings can update while beforeInitialize is still waiting") {
+        Promise.make[Nothing, Unit].flatMap { hold =>
+          chat(beforeInitialize = hold.await) { (rt, posted) =>
+            val next = SettingsState.defaults.copy(cliPath = "/tmp/grok")
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.replaceSettings(next)
+              msgs <- posted.get
+              _    <- hold.succeed(())
+            yield assertTrue(msgs.exists {
+              case m: HostMsg.Settings => m.cliPath == "/tmp/grok"
+              case _                   => false
+            })
+            end for
+          }
+        }
+      } @@ TestAspect.timeout(5.seconds),
       test("send posts user, thought, agent, tool, then turnEnd") {
         chat() { (rt, posted) =>
           for
@@ -136,6 +210,74 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             },
             model.turns.size == 1,
           )
+        }
+      },
+      test("/loop without args posts usage") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/loop")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message.contains("/loop")
+              case _                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("/loop 5m prompt starts a loop and fires immediately") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/loop 5m check ci")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Tasks(rows) =>
+                rows.exists(r => r.kind == TaskKind.Loop && r.label == "check ci" && r.owned)
+              case _ => false
+            },
+            msgs.exists {
+              case HostMsg.UserMessage(_, "check ci", _, _) => true
+              case _                                        => false
+            },
+          )
+        }
+      },
+      test("x.ai task_backgrounded posts Tasks") {
+        chat() { (rt, posted) =>
+          val line = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "_x.ai/session/update",
+                Json.Obj(
+                  "sessionId" -> Json.Str("sess_test"),
+                  "update"    -> Json.Obj(
+                    "sessionUpdate" -> Json.Str("task_backgrounded"),
+                    "task_id"       -> Json.Str("t1"),
+                    "description"   -> Json.Str("Compile"),
+                    "command"       -> Json.Str("sbt compile"),
+                  ),
+                ),
+              )
+            )
+          )
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(line)
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Tasks(rows) => rows.exists(r => r.id.value == "t1" && r.label == "Compile")
+            case _                   => false
+          })
         }
       },
       test("send /rewind intercepts and lists points") {
@@ -1597,12 +1739,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       readDisk: String => Option[String] = _ => None,
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
       planOnDisk: SessionId => List[TodoEntry] = _ => Nil,
+      beforeInitialize: UIO[Unit] = ZIO.unit,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
       for
         posted <- Ref.make(List.empty[HostMsg])
         rt     <- ChatRuntime
-          .make(transport = transport)
+          .make(transport = transport, beforeInitialize = beforeInitialize)
           .provideSome[Scope](
             ChatEnv.test(
               post = msg => posted.update(_ :+ msg),

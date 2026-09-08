@@ -2,8 +2,7 @@ package groksbeard.ui
 
 import ascent.*
 import groksbeard.core.WebviewMsg
-import groksbeard.facade.VsCodeApi
-import org.scalajs.dom as jsdom
+import groksbeard.facade.{Browser, VsCodeApi}
 import zio.*
 import zio.json.*
 
@@ -15,7 +14,7 @@ object Main extends ZIOAppDefault:
     boot.tapError { e =>
       ZIO.succeed {
         val msg = Option(e.getMessage).filter(_.nonEmpty).getOrElse(e.toString)
-        js.Dynamic.global.console.error("Grok's Beard UI failed:", msg)
+        Browser.console.error("Grok's Beard UI failed:", msg)
         VsCodeApi.current.foreach { api =>
           val payload: WebviewMsg = WebviewMsg.Log(msg)
           api.postMessage(js.JSON.parse(payload.toJson))
@@ -49,14 +48,14 @@ object Main extends ZIOAppDefault:
   end boot
 
   private def readLogo: Option[String] =
-    def attr(el: jsdom.Element | Null): Option[String] =
+    def attr(el: ascent.dom.Element | Null): Option[String] =
       Option(el).flatMap(e => Option(e.getAttribute("data-logo"))).filter(s => s != null && s.nonEmpty)
-    attr(jsdom.document.documentElement).orElse(attr(jsdom.document.body)).orElse(Some("/logo.png"))
+    attr(ascent.dom.document.documentElement).orElse(attr(ascent.dom.document.body)).orElse(Some("/logo.png"))
 
   private def whenDomReady: UIO[Unit] =
-    if jsdom.document.readyState != "loading" then ZIO.unit
+    if ascent.dom.document.readyState != "loading" then ZIO.unit
     else
       ZIO.async[Any, Nothing, Unit] { cb =>
-        jsdom.document.addEventListener("DOMContentLoaded", (_: jsdom.Event) => cb(ZIO.unit))
+        ascent.dom.document.addEventListener("DOMContentLoaded", (_: ascent.dom.Event) => cb(ZIO.unit))
       }
 end Main

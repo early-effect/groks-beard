@@ -50,6 +50,17 @@ object QueueId:
   extension (id: QueueId) def value: String = id
   given JsonCodec[QueueId]                  = JsonExt.stringCodec(_.value, apply)
 
+opaque type TaskId = String
+object TaskId:
+  val empty: TaskId              = ""
+  def apply(raw: String): TaskId = raw.trim
+  def mint(seq: Int): TaskId     = apply(s"loop-$seq")
+  extension (id: TaskId)
+    def value: String     = id
+    def isEmpty: Boolean  = id.length == 0
+    def nonEmpty: Boolean = id.length > 0
+  given JsonCodec[TaskId] = JsonExt.stringCodec(_.value, apply)
+
 opaque type ModeId = String
 object ModeId:
   val empty: ModeId              = ""

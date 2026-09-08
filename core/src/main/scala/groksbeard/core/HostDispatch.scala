@@ -10,6 +10,7 @@ object HostDispatch:
       case WebviewMsg.Queue(text)                    => runtime.queue(text)
       case WebviewMsg.QueueSendNow(id)               => runtime.sendNow(id)
       case WebviewMsg.QueueDrop(id)                  => runtime.dropQueued(id)
+      case WebviewMsg.StopTask(id)                   => runtime.stopTask(id)
       case WebviewMsg.Cancel                         => runtime.cancel
       case WebviewMsg.SetMode(id)                    => runtime.setMode(id)
       case WebviewMsg.SetModel(id, effort)           => runtime.setModel(id, Option(effort).filter(_.nonEmpty))

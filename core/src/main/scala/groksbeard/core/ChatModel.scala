@@ -125,6 +125,7 @@ final case class ChatModel(
     changes: Option[ChangesSummary] = None,
     diff: Option[DiffView] = None,
     todos: List[TodoEntry] = Nil,
+    tasks: List[TaskRow] = Nil,
     error: Option[String] = None,
     runningSinceMs: Option[Long] = None,
     awaitingSession: Option[SessionId] = None,
@@ -186,6 +187,7 @@ object ChatModel:
       changes = None,
       diff = None,
       todos = Nil,
+      tasks = Nil,
       error = None,
       pickerOpen = false,
       locked = None,
@@ -204,10 +206,11 @@ object ChatModel:
       case Some(want) =>
         msg match
           case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | HostMsg.ToggleQueue |
-              HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers | _: HostMsg.Transcript |
-              _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings |
-              _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission |
-              _: HostMsg.Plan | _: HostMsg.Question =>
+              HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers |
+              _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands |
+              _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit |
+              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks |
+              _: HostMsg.TaskNotice =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -318,7 +321,19 @@ object ChatModel:
         model.copy(error = Some(message))
       case HostMsg.Todos(entries) =>
         model.copy(todos = Todos.fromEntries(entries))
-      case HostMsg.ToggleTodos | HostMsg.ToggleQueue | HostMsg.OpenPalette | HostMsg.OpenMcps =>
+      case HostMsg.Tasks(entries) =>
+        model.copy(tasks = entries)
+      case HostMsg.TaskNotice(text) =>
+        if text.isEmpty then model
+        else
+          val turn =
+            TurnView(
+              TurnId(s"task-${model.turns.size + 1}"),
+              agent = text,
+              stopReason = Some(StopReason.EndTurn),
+            )
+          model.copy(turns = model.turns :+ turn, inSession = true)
+      case HostMsg.ToggleTodos | HostMsg.ToggleQueue | HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps =>
         model
       case HostMsg.McpServers(servers) =>
         model.copy(mcps = servers)
@@ -334,6 +349,7 @@ object ChatModel:
           changes = None,
           diff = None,
           todos = Nil,
+          tasks = Nil,
           error = None,
           pickerOpen = false,
           locked = None,

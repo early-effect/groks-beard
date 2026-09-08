@@ -4,6 +4,11 @@ import zio.json.*
 import zio.json.ast.Json
 
 object SessionUpdate:
+  def isSessionNotify(method: String): Boolean =
+    val m =
+      if method.startsWith("x.ai/") && !method.startsWith("_x.ai/") then s"_$method" else method
+    m == "session/update" || m == "_x.ai/session/update"
+
   def hostMsgs(params: Json, turnId: TurnId): List[HostMsg] =
     SessionState.decodeUpdate(params) match
       case Some(AcpUpdate.Thought(content)) =>

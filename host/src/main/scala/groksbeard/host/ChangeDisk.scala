@@ -82,18 +82,18 @@ end ChangeDisk
 
 object ChangeDisk:
   def utf8String(bytes: Uint8Array): String =
-    js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8").decode(bytes).asInstanceOf[String]
+    new groksbeard.facade.TextDecoder("utf-8").decode(bytes)
 
   def fromPromise[A](make: => js.Promise[A]): BeardError.Result[A] =
     ZIO.async[Any, BeardError, A] { cb =>
       val p =
-        try make
+        try Some(make)
         catch
           case t: Throwable =>
             cb(ZIO.fail(BeardError.system(t)))
-            null.asInstanceOf[js.Promise[A]]
-      if p != null then
-        val _ = p.`then`(
+            None
+      p.foreach { promise =>
+        val _ = promise.`then`(
           (a: A) =>
             cb(ZIO.succeed(a)); (): js.Any
           ,
@@ -104,7 +104,7 @@ object ChangeDisk:
             cb(ZIO.fail(BeardError.system(t)))
             (): js.Any,
         )
-      end if
+      }
       ()
     }
 end ChangeDisk

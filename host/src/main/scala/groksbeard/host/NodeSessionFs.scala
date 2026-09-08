@@ -29,11 +29,11 @@ object NodeSessionFs extends SessionFs:
 
   override def writeText(path: String, text: String): BeardError.Result[Unit] =
     ZIO.attempt {
-      nodeFs.mkdirSync(nodePath.dirname(path), js.Dynamic.literal(recursive = true))
+      nodeFs.mkdirSync(nodePath.dirname(path), MkdirSyncOptions(recursive = true))
       nodeFs.writeFileSync(path, text, "utf8")
       ()
     }.orSystem
 
   override def deleteTree(path: String): BeardError.Result[Unit] =
-    ZIO.attempt(nodeFs.rmSync(path, js.Dynamic.literal(recursive = true, force = true))).orSystem
+    ZIO.attempt(nodeFs.rmSync(path, RmSyncOptions(recursive = true, force = true))).orSystem
 end NodeSessionFs

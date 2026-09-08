@@ -3,8 +3,6 @@ package groksbeard.ui
 import zio.*
 import zio.stream.ZStream
 
-import scala.scalajs.js
-
 /** Coalesce a stream of events into one chunk per animation frame. */
 object FrameBurst:
   val Window: Duration = 16.millis
@@ -25,13 +23,10 @@ object FrameBurst:
     ZIO
       .asyncInterrupt[Any, Nothing, Unit] { cb =>
         try
-          val w = js.Dynamic.global.window
-          if js.typeOf(w.requestAnimationFrame) == "function" then
-            val id = w.requestAnimationFrame((_: Double) => cb(ZIO.unit))
-            Left(ZIO.succeed {
-              val _ = w.cancelAnimationFrame(id)
-            })
-          else Right(ZIO.unit)
+          val id = ascent.dom.window.requestAnimationFrame((_: Double) => cb(ZIO.unit))
+          Left(ZIO.succeed {
+            ascent.dom.window.cancelAnimationFrame(id)
+          })
         catch case _: Throwable => Right(ZIO.unit)
       }
       .timeout(Window)

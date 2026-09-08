@@ -15,6 +15,7 @@ object PaletteSpec extends ZIOSpecDefault:
           rows.exists(_.id == "compact"),
           rows.exists(_.kind == PaletteKind.Mcps),
           rows.exists(_.kind == PaletteKind.Todos),
+          rows.exists(_.kind == PaletteKind.Tasks),
           rows.exists(_.kind == PaletteKind.Settings),
           !rows.exists(_.id == "clear"),
           !rows.exists(_.id == "undo"),
@@ -57,6 +58,9 @@ object PaletteSpec extends ZIOSpecDefault:
           !merged.exists(_.name == "status"),
           rows.exists(_.kind == PaletteKind.SessionInfo),
           rows.exists(_.kind == PaletteKind.Context),
+          rows.exists(_.kind == PaletteKind.Tasks),
+          SessionCommands.intercept("/tasks").contains(ClientCommand("tasks")),
+          SessionCommands.intercept("/loop 5m ci").contains(ClientCommand("loop", "5m ci")),
           !rows.exists(_.id == "status"),
           !rows.exists(_.id == "info"),
         )

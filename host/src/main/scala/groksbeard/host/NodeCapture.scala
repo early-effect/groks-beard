@@ -12,7 +12,7 @@ object NodeCapture:
         val child = nodeChildProcess.spawn(
           command,
           js.Array(args*),
-          js.Dynamic.literal(cwd = cwd, stdio = js.Array("ignore", "pipe", "pipe")),
+          SpawnOptions(cwd = cwd, stdio = js.Array("ignore", "pipe", "pipe")),
         )
         val out = StringBuilder()
         val err = StringBuilder()

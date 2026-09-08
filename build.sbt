@@ -188,7 +188,7 @@ lazy val packageVsix =
 lazy val host = (project in file("host"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
   .enablePlugins(ScalaJSPlugin)
-  .dependsOn(LocalProject("coreJS"))
+  .dependsOn(LocalProject("coreJS"), facade)
   .settings(
     name := "groks-beard-host",
     skipPublish,

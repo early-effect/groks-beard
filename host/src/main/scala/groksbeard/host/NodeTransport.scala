@@ -33,7 +33,7 @@ final class NodeTransport(
     "exit",
     (code: js.Any) =>
       if !stopping.get() then
-        val parsed = js.Dynamic.global.parseInt(code, 10).asInstanceOf[Double]
+        val parsed = groksbeard.facade.Browser.parseInt(code, 10)
         val n      = if parsed.isNaN then -1 else parsed.toInt
         run(onExit(n)),
   )
@@ -67,7 +67,7 @@ object NodeTransport:
         val child = nodeChildProcess.spawn(
           command,
           js.Array(args*),
-          js.Dynamic.literal(cwd = cwd, stdio = js.Array("pipe", "pipe", "pipe")),
+          SpawnOptions(cwd = cwd, stdio = js.Array("pipe", "pipe", "pipe")),
         )
         new NodeTransport(child, log, onErr, onExit, run, new AtomicBoolean(false))
       }.orSystem

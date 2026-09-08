@@ -27,10 +27,9 @@ object TranscriptScroll:
       el.scrollTop = el.scrollHeight.toDouble
       pinned = el.scrollTop
     def raf(run: js.Function1[Double, Unit]): Unit =
-      val w = js.Dynamic.global.window
-      if js.typeOf(w.requestAnimationFrame) == "function" then
-        val _ = w.requestAnimationFrame(run)
-      else run(0)
+      try
+        val _ = ascent.dom.window.requestAnimationFrame(run)
+      catch case _: Throwable => run(0)
     def pin(): Unit =
       if follow.get() then
         ignore.set(true)
@@ -43,10 +42,8 @@ object TranscriptScroll:
             ignore.set(false)
           mark()
         }
-    val obs = js.Dynamic.newInstance(js.Dynamic.global.MutationObserver) { (_: js.Any) =>
-      raf { _ => pin() }
-    }
-    obs.observe(el, js.Dynamic.literal(childList = true, subtree = true, characterData = true))
+    val obs = new ascent.dom.MutationObserver((_, _) => raf(_ => pin()))
+    obs.observe(el, JsDom.subtreeMutations)
     pin()
     mark()
     Dom.listen(el, Events.onScroll)(_ => ZIO.succeed(mark())) *>

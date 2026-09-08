@@ -226,7 +226,18 @@ class TreeItem(val label: String, val collapsibleState: Int) extends js.Object:
   var description: js.UndefOr[String]  = js.native
   var contextValue: js.UndefOr[String] = js.native
   var tooltip: js.UndefOr[String]      = js.native
-  var command: js.UndefOr[js.Any]      = js.native
+  var command: js.UndefOr[Command]     = js.native
+
+class Command(
+    val command: String,
+    val title: String,
+    val arguments: js.UndefOr[js.Array[js.Any]] = js.undefined,
+) extends js.Object
+
+class RevealLineArgs(
+    val lineNumber: Int,
+    val at: String,
+) extends js.Object
 
 object TreeItemCollapsible:
   val None: Int      = 0

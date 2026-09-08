@@ -25,6 +25,7 @@ final case class TurnView(
     thought: String = "",
     agent: String = "",
     tools: List[ToolRow] = Nil,
+    subagents: List[TaskRow] = Nil,
     stopReason: Option[StopReason] = None,
 ) derives JsonCodec,
       Eq
@@ -172,6 +173,7 @@ object ChatModel:
         thought = "",
         stopReason = t.stopReason.orElse(Some(StopReason.EndTurn)),
         tools = t.tools.map(r => r.copy(input = None, output = None)),
+        subagents = t.subagents,
       )
     }
 
@@ -327,7 +329,7 @@ object ChatModel:
       case HostMsg.Todos(entries) =>
         model.copy(todos = Todos.fromEntries(entries))
       case HostMsg.Tasks(entries) =>
-        model.copy(tasks = entries)
+        pinSubagents(model.copy(tasks = entries), entries)
       case HostMsg.TaskNotice(text) =>
         if text.isEmpty then model
         else
@@ -389,6 +391,25 @@ object ChatModel:
   private def markRunning(model: ChatModel, nowMs: Long): ChatModel =
     if ChatModel.turnIsRunning(model) then model.copy(runningSinceMs = model.runningSinceMs.orElse(Some(nowMs)))
     else model.copy(runningSinceMs = None)
+
+  private def pinSubagents(model: ChatModel, entries: List[TaskRow]): ChatModel =
+    entries.filter(_.kind == TaskKind.Subagent).foldLeft(model)(pinSubagent)
+
+  private def pinSubagent(model: ChatModel, row: TaskRow): ChatModel =
+    val idx = model.turns.lastIndexWhere(_.subagents.exists(_.id == row.id))
+    if idx >= 0 then model.copy(turns = model.turns.updated(idx, mergeSubagent(model.turns(idx), row)))
+    else if model.turns.nonEmpty then
+      val last = model.turns.size - 1
+      model.copy(turns = model.turns.updated(last, mergeSubagent(model.turns(last), row)))
+    else
+      model.copy(
+        turns = List(TurnView(TurnId("subagent-1"), subagents = List(row))),
+        inSession = true,
+      )
+  end pinSubagent
+
+  private def mergeSubagent(turn: TurnView, row: TaskRow): TurnView =
+    turn.copy(subagents = Tasks.upsert(turn.subagents, row))
 
   private def upsert(model: ChatModel, turnId: TurnId)(patch: TurnView => TurnView): ChatModel =
     val idx = model.turns.indexWhere(_.id == turnId)

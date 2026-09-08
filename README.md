@@ -53,7 +53,7 @@ sbt --no-server ~uiJS/ascentPreview
 # if Metals is not the build server: sbt --server ~uiJS/ascentPreview
 ```
 
-Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `palette`, `mcps`, `queue`, `session-info`, `context`.
+Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `tasks`, `palette`, `mcps`, `queue`, `session-info`, `context`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
@@ -65,10 +65,11 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Follow-along: the transcript shows the file the agent is in. Click it to open; the editor does not jump on its own.
+- Subagents: a compact lifecycle row in the transcript, and a Subagents group in the tasks pane (`Ctrl+G`). No child-transcript attach, no kill, no `/config-agents`.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): subagents, `/view-plan`, stash, `/btw`.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): child-transcript attach, subagent kill, `/config-agents`, `/view-plan`, stash, `/btw`.
 
 ## Shortcuts
 

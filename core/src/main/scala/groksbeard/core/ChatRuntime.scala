@@ -803,12 +803,14 @@ final class ChatRuntime private (
     Tasks.fold(p, current) match
       case None       => ZIO.succeed(false)
       case Some(next) =>
-        val notices = Tasks.notices(current, next)
-        if loading then loadModel = loadModel.copy(tasks = next)
-        else tasks = next
-        val snap = post(HostMsg.Tasks(next))
-        val note = if loading then ZIO.unit else ZIO.foreachDiscard(notices)(post)
-        (snap *> note).as(true)
+        if loading then
+          loadModel = ChatModel.applyMsg(loadModel, HostMsg.Tasks(next))
+          ZIO.succeed(true)
+        else
+          val notices = Tasks.notices(current, next)
+          tasks = next
+          (post(HostMsg.Tasks(next)) *> ZIO.foreachDiscard(notices)(post)).as(true)
+    end match
   end foldTasks
 
   private def doLoop(args: String): UIO[Unit] =

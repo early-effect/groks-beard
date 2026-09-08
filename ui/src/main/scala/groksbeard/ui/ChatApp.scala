@@ -2856,6 +2856,20 @@ object ChatApp:
           when(tail.map(t => t.nonEmpty && !t.startsWith("```")))(E.p(tail)),
         )
       ),
+      when(turn.map(_.subagents.nonEmpty))(
+        E.div(
+          TestId(s"subagents-$id"),
+          forEachSignal(turn.map(_.subagents))(_.id.value) { (sid, _, row) =>
+            E.div(
+              ToolBox,
+              FileRow,
+              TestId(s"subagent-$sid"),
+              E.span(TodoMark, row.map(r => Tasks.mark(r.status))),
+              E.span(row.map(Tasks.lifecycle)),
+            )
+          },
+        )
+      ),
       when(turn.map(t => t.stopReason.exists(_ != groksbeard.core.StopReason.EndTurn)))(
         E.div(StopReason, turn.map(_.stopReason.map(groksbeard.core.StopReason.wire).getOrElse("")))
       ),
@@ -3434,24 +3448,20 @@ object ChatApp:
             when(chat.map(_.tasks.isEmpty))(
               E.p(Copy, TestId("tasks-empty"), "No tasks")
             ),
-            forEach(chat.map(_.tasks.zipWithIndex))(p => s"${p._2}-${p._1.id.value}") { pair =>
-              val (row, i) = pair
-              val key      = Tasks.rowKey(row, i)
+            forEach(chat.map(c => Tasks.grouped(c.tasks)))(g => g._1.getOrElse("rest")) { group =>
+              val (heading, rows) = group
               E.div(
-                FileRow,
-                TestId(s"task-$key"),
-                E.span(TodoMark, Tasks.mark(row.status)),
-                E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
-                if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
-                if row.owned && TaskStatus.isLive(row.status) then
-                  E.button(
-                    Chip,
-                    TestId(s"task-stop-$key"),
-                    A.`type`("button"),
-                    Ev.onClick(_ => stopTask(row.id)),
-                    "Stop",
-                  )
-                else E.span(),
+                ChangesTurn,
+                TestId(heading.fold("tasks-group-rest")(_ => "tasks-group-subagents")),
+                heading match
+                  case Some(title) => E.div(SessionMetaLine, title)
+                  case None        => E.span()
+                ,
+                Arg.ArgsArg(
+                  rows.zipWithIndex.map { (row, i) =>
+                    Arg.ChildArg(renderTaskRow(row, i, stopTask))
+                  }
+                ),
               )
             },
           )
@@ -3459,6 +3469,26 @@ object ChatApp:
       )
     )
   end renderTasks
+
+  private def renderTaskRow(row: TaskRow, index: Int, stopTask: TaskId => UIO[Unit]): ascent.ast.UI[Any] =
+    val key = Tasks.rowKey(row, index)
+    E.div(
+      FileRow,
+      TestId(s"task-$key"),
+      E.span(TodoMark, Tasks.mark(row.status)),
+      E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
+      if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
+      if row.owned && TaskStatus.isLive(row.status) then
+        E.button(
+          Chip,
+          TestId(s"task-stop-$key"),
+          A.`type`("button"),
+          Ev.onClick(_ => stopTask(row.id)),
+          "Stop",
+        )
+      else E.span(),
+    )
+  end renderTaskRow
 
   private def renderChanges(
       bridge: HostBridge,

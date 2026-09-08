@@ -351,6 +351,65 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           })
         }
       },
+      test("x.ai subagent_spawned posts Tasks and finish skips TaskNotice") {
+        chat() { (rt, posted) =>
+          val spawn = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "_x.ai/session/update",
+                Json.Obj(
+                  "sessionId" -> Json.Str("sess_test"),
+                  "update"    -> Json.Obj(
+                    "sessionUpdate" -> Json.Str("subagent_spawned"),
+                    "subagent_id"   -> Json.Str("sub-1"),
+                    "description"   -> Json.Str("Research spawn_subagent"),
+                    "subagent_type" -> Json.Str("explore"),
+                    "model"         -> Json.Str("grok-4.6"),
+                  ),
+                ),
+              )
+            )
+          )
+          val finish = Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "_x.ai/session/update",
+                Json.Obj(
+                  "sessionId" -> Json.Str("sess_test"),
+                  "update"    -> Json.Obj(
+                    "sessionUpdate" -> Json.Str("subagent_finished"),
+                    "subagent_id"   -> Json.Str("sub-1"),
+                    "status"        -> Json.Str("completed"),
+                  ),
+                ),
+              )
+            )
+          )
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(spawn)
+            _    <- rt.ingestData(finish)
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Tasks(rows) =>
+                rows.exists(r => r.id.value == "sub-1" && r.kind == TaskKind.Subagent && r.status == TaskStatus.Running)
+              case _ => false
+            },
+            msgs.exists {
+              case HostMsg.Tasks(rows) =>
+                rows.exists(r => r.id.value == "sub-1" && r.status == TaskStatus.Completed)
+              case _ => false
+            },
+            !msgs.exists {
+              case _: HostMsg.TaskNotice => true
+              case _                     => false
+            },
+          )
+          end for
+        }
+      },
       test("send /rewind intercepts and lists points") {
         chat() { (rt, posted) =>
           for

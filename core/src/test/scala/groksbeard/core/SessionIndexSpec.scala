@@ -240,12 +240,18 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionCommands.intercept("/context").contains(ClientCommand("context")),
           SessionCommands.intercept("/tasks").contains(ClientCommand("tasks")),
           SessionCommands.intercept("/loop 5m check").contains(ClientCommand("loop", "5m check")),
+          SessionCommands
+            .intercept("/fork --worktree try this")
+            .contains(
+              ClientCommand("fork", "--worktree try this")
+            ),
           merged.exists(_.name == "rewind"),
           merged.exists(_.name == "mcps"),
           merged.exists(_.name == "session-info"),
           merged.exists(_.name == "context"),
           merged.exists(_.name == "tasks"),
           merged.exists(_.name == "loop"),
+          merged.exists(_.name == "fork"),
           merged.exists(_.name == "rename"),
           merged.exists(_.name == "delete"),
           merged.exists(_.name == "history"),

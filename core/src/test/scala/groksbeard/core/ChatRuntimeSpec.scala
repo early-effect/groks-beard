@@ -104,6 +104,77 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           }
         }
       } @@ TestAspect.timeout(5.seconds),
+      test("fork copies the session and loads the child") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/fork --no-worktree")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.sessionId == "sess_fork"
+              case _                      => false
+            },
+            msgs.exists {
+              case HostMsg.Transcript(_) => true
+              case _                     => false
+            },
+          )
+        }
+      },
+      test("fork MethodNotFound is CLI does not advertise") {
+        chat(transport = AcpTransport.fake(FakeAgent(rejectFork = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/fork")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Error(Fork.MissingCli, _) => true
+            case _                                 => false
+          })
+        }
+      },
+      test("fork --worktree without capability errors") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/fork --worktree")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Error(Fork.MissingWorktree, _) => true
+            case _                                      => false
+          })
+        }
+      },
+      test("fork without flags asks when worktree methods are advertised") {
+        chat(transport = AcpTransport.fake(FakeAgent(worktreeMeta = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/fork try the async approach")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.ForkAsk("try the async approach") => true
+            case _                                         => false
+          })
+        }
+      },
+      test("fork directive is sent after the child loads") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.send("/fork --no-worktree ping the child")
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.UserMessage(_, "ping the child", _, _) => true
+            case _                                              => false
+          })
+        }
+      },
       test("send posts user, thought, agent, tool, then turnEnd") {
         chat() { (rt, posted) =>
           for

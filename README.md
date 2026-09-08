@@ -60,7 +60,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 ## What you get
 
 - Grok Build CLI only.
-- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`), `/mcps`, `/session-info` (`/status`, `/info`), `/context`.
+- TUI-shaped composer: `@path`, `@path:start-end`, slash from the live CLI, `/new`, `/resume`, `/model`, `/effort`, `/rename`, `/delete`, `/history`, `/copy`, `/export`, `/rewind` (`/undo`), `/fork`, `/mcps`, `/session-info` (`/status`, `/info`), `/context`.
 - Command palette (`Ctrl+P` / `?` in chat): session actions plus MCP servers. Occupancy meter click opens `/context`.
 - Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
@@ -68,7 +68,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): `/fork`.
+Still missing versus the pager (see the internal `ROADMAP.md` gap audit): subagents, `/view-plan`, stash, `/btw`.
 
 ## Shortcuts
 

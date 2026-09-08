@@ -134,6 +134,7 @@ final case class ChatModel(
     rewind: List[RewindPoint] = Nil,
     rewindConfirm: Option[RewindPoint] = None,
     mcps: List[McpServerView] = Nil,
+    forkAsk: Option[String] = None,
 )
 
 object ChatModel:
@@ -209,8 +210,8 @@ object ChatModel:
               HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers |
               _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands |
               _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit |
-              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks |
-              _: HostMsg.TaskNotice =>
+              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
+              _: HostMsg.ForkAsk =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -263,6 +264,8 @@ object ChatModel:
         )
       case HostMsg.SessionLocked(_, message) =>
         model.copy(locked = Some(message), pickerOpen = true, awaitingSession = None)
+      case HostMsg.ForkAsk(directive) =>
+        model.copy(forkAsk = Some(directive), error = None)
       case HostMsg.AvailableCommands(commands) =>
         model.copy(commands = commands)
       case HostMsg.MentionResults(query, files) =>
@@ -356,6 +359,7 @@ object ChatModel:
           runningSinceMs = None,
           rewind = Nil,
           rewindConfirm = None,
+          forkAsk = None,
         )
       case HostMsg.RewindList(points) =>
         val confirm =

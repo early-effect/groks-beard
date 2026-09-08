@@ -125,25 +125,41 @@ final class PreviewBridge extends HostBridge:
               case _         => settings
           case _ => settings
         emit(HostMsg.settings(settings))
-      case WebviewMsg.Send(text) =>
-        emit(HostMsg.UserMessage(TurnId("preview-turn"), text))
-        emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Echo: **$text**"))
-        emit(
-          HostMsg.ToolCall(
-            TurnId("preview-turn"),
-            ToolRow(
-              ToolCallId("call_1"),
-              "Edit Main.scala",
-              ToolKind.Edit,
-              ToolStatus.Completed,
-              additions = Some(2),
-              deletions = Some(1),
-              input = Some(PreviewDiffs.MainPath),
-            ),
-          )
-        )
-        emitChanges()
+      case WebviewMsg.Fork(worktree, directive) =>
+        val where = if worktree then "a worktree" else "this workspace"
+        val seed  = if directive.isEmpty then "Forked" else directive
+        emit(HostMsg.UserMessage(TurnId("preview-turn"), seed))
+        emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Forked into $where."))
         emit(HostMsg.TurnEnd(TurnId("preview-turn"), StopReason.EndTurn))
+      case WebviewMsg.Send(text) =>
+        SessionCommands.intercept(text) match
+          case Some(cmd) if SessionCommands.isFork(cmd.name) =>
+            Fork.parse(cmd.args) match
+              case Left(err) =>
+                emit(HostMsg.Error(err))
+              case Right(args) if args.worktree.isEmpty =>
+                emit(HostMsg.ForkAsk(args.directive.getOrElse("")))
+              case Right(args) =>
+                post(WebviewMsg.Fork(args.worktree.contains(true), args.directive.getOrElse("")))
+          case _ =>
+            emit(HostMsg.UserMessage(TurnId("preview-turn"), text))
+            emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Echo: **$text**"))
+            emit(
+              HostMsg.ToolCall(
+                TurnId("preview-turn"),
+                ToolRow(
+                  ToolCallId("call_1"),
+                  "Edit Main.scala",
+                  ToolKind.Edit,
+                  ToolStatus.Completed,
+                  additions = Some(2),
+                  deletions = Some(1),
+                  input = Some(PreviewDiffs.MainPath),
+                ),
+              )
+            )
+            emitChanges()
+            emit(HostMsg.TurnEnd(TurnId("preview-turn"), StopReason.EndTurn))
       case WebviewMsg.Queue(text) =>
         emit(HostMsg.Queued(List(QueuedPrompt(QueueId("preview-q"), text))))
       case WebviewMsg.QueueSendNow(_) | WebviewMsg.QueueDrop(_) | WebviewMsg.StopTask(_) =>

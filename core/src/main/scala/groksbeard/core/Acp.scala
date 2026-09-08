@@ -34,7 +34,7 @@ final case class InitializeParams(
     clientCapabilities: ClientCapabilities = ClientCapabilities.fake,
     clientInfo: ClientInfo = ClientInfo("groks-beard", "Grok's Beard", "0.2.0"),
 ) derives JsonCodec
-final case class AgentCapabilities(loadSession: Boolean = false) derives JsonCodec
+final case class AgentCapabilities(loadSession: Boolean = false, _meta: Option[Json] = None) derives JsonCodec
 final case class InitializeResult(protocolVersion: Int, agentCapabilities: AgentCapabilities) derives JsonCodec
 
 final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil) derives JsonCodec
@@ -60,6 +60,27 @@ final case class SessionCancelParams(sessionId: SessionId) derives JsonCodec
 
 final case class PromptText(@jsonField("type") tpe: String = "text", text: String) derives JsonCodec
 final case class SessionPromptParams(sessionId: SessionId, prompt: List[PromptText]) derives JsonCodec
+
+final case class ForkSessionParams(
+    sourceSessionId: SessionId,
+    sourceCwd: String,
+    newCwd: String,
+    newSessionId: Option[String] = None,
+    newModelId: Option[String] = None,
+    targetPromptIndex: Option[Int] = None,
+    sessionKind: Option[String] = None,
+    sourceWorkspaceDir: Option[String] = None,
+) derives JsonCodec
+
+final case class ForkSessionResult(
+    newSessionId: SessionId,
+    chatMessagesCopied: Int = 0,
+    updatesCopied: Int = 0,
+    planStateCopied: Boolean = false,
+    newCwd: String = "",
+    parentSessionId: SessionId = SessionId.empty,
+    newModelId: Option[String] = None,
+) derives JsonCodec
 final case class SessionPromptResult(stopReason: StopReason) derives JsonCodec
 
 @jsonDiscriminator("type")

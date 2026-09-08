@@ -112,6 +112,7 @@ enum HostMsg derives JsonCodec:
   @jsonHint("tasks") case Tasks(entries: List[TaskRow] = Nil)
   @jsonHint("toggleTasks") case ToggleTasks
   @jsonHint("taskNotice") case TaskNotice(text: String)
+  @jsonHint("forkAsk") case ForkAsk(directive: String = "")
   @jsonHint("openPalette") case OpenPalette
   @jsonHint("openMcps") case OpenMcps
   @jsonHint("mcpServers") case McpServers(servers: List[McpServerView] = Nil)
@@ -205,5 +206,6 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("rewindTo") case RewindTo(promptIndex: Int)
   @jsonHint("listMcps") case ListMcps
   @jsonHint("setMcpEnabled") case SetMcpEnabled(name: String, enabled: Boolean)
+  @jsonHint("fork") case Fork(worktree: Boolean, directive: String = "")
   @jsonHint("log") case Log(message: String, level: String = "error")
 end WebviewMsg

@@ -67,6 +67,9 @@ final class ChatRuntime private (
   private var tasks                        = List.empty[TaskRow]
   private var loopSeq                      = 0
   private var loopFibers                   = Map.empty[String, Fiber.Runtime[Nothing, Unit]]
+  private var canWorktree                  = false
+  private var sessionCwd                   = cwd
+  private var pendingForkPrompt            = Option.empty[String]
 
   private def exclusive[A](body: UIO[A]): UIO[A] =
     reentrant.get.flatMap { held =>
@@ -279,7 +282,12 @@ final class ChatRuntime private (
     else if SessionCommands.isSessionInfo(name) || SessionCommands.isContext(name) then ZIO.unit
     else if SessionCommands.isTasks(name) then ZIO.unit
     else if SessionCommands.isLoop(name) then post(HostMsg.Error(Tasks.LoopUsage))
+    else if SessionCommands.isFork(name) then doFork(ForkArgs(None, None))
     else ZIO.unit
+  }
+
+  def forkSession(worktree: Boolean, directive: String): UIO[Unit] = exclusive {
+    doFork(ForkArgs(Some(worktree), Option(directive).filter(_.nonEmpty)))
   }
 
   def stopTask(id: TaskId): UIO[Unit] = exclusive(doStopTask(id))
@@ -367,6 +375,10 @@ final class ChatRuntime private (
           ZIO.unit
         case Some(cmd) if SessionCommands.isLoop(cmd.name) =>
           doLoop(cmd.args)
+        case Some(cmd) if SessionCommands.isFork(cmd.name) =>
+          Fork.parse(cmd.args) match
+            case Left(err)   => post(HostMsg.Error(err))
+            case Right(args) => doFork(args)
         case _ =>
           val chosen = PromptChip.chipsForSend(chips, activeFile(), settingsState.includeActiveFileByDefault)
           if trimmed.isEmpty && chosen.isEmpty then ZIO.unit
@@ -543,7 +555,7 @@ final class ChatRuntime private (
     leaveCurrent *> stopLoops *> ZIO.suspendSucceed {
       resetLocal()
       sessionId = None
-      post(HostMsg.ClearTranscript) *> rpc("session/new", SessionNewParams(cwd).asJson)
+      post(HostMsg.ClearTranscript) *> rpc("session/new", SessionNewParams(sessionCwd).asJson)
     }
 
   private def doResume(id: SessionId): UIO[Unit] =
@@ -561,7 +573,7 @@ final class ChatRuntime private (
         loadCleared = true
         pendingResume = Some(id)
         val load =
-          if initialized then rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
+          if initialized then rpc("session/load", SessionLoadParams(id, sessionCwd).asJson, loadSessionId = Some(id))
           else ZIO.unit
         post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *> load
       }
@@ -814,6 +826,61 @@ final class ChatRuntime private (
         tasks = Tasks.upsert(tasks, row)
         post(HostMsg.Tasks(tasks)) *> startLoop(id, spec)
 
+  private def doFork(args: ForkArgs): UIO[Unit] =
+    sessionId.filter(_.nonEmpty) match
+      case None    => post(HostMsg.Error(Fork.NoSession))
+      case Some(_) =>
+        args.worktree match
+          case None if canWorktree =>
+            post(HostMsg.ForkAsk(args.directive.getOrElse("")))
+          case None =>
+            runFork(worktree = false, args.directive)
+          case Some(true) if !canWorktree =>
+            post(HostMsg.Error(Fork.MissingWorktree))
+          case Some(w) =>
+            runFork(w, args.directive)
+
+  private def runFork(worktree: Boolean, directive: Option[String]): UIO[Unit] =
+    sessionId.filter(_.nonEmpty) match
+      case None      => post(HostMsg.Error(Fork.NoSession))
+      case Some(sid) =>
+        pendingForkPrompt = directive
+        rpc(
+          "_x.ai/session/fork",
+          ForkSessionParams(
+            sourceSessionId = sid,
+            sourceCwd = sessionCwd,
+            newCwd = sessionCwd,
+            sessionKind = Some(if worktree then "worktree" else "fork"),
+            sourceWorkspaceDir = if worktree then Some(cwd) else None,
+          ).asJson,
+        )
+
+  private def ingestFork(result: Option[Json], error: Option[RpcError]): UIO[Unit] =
+    error match
+      case Some(err) if err.code == Rpc.MethodNotFound =>
+        pendingForkPrompt = None
+        post(HostMsg.Error(Fork.MissingCli))
+      case Some(err) =>
+        pendingForkPrompt = None
+        post(HostMsg.Error(err.message))
+      case None =>
+        result.flatMap(_.as[ForkSessionResult].toOption) match
+          case None =>
+            pendingForkPrompt = None
+            post(HostMsg.Error("Fork failed"))
+          case Some(forked) =>
+            if forked.newCwd.nonEmpty then sessionCwd = forked.newCwd
+            doResume(forked.newSessionId)
+
+  private def sendForkPrompt: UIO[Unit] =
+    pendingForkPrompt match
+      case None       => ZIO.unit
+      case Some(text) =>
+        pendingForkPrompt = None
+        if text.isEmpty then ZIO.unit
+        else runTurn(text, Nil)
+
   private def startLoop(id: TaskId, spec: LoopSpec): UIO[Unit] =
     def fire: UIO[Unit] =
       exclusive(
@@ -978,14 +1045,15 @@ final class ChatRuntime private (
       val method = pendingMethod.getOrElse(id, "")
       pendingMethod -= id
       val errPost =
-        if method == "session/load" || method.endsWith("rewind/points") then ZIO.unit
+        if method == "session/load" || method.endsWith("rewind/points") || method.endsWith("session/fork") then ZIO.unit
         else error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
       errPost *> (method match
         case "initialize" =>
           initialized = true
+          canWorktree = result.exists(Fork.offersWorktree)
           pendingResume match
-            case Some(id) => rpc("session/load", SessionLoadParams(id, cwd).asJson, loadSessionId = Some(id))
-            case None     => rpc("session/new", SessionNewParams(cwd).asJson)
+            case Some(id) => rpc("session/load", SessionLoadParams(id, sessionCwd).asJson, loadSessionId = Some(id))
+            case None     => rpc("session/new", SessionNewParams(sessionCwd).asJson)
         case "session/new" =>
           result match
             case None       => ZIO.unit
@@ -1011,6 +1079,8 @@ final class ChatRuntime private (
         case m if m.endsWith("rewind/points") =>
           if error.isDefined then ZIO.unit
           else post(HostMsg.RewindList(Rewind.decodePoints(result.getOrElse(Json.Null))))
+        case m if m.endsWith("session/fork") =>
+          ingestFork(result, error)
         case m if m.endsWith("rewind/execute") =>
           val idx = pendingRewind
           pendingRewind = None
@@ -1047,7 +1117,8 @@ final class ChatRuntime private (
           case Some(err) =>
             val kind = SessionLoad.classify(err.message)
             val sid  = wanted.getOrElse(SessionId.empty)
-            post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
+            ZIO.succeed { pendingForkPrompt = None } *>
+              post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
               (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
           case None =>
             val clear       = if !loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
@@ -1068,7 +1139,7 @@ final class ChatRuntime private (
                   empty.markHasHistory(sessionId.getOrElse(loadId))
                 }
               } *> postMeta *> post(HostMsg.settings(settingsState)) *> doPostList(open = false) *>
-              (if pendingQueue.nonEmpty then drainQueue else ZIO.unit)
+              (if pendingQueue.nonEmpty then drainQueue else ZIO.unit) *> sendForkPrompt
         end match
       end if
     }

@@ -180,8 +180,11 @@ final class ChatRuntime private (
       )
   }
 
-  def mentionPick(path: String, absPath: String): UIO[Unit] =
-    exclusive(doAddChip(PromptChip(path, absPath, source = ChipSource.Mention)))
+  def mentionPick(path: String, absPath: String): UIO[Unit] = exclusive {
+    ZIO.succeed {
+      chips = PromptChip.upsert(chips, PromptChip(path, absPath, source = ChipSource.Mention))
+    }
+  }
 
   def permissionChoice(requestId: RequestId, optionId: String): UIO[Unit] = exclusive {
     respond(

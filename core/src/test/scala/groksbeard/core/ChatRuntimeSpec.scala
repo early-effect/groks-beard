@@ -942,6 +942,40 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("mentionPick stores the chip without echoing ComposerChip") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.mentionPick("src/Main.scala", "/repo/src/Main.scala")
+            echo <- posted.get
+            _    <- rt.send("look")
+            msgs <- posted.get
+          yield assertTrue(
+            !echo.exists {
+              case _: HostMsg.ComposerChip => true
+              case _                       => false
+            },
+            msgs.exists {
+              case HostMsg.UserMessage(_, "look", chips, _) => chips.exists(_.path == "src/Main.scala")
+              case _                                        => false
+            },
+          )
+        }
+      },
+      test("addChip posts ComposerChip so the editor selection appears in chat") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.addChip(PromptChip.fromFile("/repo/src/Foo.scala", Some("/repo")))
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.ComposerChip(path, _, _, _, _) => path == "src/Foo.scala"
+            case _                                      => false
+          })
+        }
+      },
       test("mentionQuery uses the search port") {
         val files = List(MentionFile("src/Main.scala", "/repo/src/Main.scala"))
         chat(searchFiles = q => if q == "Main" then files else Nil) { (rt, posted) =>

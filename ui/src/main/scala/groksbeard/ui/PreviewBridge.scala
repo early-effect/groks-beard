@@ -168,8 +168,6 @@ final class PreviewBridge extends HostBridge:
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
         emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.EndTurn))
-      case WebviewMsg.MentionPick(path, absPath) =>
-        emit(HostMsg.chip(PromptChip(path, absPath, source = ChipSource.Mention)))
       case WebviewMsg.SlashPick(name) =>
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
         else if SessionCommands.isResume(name) || SessionCommands.isHome(name) then post(WebviewMsg.OpenSessionPicker)
@@ -237,7 +235,8 @@ final class PreviewBridge extends HostBridge:
           emitMeta(SessionId.empty, "Grok's Beard")
           emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
         else emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
-      case WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
+      case WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection |
+          WebviewMsg.RemoveChip(_, _, _) =>
         ()
       case WebviewMsg.OpenFile(_, _) =>
         ()

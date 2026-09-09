@@ -11,7 +11,7 @@ import zio.test.*
 object ChatChromeSpec extends ZIOSpecDefault:
 
   override def aspects =
-    Chunk(TestAspect.withLiveClock, TestAspect.timeout(30.seconds))
+    Chunk(TestAspect.sequential, TestAspect.withLiveClock, TestAspect.timeout(30.seconds))
 
   def spec =
     suite("ChatChrome")(

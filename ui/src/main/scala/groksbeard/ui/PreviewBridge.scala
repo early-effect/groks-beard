@@ -61,6 +61,9 @@ final class PreviewBridge extends HostBridge:
   private var currentId  = SessionId.empty
   private var pickerOpen = false
   private var mcps       = PreviewScenes.mcps
+  private var uiTheme    = "vscode"
+  private var uiCompact  = false
+  private var uiVim      = false
 
   def post(msg: WebviewMsg): Unit =
     msg match
@@ -131,7 +134,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.UserMessage(TurnId("preview-turn"), seed))
         emit(HostMsg.AgentChunk(TurnId("preview-turn"), s"Forked into $where."))
         emit(HostMsg.TurnEnd(TurnId("preview-turn"), StopReason.EndTurn))
-      case WebviewMsg.Send(text) =>
+      case WebviewMsg.Send(text, _) =>
         SessionCommands.intercept(text) match
           case Some(cmd) if SessionCommands.isFork(cmd.name) =>
             Fork.parse(cmd.args) match
@@ -160,10 +163,12 @@ final class PreviewBridge extends HostBridge:
             )
             emitChanges()
             emit(HostMsg.TurnEnd(TurnId("preview-turn"), StopReason.EndTurn))
-      case WebviewMsg.Queue(text) =>
+      case WebviewMsg.Queue(text, _) =>
         emit(HostMsg.Queued(List(QueuedPrompt(QueueId("preview-q"), text))))
-      case WebviewMsg.QueueSendNow(_) | WebviewMsg.QueueDrop(_) | WebviewMsg.StopTask(_) =>
+      case WebviewMsg.QueueSendNow(_) | WebviewMsg.QueueDrop(_) =>
         ()
+      case WebviewMsg.StopTask(id) =>
+        emit(HostMsg.Tasks(List(TaskRow(id, TaskKind.Subagent, TaskStatus.Cancelled, "stopped"))))
       case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionSubmit(_, _) |
           WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
           WebviewMsg.Cancel =>
@@ -190,7 +195,7 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.ClearTranscript)
         emitMeta(SessionId.empty, "Grok's Beard")
         emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
-      case WebviewMsg.ResumeSession(id) =>
+      case WebviewMsg.ResumeSession(id, _) =>
         currentId = id
         pickerOpen = false
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
@@ -270,6 +275,100 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.Copied(TranscriptCopy.toast(path, conversation)))
       case WebviewMsg.Log(message, _) =>
         emit(HostMsg.Error(message, Some(Wire.Decode)))
+      case WebviewMsg.Cancel =>
+        emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
+        emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))
+      case WebviewMsg.CancelTurnChoice(_, keep) =>
+        emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
+        emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))
+        if !keep then emit(HostMsg.Tasks(Nil))
+      case WebviewMsg.AttachChild(id) =>
+        emit(
+          HostMsg.ChildTranscript(
+            SessionId(id.value),
+            List(
+              TurnView(
+                TurnId("child-t"),
+                user = Some(TurnUser("research this")),
+                agent = "Child is working.",
+                stopReason = Some(StopReason.EndTurn),
+              )
+            ),
+          )
+        )
+      case WebviewMsg.DetachChild             => ()
+      case WebviewMsg.SteerChild(id, text, _) =>
+        emit(
+          HostMsg.ChildTranscript(
+            SessionId(id.value),
+            List(
+              TurnView(
+                TurnId("child-t"),
+                user = Some(TurnUser("research this")),
+                agent = "Child is working.",
+                stopReason = Some(StopReason.EndTurn),
+              ),
+              TurnView(
+                TurnId("child-steer"),
+                user = Some(TurnUser(text)),
+                agent = s"Heard: $text",
+                stopReason = Some(StopReason.EndTurn),
+              ),
+            ),
+          )
+        )
+      case WebviewMsg.ViewPlan =>
+        emit(HostMsg.PlanView("# Plan\n\nUse Metals for compile."))
+      case WebviewMsg.OpenAgents =>
+        emit(HostMsg.Agents(AgentsCatalog.builtins, List(PersonaDef("concise", "Be concise."))))
+      case WebviewMsg.OpenDashboard =>
+        emit(
+          HostMsg.Dashboard(
+            List(DashRow(SessionId("disk-1"), "Effect plan", "/repo", "idle", "Continue the plan", 10))
+          )
+        )
+      case WebviewMsg.OpenWorkflows =>
+        emit(HostMsg.Workflows(List(WorkflowRun("review-changes", "verify", "running", "2/4"))))
+      case WebviewMsg.OpenDoctor =>
+        emit(
+          HostMsg.DoctorReport(
+            Doctor.collect(
+              Some("/usr/bin/grok"),
+              Some("1.0.24"),
+              true,
+              false,
+              true,
+              true,
+              true,
+              "/repo",
+              2,
+              "ready",
+              Some("node"),
+            )
+          )
+        )
+      case WebviewMsg.OpenTheme => ()
+      case WebviewMsg.Btw(text) =>
+        emit(HostMsg.Btw(s"Aside: $text\n\nNoted.", done = true))
+      case WebviewMsg.SetTheme(id) =>
+        uiTheme = Theme.canonicalize(id)
+        emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
+      case WebviewMsg.ToggleCompact =>
+        uiCompact = !uiCompact
+        emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
+      case WebviewMsg.ToggleVim =>
+        uiVim = !uiVim
+        emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
+      case WebviewMsg.AddImage(_, _, _) | WebviewMsg.RemoveImage(_) =>
+        ()
+      case WebviewMsg.PersistConfig(table, key, value) =>
+        if table == "ui" then
+          key match
+            case "theme"        => uiTheme = Theme.canonicalize(value)
+            case "compact_mode" => uiCompact = value == "true"
+            case "vim_mode"     => uiVim = value == "true"
+            case _              => ()
+          emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f

@@ -11,6 +11,7 @@ final class FakeAgent(
     hangPrompt: Boolean = false,
     rejectFork: Boolean = false,
     worktreeMeta: Boolean = false,
+    omitConfigOptions: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -29,7 +30,14 @@ final class FakeAgent(
               loadSession = true,
               _meta = Some(Json.Obj("x.ai/git/worktree/create" -> Json.Bool(true))),
             )
-          else AgentCapabilities(loadSession = true)
+          else
+            AgentCapabilities(
+              loadSession = true,
+              promptCapabilities = Some(PromptCapabilities(embeddedContext = true, image = false)),
+              sessionCapabilities = Some(
+                Json.Obj("list" -> Json.Obj(), "resume" -> Json.Obj(), "close" -> Json.Obj())
+              ),
+            )
         List(Rpc.ok(id, InitializeResult(1, caps).asJson))
       case "session/new" =>
         List(
@@ -69,6 +77,33 @@ final class FakeAgent(
                   ),
                 )
               ),
+              configOptions =
+                if omitConfigOptions then Nil
+                else
+                  List(
+                    ConfigOption(
+                      id = "model",
+                      name = "Model",
+                      category = Some("model"),
+                      currentValue = Some("grok-4.6"),
+                      options = List(
+                        ConfigSelect("grok-4.6", Some("Grok 4.6")),
+                        ConfigSelect("grok-code-fast-1", Some("Grok Code Fast")),
+                      ),
+                    ),
+                    ConfigOption(
+                      id = "reasoning_effort",
+                      name = "Reasoning",
+                      category = Some("thought_level"),
+                      currentValue = Some("high"),
+                      options = List(
+                        ConfigSelect("low"),
+                        ConfigSelect("medium"),
+                        ConfigSelect("high"),
+                        ConfigSelect("xhigh"),
+                      ),
+                    ),
+                  ),
             ).asJson,
           ),
         )
@@ -91,6 +126,25 @@ final class FakeAgent(
             Rpc.ok(id, SessionLoadResult(sid).asJson),
           )
       case "session/set_model" =>
+        List(Rpc.ok(id, EmptyObject().asJson))
+      case "session/set_config_option" =>
+        List(Rpc.ok(id, Json.Obj("configOptions" -> Json.Arr())))
+      case "session/list" =>
+        List(
+          Rpc.ok(
+            id,
+            Json.Obj(
+              "sessions" -> Json.Arr(
+                Json.Obj(
+                  "sessionId" -> Json.Str(sessionId.value),
+                  "title"     -> Json.Str("Fake session"),
+                  "cwd"       -> Json.Str("."),
+                )
+              )
+            ),
+          )
+        )
+      case "session/close" | "session/resume" | "x.ai/interject" | "_x.ai/interject" =>
         List(Rpc.ok(id, EmptyObject().asJson))
       case "session/set_mode" =>
         val result = Rpc.ok(id, EmptyObject().asJson)

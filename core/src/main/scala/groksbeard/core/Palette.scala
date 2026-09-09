@@ -8,6 +8,14 @@ enum PaletteKind:
   case Settings
   case SessionInfo
   case Context
+  case Agents
+  case Dashboard
+  case PlanView
+  case Workflows
+  case Doctor
+  case Theme
+  case Voice
+end PaletteKind
 
 final case class PaletteRow(
     id: String,
@@ -56,12 +64,47 @@ object Palette:
       PaletteKind.Context,
     )
 
+  val AgentsRow: PaletteRow =
+    PaletteRow("config-agents", "Manage Agents", "/config-agents", "Agent definitions and personas", PaletteKind.Agents)
+
+  val DashboardRow: PaletteRow =
+    PaletteRow("dashboard", "Dashboard", "/dashboard", "Live roster of sessions", PaletteKind.Dashboard)
+
+  val PlanViewRow: PaletteRow =
+    PaletteRow("view-plan", "View plan", "/view-plan", "Open the saved plan", PaletteKind.PlanView)
+
+  val WorkflowsRow: PaletteRow =
+    PaletteRow("workflow-runs", "Workflow runs", "/workflow runs", "Live workflow runs", PaletteKind.Workflows)
+
+  val DoctorRow: PaletteRow =
+    PaletteRow("doctor", "Doctor", "/doctor", "Check this session", PaletteKind.Doctor)
+
+  val ThemeRow: PaletteRow =
+    PaletteRow("theme", "Theme", "/theme", "Color theme", PaletteKind.Theme)
+
+  val VoiceRow: PaletteRow =
+    PaletteRow("voice", "Voice", "/voice", "Dictate into the composer", PaletteKind.Voice)
+
   def rows(commands: List[SlashCommand]): List[PaletteRow] =
     val advertised = SessionCommands.merge(commands).map(slashRow)
-    val extra      = List(McpsRow, TodosRow, TasksRow, SettingsRow).filterNot(r => advertised.exists(_.id == r.id))
-    val merged     = advertised ++ extra
-    val seen       = scala.collection.mutable.LinkedHashSet.empty[String]
-    val unique     = merged.filter { row =>
+    val extra      =
+      List(
+        McpsRow,
+        TodosRow,
+        TasksRow,
+        SettingsRow,
+        AgentsRow,
+        DashboardRow,
+        PlanViewRow,
+        WorkflowsRow,
+        DoctorRow,
+        ThemeRow,
+        VoiceRow,
+      )
+        .filterNot(r => advertised.exists(_.id == r.id))
+    val merged = advertised ++ extra
+    val seen   = scala.collection.mutable.LinkedHashSet.empty[String]
+    val unique = merged.filter { row =>
       if Aliases.contains(row.id) || !seen.add(row.id) then false
       else true
     }
@@ -93,6 +136,12 @@ object Palette:
       else if SessionCommands.isSessionInfo(cmd.name) then PaletteKind.SessionInfo
       else if SessionCommands.isContext(cmd.name) then PaletteKind.Context
       else if SessionCommands.isTasks(cmd.name) then PaletteKind.Tasks
+      else if SessionCommands.isConfigAgents(cmd.name) || SessionCommands.isPersonas(cmd.name) then PaletteKind.Agents
+      else if SessionCommands.isDashboard(cmd.name) then PaletteKind.Dashboard
+      else if SessionCommands.isViewPlan(cmd.name) then PaletteKind.PlanView
+      else if SessionCommands.isDoctor(cmd.name) then PaletteKind.Doctor
+      else if SessionCommands.isTheme(cmd.name) then PaletteKind.Theme
+      else if SessionCommands.isVoice(cmd.name) then PaletteKind.Voice
       else PaletteKind.Slash(cmd.name)
     val label =
       if SessionCommands.isMcps(cmd.name) then McpsRow.label

@@ -16,6 +16,12 @@ trait SessionRepo:
   def delete(id: SessionId): BeardError.Result[Boolean]
   def scheduleEmptyDelete(id: SessionId): UIO[Unit]
   def plan(id: SessionId): BeardError.Result[List[TodoEntry]]
+  def planMarkdown(id: SessionId): BeardError.Result[String]
+  def agents: BeardError.Result[List[AgentDef]]
+  def personas: BeardError.Result[List[PersonaDef]]
+  def readConfig: BeardError.Result[String]
+  def writeConfig(text: String): BeardError.Result[Unit]
+end SessionRepo
 
 object SessionRepo:
   def of(fs: SessionFs, home: String, cwd: String): ULayer[SessionRepo] =
@@ -35,7 +41,30 @@ object SessionRepo:
           fs.deleteTree(path).tapError(e => ZIO.logWarning(e.message)).ignore).forkDaemon.unit
 
       def plan(id: SessionId): BeardError.Result[List[TodoEntry]] =
-        SessionIndex.readPlan(fs, home, cwd, id))
+        SessionIndex.readPlan(fs, home, cwd, id)
+
+      def planMarkdown(id: SessionId): BeardError.Result[String] =
+        SessionIndex.readPlanMarkdown(fs, home, cwd, id)
+
+      def agents: BeardError.Result[List[AgentDef]] =
+        val user = SessionIndex.join(home, "agents")
+        val proj = SessionIndex.join(SessionIndex.join(cwd, ".grok"), "agents")
+        SessionIndex.listMarkdownAgents(fs, proj).flatMap { p =>
+          SessionIndex.listMarkdownAgents(fs, user).map(u => AgentsCatalog.merge(p ++ u))
+        }
+
+      def personas: BeardError.Result[List[PersonaDef]] =
+        val user = SessionIndex.join(home, "personas")
+        val proj = SessionIndex.join(SessionIndex.join(cwd, ".grok"), "personas")
+        SessionIndex.listTomlPersonas(fs, proj).flatMap { p =>
+          SessionIndex.listTomlPersonas(fs, user).map(u => p ++ u)
+        }
+
+      def readConfig: BeardError.Result[String] =
+        fs.readText(ConfigToml.userPath(home)).map(_.getOrElse(""))
+
+      def writeConfig(text: String): BeardError.Result[Unit] =
+        fs.writeText(ConfigToml.userPath(home), text))
 
   def test(
       listRows: () => List[SessionRow] = () => Nil,
@@ -43,6 +72,11 @@ object SessionRepo:
       onDelete: SessionId => Boolean = _ => false,
       onEmptyDelete: SessionId => Unit = _ => (),
       onPlan: SessionId => List[TodoEntry] = _ => Nil,
+      onPlanMarkdown: SessionId => String = _ => "",
+      onAgents: () => List[AgentDef] = () => AgentsCatalog.builtins,
+      onPersonas: () => List[PersonaDef] = () => Nil,
+      onReadConfig: () => String = () => "",
+      onWriteConfig: String => Unit = _ => (),
   ): ULayer[SessionRepo] =
     ZLayer.succeed(new SessionRepo:
       def list: BeardError.Result[List[SessionRow]]                                  = ZIO.succeed(listRows())
@@ -50,7 +84,12 @@ object SessionRepo:
         ZIO.succeed(onRename(id, op))
       def delete(id: SessionId): BeardError.Result[Boolean]       = ZIO.succeed(onDelete(id))
       def scheduleEmptyDelete(id: SessionId): UIO[Unit]           = ZIO.succeed(onEmptyDelete(id))
-      def plan(id: SessionId): BeardError.Result[List[TodoEntry]] = ZIO.succeed(onPlan(id)))
+      def plan(id: SessionId): BeardError.Result[List[TodoEntry]] = ZIO.succeed(onPlan(id))
+      def planMarkdown(id: SessionId): BeardError.Result[String]  = ZIO.succeed(onPlanMarkdown(id))
+      def agents: BeardError.Result[List[AgentDef]]               = ZIO.succeed(onAgents())
+      def personas: BeardError.Result[List[PersonaDef]]           = ZIO.succeed(onPersonas())
+      def readConfig: BeardError.Result[String]                   = ZIO.succeed(onReadConfig())
+      def writeConfig(text: String): BeardError.Result[Unit]      = ZIO.succeed(onWriteConfig(text)))
 end SessionRepo
 
 trait Mentions:
@@ -154,7 +193,7 @@ object TranscriptOut:
 end TranscriptOut
 
 object ChatEnv:
-  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals & Mcps
+  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals & Mcps & UiPrefs
 
   def test(
       post: HostMsg => UIO[Unit] = _ => ZIO.unit,
@@ -173,22 +212,35 @@ object ChatEnv:
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
       onCopy: (String, Option[String], Boolean, Boolean) => CopyResult = (text, path, _, conversation) =>
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
+      onReadConfig: () => String = () => "",
+      onWriteConfig: String => Unit = _ => (),
       terminals: ULayer[Terminals] = Terminals.test(),
       mcps: ULayer[Mcps] = Mcps.none,
   ): ULayer[Env] =
-    HostOut.layer(post) ++
-      SessionRepo.test(listSessions, renameOnDisk, deleteOnDisk, scheduleEmptyDelete, planOnDisk) ++
-      Mentions.layer(q => ZIO.succeed(searchFiles(q))) ++
-      ChangesPersist.layer(sets => persistChanges(sets)) ++
-      ReviewOps.layer(
-        read = p => ZIO.succeed(readDisk(p)),
-        openDiffs = (h, d) => ZIO.succeed(openNativeDiffs(h, d)),
-        undo = m => ZIO.succeed(applyUndo(m)),
-        dirty = p => ZIO.succeed(confirmDirty(p)),
-        storeChanged = ZIO.succeed(onStoreChange()),
-        onFollow = (p, l) => ZIO.succeed(followFile(p, l)),
-      ) ++
-      TranscriptOut.test(onCopy) ++
-      terminals ++
-      mcps
+    val base =
+      HostOut.layer(post) ++
+        SessionRepo.test(
+          listSessions,
+          renameOnDisk,
+          deleteOnDisk,
+          scheduleEmptyDelete,
+          planOnDisk,
+          onReadConfig = onReadConfig,
+          onWriteConfig = onWriteConfig,
+        ) ++
+        Mentions.layer(q => ZIO.succeed(searchFiles(q))) ++
+        ChangesPersist.layer(sets => persistChanges(sets)) ++
+        ReviewOps.layer(
+          read = p => ZIO.succeed(readDisk(p)),
+          openDiffs = (h, d) => ZIO.succeed(openNativeDiffs(h, d)),
+          undo = m => ZIO.succeed(applyUndo(m)),
+          dirty = p => ZIO.succeed(confirmDirty(p)),
+          storeChanged = ZIO.succeed(onStoreChange()),
+          onFollow = (p, l) => ZIO.succeed(followFile(p, l)),
+        ) ++
+        TranscriptOut.test(onCopy) ++
+        terminals ++
+        mcps
+    base >+> UiPrefs.layer
+  end test
 end ChatEnv

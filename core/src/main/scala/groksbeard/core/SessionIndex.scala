@@ -75,6 +75,30 @@ object SessionIndex:
           text.fromJson[Json].toOption.map(Todos.fromPlanJson).getOrElse(Nil)
       }
 
+  def readPlanMarkdown(fs: SessionFs, home: String, cwd: String, sessionId: SessionId): BeardError.Result[String] =
+    if sessionId.isEmpty then ZIO.succeed("")
+    else fs.readText(join(sessionPath(home, cwd, sessionId), "plan.md")).map(_.getOrElse(""))
+
+  def listMarkdownAgents(fs: SessionFs, dir: String): BeardError.Result[List[AgentDef]] =
+    fs.listNames(dir).orElse(ZIO.succeed(Nil)).flatMap { names =>
+      ZIO
+        .foreach(names.filter(_.toLowerCase.endsWith(".md"))) { name =>
+          val path = join(dir, name)
+          fs.readText(path).map(_.flatMap(t => AgentsCatalog.parseAgent(path, t)))
+        }
+        .map(_.flatten)
+    }
+
+  def listTomlPersonas(fs: SessionFs, dir: String): BeardError.Result[List[PersonaDef]] =
+    fs.listNames(dir).orElse(ZIO.succeed(Nil)).flatMap { names =>
+      ZIO
+        .foreach(names.filter(_.toLowerCase.endsWith(".toml"))) { name =>
+          val path = join(dir, name)
+          fs.readText(path).map(_.flatMap(t => AgentsCatalog.parsePersona(path, t)))
+        }
+        .map(_.flatten)
+    }
+
   def activityMs(stat: SessionActivity): Long =
     stat.updatesMtimeMs.orElse(stat.eventsMtimeMs).orElse(stat.summaryMtimeMs).getOrElse(0L)
 

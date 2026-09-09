@@ -157,6 +157,28 @@ lazy val ui = (projectMatrix in file("ui"))
           javaTimePolyfill,
           MyVersions.chekhovUi,
           chekhovBrowser := "firefox",
+          chekhovInstall := Def.uncached {
+            val log      = streams.value.log
+            val browsers = chekhovBrowsers.value.toList
+            val names    = chekhov.protocol.PinnedPlaywright.installPackageNames(browsers)
+            def ok(cli: java.nio.file.Path): Unit =
+              log.info(
+                s"Pinned Playwright ${chekhov.protocol.PinnedPlaywright.version} CLI: $cli (${names.mkString(", ")})"
+              )
+            chekhov.protocol.PinnedPlaywright.install(
+              browsers = browsers,
+              log      = msg => log.info(msg),
+            ) match
+              case Right(cli) => ok(cli)
+              case Left(err)  =>
+                log.warn(s"chekhovInstall with install-deps failed: $err; installing browsers only")
+                val cli  = chekhov.protocol.PinnedPlaywright.cliInCache()
+                val node = sys.env.getOrElse("PLAYWRIGHT_NODEJS_PATH", "node")
+                val cmd  = Seq(node, cli.toString, "install") ++ names
+                val code = scala.sys.process.Process(cmd).!
+                if code != 0 then sys.error(s"chekhov: ${cmd.mkString(" ")} exited $code")
+                else ok(cli)
+          },
           Test / fork    := false,
           Test / jsEnv   := Def.uncached(chekhovJSEnv.value),
           Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),

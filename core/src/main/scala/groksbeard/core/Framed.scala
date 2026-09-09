@@ -10,7 +10,7 @@ final class Framed(val state: SessionState):
     msg match
       case Rpc.Request(id, method, params) =>
         val mode =
-          if method == "session/set_mode" then params.as[SessionSetModeParams].toOption.map(_.modeId)
+          if AcpMethod.is(method, AcpMethod.SessionSetMode) then params.as[SessionSetModeParams].toOption.map(_.modeId)
           else None
         pending = pending.updated(RpcId.key(id), (method, mode))
       case _ => ()
@@ -36,8 +36,9 @@ final class Framed(val state: SessionState):
         val ok = error.isEmpty
         recorded.foreach { (method, mode) =>
           if ok then
-            if SessionState.CommitBeforeContinue.contains(method) then mode.foreach(state.commitMode)
-            else if method == "session/new" || method == "session/load" then
+            val op = AcpMethod.parse(method)
+            if op.exists(SessionState.CommitBeforeContinue.contains) then mode.foreach(state.commitMode)
+            else if op.contains(AcpMethod.SessionNew) || op.contains(AcpMethod.SessionLoad) then
               result.flatMap(SessionState.modeIdFromSessionResult).foreach(state.commitMode)
         }
       case Rpc.Notify(method, params) if SessionUpdate.isSessionNotify(method) =>

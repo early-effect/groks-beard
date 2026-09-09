@@ -788,6 +788,10 @@ object ChatApp:
           borderBottom(Border.solid(1.px, widgetBorder)),
           verticalAlign.top,
         ),
+        Selector(
+          " a",
+          color(orange),
+        ),
       )
 
   object ThoughtBody
@@ -2911,7 +2915,7 @@ object ChatApp:
           AgentMsg,
           TestId(s"agent-$id"),
           forEach(parts.map(_._1))(_._1) { pair =>
-            ChatMarkdown.block(pair._2)
+            ChatMarkdown.block(pair._2, pair._1)
           },
           when(tail.map(_.startsWith("```")))(E.pre(E.code(tail))),
           when(tail.map(t => t.nonEmpty && !t.startsWith("```")))(E.p(tail)),
@@ -3098,7 +3102,7 @@ object ChatApp:
         E.div(
           Card,
           TestId("plan"),
-          E.pre(card.planMarkdown),
+          E.div(AgentMsg, TestId("plan-md"), ChatMarkdown.render(card.planMarkdown)),
           E.button(
             Send,
             TestId("plan-approved"),

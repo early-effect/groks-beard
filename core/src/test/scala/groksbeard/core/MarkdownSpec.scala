@@ -19,8 +19,8 @@ object MarkdownSpec extends ZIOSpecDefault:
             || fallback | 3.8.4 |
             |""".stripMargin
         )
-        val quote = blocks.collectFirst { case Markdown.Block.Quote(in) =>
-          in.collect { case Markdown.Inline.Text(t) => t }.mkString
+        val quote = blocks.collectFirst { case Markdown.Block.Quote(paras) =>
+          paras.flatten.collect { case Markdown.Inline.Text(t) => t }.mkString
         }
         val ordered = blocks.collectFirst { case Markdown.Block.Ordered(items) => items.size }
         val table   = blocks.collectFirst { case Markdown.Block.Table(h, rows) => (h.size, rows.size) }
@@ -28,6 +28,35 @@ object MarkdownSpec extends ZIOSpecDefault:
           quote.contains("first second"),
           ordered.contains(2),
           table.contains((2, 2)),
+        )
+      },
+      test("quote blank lines become paragraphs") {
+        val blocks = Markdown.parse("> first\n>\n> second")
+        val paras  = blocks.collectFirst { case Markdown.Block.Quote(p) => p.size }
+        assertTrue(paras.contains(2))
+      },
+      test("plus bullets nest under a parent item") {
+        val blocks = Markdown.parse("- parent\n  - child\n  + also\n- sibling")
+        val nested = blocks.collectFirst { case Markdown.Block.Bullet(items) =>
+          (items.size, items.head.children.collect { case Markdown.Block.Bullet(ch) => ch.size })
+        }
+        assertTrue(nested.contains((2, List(2))))
+      },
+      test("a GFM table does not need a leading pipe") {
+        val blocks = Markdown.parse("What | Value\n--- | ---\nmodule | 3.9.0")
+        val table  = blocks.collectFirst { case Markdown.Block.Table(h, rows) => (h.size, rows.size) }
+        assertTrue(table.contains((2, 1)))
+      },
+      test("streamParts commits a closed table before a trailing blank") {
+        val (done, tail) = Markdown.streamParts("Intro\n\nWhat | Value\n--- | ---\nmodule | 3.9.0")
+        val table        = done.collectFirst { case Markdown.Block.Table(h, rows) => (h.size, rows.size) }
+        assertTrue(
+          done.exists {
+            case Markdown.Block.Paragraph(_) => true
+            case _                           => false
+          },
+          table.contains((2, 1)),
+          tail.isEmpty,
         )
       },
       test("a pipe row without a separator is a paragraph") {

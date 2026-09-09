@@ -16,13 +16,18 @@ object Markdown:
   object Inline:
     given Eq[Inline] = (a, b) => a == b
 
+  final case class ListItem(inlines: List[Inline], children: List[Block] = Nil)
+
+  object ListItem:
+    given Eq[ListItem] = (a, b) => a == b
+
   enum Block:
     case Paragraph(inlines: List[Inline])
     case Heading(level: Int, inlines: List[Inline])
     case Fence(lang: Option[String], body: String)
-    case Bullet(items: List[List[Inline]])
-    case Ordered(items: List[List[Inline]])
-    case Quote(inlines: List[Inline])
+    case Bullet(items: List[ListItem])
+    case Ordered(items: List[ListItem])
+    case Quote(paragraphs: List[List[Inline]])
     case Table(headers: List[List[Inline]], rows: List[List[List[Inline]]])
 
   object Block:
@@ -39,7 +44,7 @@ object Markdown:
   /** Closed blocks plus the open fence or trailing unterminated paragraph.
     *
     * The closed prefix is append-only as `text` grows, so a live fold can keep committed nodes and only rewrite the
-    * tail.
+    * tail. A finished table in the tail is peeled off so it does not sit as raw text until a blank line or stopReason.
     */
   def streamParts(text: String): (Chunk[Block], String) =
     if text.isEmpty then (Chunk.empty, "")
@@ -51,16 +56,29 @@ object Markdown:
         (Chunk.fromIterable(parseBlocks(head)), tail.mkString("\n"))
       else
         val lastBlank = lines.lastIndexWhere(_.trim.isEmpty)
-        if lastBlank < 0 then (Chunk.empty, lines.mkString("\n"))
+        if lastBlank < 0 then peelTail(Nil, lines)
         else
           val (head, tail) = lines.splitAt(lastBlank + 1)
           if tail.forall(_.trim.isEmpty) then (Chunk.fromIterable(parseBlocks(lines)), "")
-          else (Chunk.fromIterable(parseBlocks(head)), tail.mkString("\n"))
+          else peelTail(head, tail)
       end if
 
   /** Fold the next chunk onto an open tail. Closed blocks from the tail are the new prefix. */
   def pull(tail: String, more: String): (Chunk[Block], String) =
     streamParts(tail + more)
+
+  private def peelTail(head: List[String], tail: List[String]): (Chunk[Block], String) =
+    val (tables, leftover) = peelClosedTables(tail)
+    (Chunk.fromIterable(parseBlocks(head) ++ tables), leftover.mkString("\n"))
+
+  private def peelClosedTables(lines: List[String]): (List[Block], List[String]) =
+    lines match
+      case h :: s :: rest if isTableRow(h) && isTableSep(s) =>
+        val (body, after) = rest.span(isTableRow)
+        val table         = Block.Table(cells(h).map(inlines), body.map(l => cells(l).map(inlines)))
+        val (more, left)  = peelClosedTables(after)
+        (table :: more, left)
+      case _ => (Nil, lines)
 
   private def fenceOpen(lines: List[String]): Boolean =
     lines.count(_.startsWith("```")) % 2 == 1
@@ -81,15 +99,10 @@ object Markdown:
         Block.Heading(level, inlines(body)) :: parseBlocks(rest)
       case line :: rest if isQuote(line) =>
         val (group, after) = (line :: rest).span(isQuote)
-        Block.Quote(inlines(group.map(quoteBody).mkString(" "))) :: parseBlocks(after)
-      case line :: rest if isBullet(line) =>
-        val (group, after) = (line :: rest).span(isBullet)
-        val items          = group.map(l => inlines(l.replaceFirst("^[-*]\\s+", "")))
-        Block.Bullet(items) :: parseBlocks(after)
-      case line :: rest if isOrdered(line) =>
-        val (group, after) = (line :: rest).span(isOrdered)
-        val items          = group.map(l => inlines(l.replaceFirst("^\\d+\\.\\s+", "")))
-        Block.Ordered(items) :: parseBlocks(after)
+        Block.Quote(quoteParagraphs(group)) :: parseBlocks(after)
+      case line :: rest if listPrefix(line).isDefined =>
+        val (group, after) = (line :: rest).span(l => listPrefix(l).isDefined)
+        parseList(group) :: parseBlocks(after)
       case line :: rest if isTableRow(line) && rest.headOption.exists(isTableSep) =>
         val header        = cells(line).map(inlines)
         val (body, after) = rest.drop(1).span(isTableRow)
@@ -102,15 +115,35 @@ object Markdown:
         Block.Paragraph(inlines(taken.mkString(" "))) :: parseBlocks(leftover)
 
   private def continuesParagraph(line: String): Boolean =
-    line.trim.nonEmpty && !line.startsWith("```") && headingLevel(line).isEmpty && !isBullet(line) &&
-      !isQuote(line) && !isOrdered(line) && !isTableRow(line)
+    line.trim.nonEmpty && !line.startsWith("```") && headingLevel(line).isEmpty &&
+      listPrefix(line).isEmpty && !isQuote(line) && !isTableRow(line) && !isTableSep(line)
 
-  private def isBullet(line: String): Boolean =
-    line.startsWith("- ") || line.startsWith("* ")
+  private def listPrefix(line: String): Option[(Int, Boolean, String)] =
+    val s   = line.replace("\t", "    ")
+    val ind = s.takeWhile(_ == ' ').length
+    val t   = s.drop(ind)
+    if t.startsWith("- ") || t.startsWith("* ") || t.startsWith("+ ") then Some((ind, false, t.drop(2)))
+    else
+      val i = t.indexOf(". ")
+      if i > 0 && t.take(i).forall(_.isDigit) then Some((ind, true, t.drop(i + 2)))
+      else None
 
-  private def isOrdered(line: String): Boolean =
-    val i = line.indexOf(". ")
-    i > 0 && line.take(i).forall(_.isDigit)
+  private def parseList(lines: List[String]): Block =
+    val ordered = listPrefix(lines.head).exists(_._2)
+    val base    = listPrefix(lines.head).map(_._1).getOrElse(0)
+    val items   = parseListItems(lines, base)
+    if ordered then Block.Ordered(items) else Block.Bullet(items)
+
+  private def parseListItems(lines: List[String], base: Int): List[ListItem] =
+    lines match
+      case Nil          => Nil
+      case line :: rest =>
+        listPrefix(line) match
+          case Some((ind, _, content)) if ind == base =>
+            val (nested, after) = rest.span(l => listPrefix(l).exists(_._1 > base))
+            val children        = if nested.isEmpty then Nil else List(parseList(nested))
+            ListItem(inlines(content), children) :: parseListItems(after, base)
+          case _ => parseListItems(rest, base)
 
   private def isQuote(line: String): Boolean =
     line.startsWith("> ") || line == ">"
@@ -118,20 +151,35 @@ object Markdown:
   private def quoteBody(line: String): String =
     if line == ">" then "" else line.drop(2)
 
+  private def quoteParagraphs(lines: List[String]): List[List[Inline]] =
+    val bodies = lines.map(quoteBody)
+    splitWhen(bodies)(_.trim.isEmpty)
+      .filter(_.exists(_.trim.nonEmpty))
+      .map(g => inlines(g.mkString(" ")))
+
+  private def splitWhen[A](xs: List[A])(sep: A => Boolean): List[List[A]] =
+    xs match
+      case Nil => Nil
+      case _   =>
+        val (chunk, rest) = xs.span(a => !sep(a))
+        val next          = rest.dropWhile(sep)
+        if chunk.isEmpty then splitWhen(next)(sep)
+        else chunk :: splitWhen(next)(sep)
+
   private def isTableRow(line: String): Boolean =
-    val t = line.trim
-    t.startsWith("|") && t.count(_ == '|') >= 2
+    line.trim.contains('|') && cells(line).size >= 2 && !isTableSep(line)
 
   private def isTableSep(line: String): Boolean =
-    val t = line.trim
-    t.startsWith("|") && t.exists(_ == '-') && t.forall(c => c == '|' || c == '-' || c == ':' || c.isWhitespace)
+    val cs = cells(line)
+    cs.size >= 2 && cs.forall(p => p.nonEmpty && p.forall(c => c == '-' || c == ':'))
 
   private def cells(line: String): List[String] =
     val t   = line.trim
     val cut =
       val a = if t.startsWith("|") then t.drop(1) else t
       if a.endsWith("|") then a.dropRight(1) else a
-    cut.split("\\|", -1).map(_.trim).toList
+    if !cut.contains('|') && !t.contains('|') then Nil
+    else cut.split("\\|", -1).map(_.trim).toList
 
   private def headingLevel(line: String): Option[Int] =
     val hashes = line.takeWhile(_ == '#').length

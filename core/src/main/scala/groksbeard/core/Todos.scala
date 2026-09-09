@@ -45,8 +45,9 @@ object Todos:
   def headline(entries: List[TodoEntry]): String =
     if entries.isEmpty then "Todos"
     else
-      val (done, n) = progress(entries)
-      s"Todos $done/$n"
+      val n       = entries.size
+      val started = entries.count(_.status != TodoStatus.Pending)
+      s"Todos $started/$n"
 
   def isLive(entries: List[TodoEntry]): Boolean =
     entries.exists(_.status != TodoStatus.Completed)

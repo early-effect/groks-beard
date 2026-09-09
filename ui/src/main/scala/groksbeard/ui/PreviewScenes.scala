@@ -25,13 +25,17 @@ object PreviewScenes:
     """Here is a **short** look at `Main.scala`.
       |
       |- entry is `main`
+      |  - nested boot
       |- it boots Ascent
+      |+ extra path
       |
       |## What sbt 2.x actually says
       |
       |Bare settings land on every subproject. That *replaces* the old `ThisBuild` default.
       |
       |> zipx's catalog check still reads `ThisBuild / scalaVersion` first.
+      |>
+      |> That is why the fallback exists.
       |
       |1. Prefer the common setting
       |2. Pin only if the check requires it
@@ -40,6 +44,10 @@ object PreviewScenes:
       || --- | --- |
       || module `scalaVersion` | 3.9.0 |
       || `ThisBuild / scalaVersion` | 3.8.4 |
+      |
+      |Col | N
+      |--- | ---
+      |rows | 2
       |
       |```scala
       |scalaVersion := scalaVer  // no ThisBuild
@@ -126,7 +134,18 @@ object PreviewScenes:
               """# Plan
                 |
                 |1. Port transcript
+                |   - keep the card readable
                 |2. Wire cards
+                |
+                |+ Keep the list nested
+                |
+                |> first beat
+                |>
+                |> second beat
+                |
+                |Step | Status
+                |--- | ---
+                |cards | yes
                 |""".stripMargin,
             )
           )

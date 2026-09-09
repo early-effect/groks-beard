@@ -365,6 +365,28 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("plan card renders headings, lists, and tables") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _  <- waitPresent(root, "plan")
+              el <- ZIO.succeed(root.element.querySelector("""[data-testid="plan-md"]"""))
+              h1   = Option(el.querySelector("h1")).exists(_.textContent.contains("Plan"))
+              ol   = Option(el.querySelector("ol li")).exists(_.textContent.contains("Port transcript"))
+              nest = Option(el.querySelector("ol ul li")).exists(_.textContent.contains("keep the card readable"))
+              plus =
+                val nodes = el.querySelectorAll("ul li")
+                (0 until nodes.length).exists { i =>
+                  Option(nodes.item(i)).exists(_.textContent.contains("Keep the list nested"))
+                }
+              tbl = Option(el.querySelector("""[data-testid^="md-table-"]""")).exists(_.textContent.contains("cards"))
+            yield assertTrue(h1, ol, nest, plus, tbl)
+          }
+        yield result
+        end for
+      },
       test("plan Approve dismisses the card") {
         val bridge = PreviewBridge()
         for
@@ -623,23 +645,32 @@ object ChatChromeSpec extends ZIOSpecDefault:
           result <- withMounted(ui) { root =>
             for
               agent <- waitPresent(root, "agent-t1") *> root.getByTestId("agent-t1").innerText
-              table <- waitPresent(root, "md-table") *> root.getByTestId("md-table").innerText
-              row   <- waitPresent(root, "md-row-0") *> root.getByTestId("md-row-0").innerText
               el    <- ZIO.succeed(root.element.querySelector("""[data-testid="agent-t1"]"""))
+              tables = el.querySelectorAll("""[data-testid^="md-table-"]""")
+              table  = Option(el.querySelector("""[data-testid^="md-table-"]""")).map(_.textContent).getOrElse("")
+              row    = Option(el.querySelector("""[data-testid^="md-row-"]""")).map(_.textContent).getOrElse("")
+              nested = Option(el.querySelector("ul ul li")).exists(_.textContent.contains("nested boot"))
+              plus   = agent.contains("extra path")
+              quotes = el.querySelectorAll("blockquote p").length
               ol     = Option(el.querySelector("ol li")).exists(_.textContent.contains("Prefer the common setting"))
               fence  = Option(el.querySelector("pre code")).exists(_.textContent.contains("no ThisBuild"))
               jsHref = Option(el.querySelector("""a[href^="javascript:"]""")).isEmpty
-              https  = Option(el.querySelector("""a[href^="https://"]""")).isDefined
+              https  = Option(el.querySelector("""a[href^="https://"]"""))
             yield assertTrue(
               agent.contains("What sbt 2.x actually says"),
               agent.contains("entry is"),
               table.contains("What"),
               table.contains("Value"),
               row.contains("3.9.0"),
+              tables.length == 2,
+              nested,
+              plus,
+              quotes == 2,
               ol,
               fence,
               jsHref,
-              https,
+              https.exists(_.getAttribute("target") == "_blank"),
+              https.exists(_.getAttribute("rel").contains("noopener")),
             )
           }
         yield result
@@ -808,7 +839,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _    <- root.button("todos-toggle").click
               _    <- waitGone(root, "todos")
             yield assertTrue(
-              head.contains("Todos 1/3"),
+              head.contains("Todos 2/3"),
               head.contains("Wire ACP plan updates"),
               row.contains("Wire ACP plan updates"),
               done.contains("Checkout the branch"),
@@ -978,7 +1009,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- waitGone(root, "todos")
               _ <- ZIO.succeed(fireCtrlT(root, "draft"))
               _ <- waitPresent(root, "todos-list")
-            yield assertTrue(head.contains("Todos 0/2"), row.contains("Checkout branch"))
+            yield assertTrue(head.contains("Todos 1/2"), row.contains("Checkout branch"))
           }
         yield result
         end for

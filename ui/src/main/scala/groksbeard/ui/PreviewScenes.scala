@@ -21,6 +21,41 @@ object PreviewScenes:
     ),
   )
 
+  val transcriptMarkdown: String =
+    """Here is a **short** look at `Main.scala`.
+      |
+      |- entry is `main`
+      |  - nested boot
+      |- it boots Ascent
+      |+ extra path
+      |
+      |## What sbt 2.x actually says
+      |
+      |Bare settings land on every subproject. That *replaces* the old `ThisBuild` default.
+      |
+      |> zipx's catalog check still reads `ThisBuild / scalaVersion` first.
+      |>
+      |> That is why the fallback exists.
+      |
+      |1. Prefer the common setting
+      |2. Pin only if the check requires it
+      |
+      || What | Value |
+      || --- | --- |
+      || module `scalaVersion` | 3.9.0 |
+      || `ThisBuild / scalaVersion` | 3.8.4 |
+      |
+      |Col | N
+      |--- | ---
+      |rows | 2
+      |
+      |```scala
+      |scalaVersion := scalaVer  // no ThisBuild
+      |```
+      |
+      |See the [sbt 2.0 docs](https://www.scala-sbt.org/2.x/docs/en/changes/migrating-from-sbt-1.x.html). [blocked](javascript:alert(1))
+      |""".stripMargin
+
   private val allow =
     PermissionOption("allow", "Allow", PermissionKind.AllowOnce)
   private val reject =
@@ -35,7 +70,7 @@ object PreviewScenes:
             TurnView(
               id = TurnId("t1"),
               user = Some(TurnUser("Summarize Main.scala")),
-              agent = "Here is a **short** look at `Main.scala`.\n\n- entry is `main`\n- it boots Ascent",
+              agent = PreviewScenes.transcriptMarkdown,
               tools = List(
                 ToolRow(
                   ToolCallId("read-1"),
@@ -99,7 +134,18 @@ object PreviewScenes:
               """# Plan
                 |
                 |1. Port transcript
+                |   - keep the card readable
                 |2. Wire cards
+                |
+                |+ Keep the list nested
+                |
+                |> first beat
+                |>
+                |> second beat
+                |
+                |Step | Status
+                |--- | ---
+                |cards | yes
                 |""".stripMargin,
             )
           )

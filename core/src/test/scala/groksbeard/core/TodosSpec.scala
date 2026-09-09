@@ -19,7 +19,9 @@ object TodosSpec extends ZIOSpecDefault:
           got.map(_.status) == List(Todos.InProgress, Todos.Pending, Todos.Completed),
           got.head.priority == TodoPriority.High,
           got.last.priority == TodoPriority.Low,
-          Todos.headline(got) == "Todos 1/3",
+          Todos.headline(got) == "Todos 2/3",
+          Todos.isLive(got),
+          !Todos.isLive(got.map(_.copy(status = Todos.Completed))),
           Todos.mark(got.head.status) == "▶",
           Todos.mark(got.last.status) == "☑",
         )

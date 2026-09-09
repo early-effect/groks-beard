@@ -71,7 +71,12 @@ object TasksSpec extends ZIOSpecDefault:
           TaskRow("b", TaskKind.Loop, TaskStatus.Running, "Check CI", "every 5m"),
           TaskRow("c", TaskKind.Command, TaskStatus.Completed, "done"),
         )
-        assertTrue(Tasks.statusLine(rows).contains("1 command"), Tasks.statusLine(rows).contains("1 loop"))
+        assertTrue(
+          Tasks.statusLine(rows).contains("1 command"),
+          Tasks.statusLine(rows).contains("1 loop"),
+          Tasks.isLive(rows),
+          !Tasks.isLive(rows.map(_.copy(status = TaskStatus.Completed))),
+        )
       },
       test("fold live subagent_spawned then subagent_finished") {
         val start = Tasks.fold(

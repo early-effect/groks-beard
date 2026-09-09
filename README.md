@@ -65,6 +65,8 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Mid-turn queue pane: Send now, Edit, Drop. `Ctrl+4` toggles it. Empty Enter sends the top follow-up now.
 - Ask-mode **review before write**: native multi-file diff, then Allow.
 - Follow-along: the transcript shows the file the agent is in. Click it to open; the editor does not jump on its own.
+- Agent markdown: headings, nested lists, `+` bullets, fences, quote paragraphs, and GFM tables (with or without a leading `|`). `javascript:` stays text. `https` links open in a new tab. Plan cards use the same renderer.
+- Todos (`Ctrl+T`) and tasks (`Ctrl+G`): the pane opens while work is live, Hide dismisses it, and the shortcut reopens history. A still-running task line stays above the composer.
 - Subagents: a compact lifecycle row in the transcript, and a Subagents group in the tasks pane (`Ctrl+G`). No child-transcript attach, no kill, no `/config-agents`.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.

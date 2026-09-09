@@ -10,10 +10,10 @@ The product is Scala 3 at the repo root (Ascent, Scala.js, ZIO). Preview in the 
 
 | | **Editor chat** | **Browser preview** | **TUI sidecar** |
 | --- | --- | --- | --- |
-| **What** | VS Code / Cursor sidebar over `grok agent stdio` | Same chat at http://localhost:8765/ | MCP tools the *external* Grok TUI can call |
+| **What** | VS Code / Cursor sidebar over `grok agent --leader stdio` | Same chat at http://localhost:8765/ | MCP tools the *external* Grok TUI can call |
 | **Best when** | Daily use, Keep/Undo persist, native diffs | Iterate on chrome without packing a VSIX | Stay in Ghostty / iTerm and use the editor as eyes |
 
-Shared identity is the CLI's session tree under `~/.grok/sessions/`. Start in the TUI, resume in the editor, and the reverse. The TUI is not hosted inside VS Code's terminal (xterm.js is a documented-bad host for Grok).
+Shared identity is the CLI's session tree under `~/.grok/sessions/`. Start in the TUI, resume in the editor, and the reverse. Live sync (same backend, same stream) needs Grok's leader; see [Share a Grok leader](#share-a-grok-leader). The TUI is not hosted inside VS Code's terminal (xterm.js is a documented-bad host for Grok).
 
 ## Requirements
 
@@ -56,6 +56,34 @@ sbt --no-server ~uiJS/ascentPreview
 Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `tasks`, `palette`, `mcps`, `queue`, `session-info`, `context`, `child`, `cancel`, `agents`, `plan-view`, `workflows`, `dashboard`, `btw`, `theme`, `compact`, `doctor`, `voice`, `images`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
+
+## Share a Grok leader
+
+Beard is an ACP client. It always starts `grok agent stdio`. **Share Grok** (default on, `/settings` or `groksBeard.shareBackend`) passes `--leader`, so that process joins `~/.grok/leader.sock` instead of becoming a private backend. If no leader is running, Grok auto-starts `grok agent leader`. Share Grok off passes `--no-leader`.
+
+That is all Beard needs in order to connect. An already-running TUI pager (`grok` without leader mode) is not a leader and does not hot-attach when Beard starts one. Beard does not write Grok's config.
+
+To have an **active leader** the TUI also uses, set this yourself in `~/.grok/config.toml` (or `$GROK_HOME/config.toml`):
+
+```toml
+[cli]
+use_leader = true
+```
+
+Then quit and restart `grok`. Check with `grok leader list`. You should see a reachable pid on `~/.grok/leader.sock`.
+
+Order that works:
+
+1. Enable `use_leader`, restart the TUI. It creates or joins the leader.
+2. Open Beard or preview with Share Grok on. Spawn is `grok agent --leader stdio`. It joins the same sock.
+3. Resume the same session in both. Live `session/update` is on that shared backend.
+
+If Beard is up first, it may already have started a leader. Restarting the TUI after `use_leader = true` still joins that sock. Restarting the TUI **without** `use_leader` leaves the pager private; Beard stays on the leader and they will not stay in sync.
+
+```bash
+grok leader list          # reachable pid on ~/.grok/leader.sock
+# Beard / preview log: spawning … grok agent --leader stdio
+```
 
 ## What you get
 

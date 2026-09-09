@@ -52,6 +52,9 @@ final case class ChatState(
     childTurns: Map[String, List[TurnView]] = Map.empty,
     restoreCodeNext: Boolean = false,
     promptSid: Option[SessionId] = None,
+    commands: List[SlashCommand] = Nil,
+    workflows: List[WorkflowRun] = Nil,
+    slashPass: Set[RpcId] = Set.empty,
 ):
   def sid(fallback: SessionId): SessionId = sessionId.getOrElse(fallback)
 
@@ -81,6 +84,8 @@ final case class ChatState(
     liveExecute = None,
     loadModel = ChatModel.empty,
     tasks = Nil,
+    workflows = Nil,
+    slashPass = Set.empty,
   )
 
   def resetLocal: ChatState =

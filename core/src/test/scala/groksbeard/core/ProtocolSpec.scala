@@ -59,12 +59,14 @@ object ProtocolSpec extends ZIOSpecDefault:
             currentId = "s2",
             openPicker = true,
           )
-        val resume: WebviewMsg = WebviewMsg.ResumeSession("s1")
+        val resume: WebviewMsg = WebviewMsg.ResumeSession("s1", hasHistory = true)
         val neu: WebviewMsg    = WebviewMsg.NewSession
+        val wf: WebviewMsg     = WebviewMsg.WorkflowControl("pause", "review-changes")
         assertTrue(
           list.toJson.fromJson[HostMsg] == Right(list),
           resume.toJson.fromJson[WebviewMsg] == Right(resume),
           neu.toJson.fromJson[WebviewMsg] == Right(neu),
+          wf.toJson.fromJson[WebviewMsg] == Right(wf),
         )
       },
       test("renameSession and deleteSession round-trip") {

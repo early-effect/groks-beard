@@ -193,6 +193,10 @@ object SessionCommands:
   def isWorkflowRuns(name: String, args: String): Boolean =
     name.stripPrefix("/").toLowerCase == "workflow" && args.trim == "runs"
 
+  def isWorkflowManage(name: String, args: String): Option[(String, String)] =
+    if name.stripPrefix("/").toLowerCase != "workflow" then None
+    else WorkflowRuns.parseManage(args)
+
   def intercept(text: String): Option[ClientCommand] =
     val trimmed = text.trim
     if !trimmed.startsWith("/") then None
@@ -208,7 +212,7 @@ object SessionCommands:
         isSessionInfo(name) || isContext(name) || isTasks(name) || isLoop(name) || isFork(name) || isViewPlan(name) ||
         isBtw(name) || isConfigAgents(name) || isPersonas(name) || isDashboard(name) || isTheme(name) ||
         isCompact(name) || isFullscreen(name) || isVim(name) || isDoctor(name) || isVoice(name) ||
-        isAlwaysApprove(name) || isAuto(name) || isWorkflowRuns(name, args)
+        isAlwaysApprove(name) || isAuto(name) || isWorkflowRuns(name, args) || isWorkflowManage(name, args).nonEmpty
       then Some(ClientCommand(name, args))
       else None
     end if

@@ -13,6 +13,62 @@ final case class WorkflowRun(
 
 object WorkflowRuns:
   val EmptyNotice: String = "No workflow runs in this session"
+  val Missing: String     = "Workflow pause/resume/stop isn't available."
+  val Verbs: Set[String]  = Set("pause", "resume", "stop")
+
+  def verbKey(key: String): Option[String] =
+    key match
+      case "p" | "P" => Some("pause")
+      case "r" | "R" => Some("resume")
+      case "x" | "X" => Some("stop")
+      case _         => None
+
+  def isNav(key: String): Boolean =
+    key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End" || verbKey(key).nonEmpty
+
+  def command(verb: String, name: String): String =
+    s"/workflow $verb $name"
+
+  def offers(commands: List[SlashCommand]): Boolean =
+    commands.exists(c => c.name.stripPrefix("/").equalsIgnoreCase("workflow"))
+
+  def parseManage(args: String): Option[(String, String)] =
+    val t = args.trim
+    val i = t.indexWhere(_.isWhitespace)
+    if i < 0 then None
+    else
+      val verb = t.take(i).toLowerCase
+      val name = t.drop(i).trim
+      if Verbs.contains(verb) && name.nonEmpty then Some((verb, name)) else None
+
+  def clamp(runs: List[WorkflowRun], sel: Option[String]): Option[String] =
+    if runs.isEmpty then None
+    else if sel.exists(n => runs.exists(_.name == n)) then sel
+    else runs.headOption.map(_.name)
+
+  def step(runs: List[WorkflowRun], sel: Option[String], key: String): Option[String] =
+    val names = runs.map(_.name)
+    if names.isEmpty then None
+    else
+      val cur = clamp(runs, sel).map(names.indexOf).filter(_ >= 0).getOrElse(0)
+      key match
+        case "ArrowDown" => Some(names((cur + 1) % names.size))
+        case "ArrowUp"   => Some(names((cur - 1 + names.size) % names.size))
+        case "Home"      => names.headOption
+        case "End"       => names.lastOption
+        case _           => clamp(runs, sel)
+  end step
+
+  def applyVerb(runs: List[WorkflowRun], name: String, verb: String): List[WorkflowRun] =
+    runs.map { r =>
+      if r.name != name then r
+      else
+        verb match
+          case "pause"  => r.copy(status = "paused", paused = true)
+          case "resume" => r.copy(status = "running", paused = false)
+          case "stop"   => r.copy(status = "stopped", paused = false)
+          case _        => r
+    }
 
   def fold(params: Json, current: List[WorkflowRun]): Option[List[WorkflowRun]] =
     obj(params).flatMap { o =>

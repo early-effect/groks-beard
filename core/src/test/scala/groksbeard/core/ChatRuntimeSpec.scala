@@ -1916,6 +1916,103 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("resumeSession with history writes session/resume and does not clear") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.resumeSession("sess_test", hasHistory = true)
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(_.contains("session/resume")),
+            !lines.exists(_.contains("session/load")),
+            !msgs.exists {
+              case HostMsg.ClearTranscript => true
+              case _: HostMsg.Transcript   => true
+              case _                       => false
+            },
+          )
+        }
+      },
+      test("resumeSession of another id still writes session/load") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.resumeSession("sess_disk")
+          yield assertTrue(
+            lines.exists(_.contains("session/load")),
+            !lines.exists(_.contains("session/resume")),
+          )
+        }
+      },
+      test("resumeSession with history falls back when resume is not advertised") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(omitResume = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.resumeSession("sess_test", hasHistory = true)
+            msgs <- posted.get
+          yield assertTrue(
+            !lines.exists(_.contains("session/resume")),
+            !lines.exists(_.contains("session/load")),
+            !msgs.exists {
+              case HostMsg.ClearTranscript => true
+              case _                       => false
+            },
+          )
+        }
+      },
+      test("workflowControl slash-passes without cancelling or enqueueing") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(hangPrompt = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.workflowControl("pause", "review-changes")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("session/prompt") && l.contains("/workflow pause review-changes")),
+            !lines.exists(_.contains("session/cancel")),
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case HostMsg.Queued(_)      => true
+              case _: HostMsg.TurnEnd     => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("workflowControl without an advertised workflow command posts an error") {
+        chat(transport = AcpTransport.fake(FakeAgent(omitWorkflow = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.workflowControl("pause", "review-changes")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(message, _) => message == WorkflowRuns.Missing
+              case _                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
       test("deleteSession writes session/close when advertised") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)

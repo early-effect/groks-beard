@@ -94,14 +94,7 @@ object PreviewScenes:
               thought = "Need the file first.",
               stopReason = Some(StopReason.EndTurn),
             )
-          ) ++ (2 to 10).toList.map { i =>
-            TurnView(
-              id = TurnId(s"t$i"),
-              user = Some(TurnUser(s"Keep going $i")),
-              agent = s"Still working through item $i.\n\n" + ("More context so the transcript overflows.\n" * 4),
-              stopReason = Some(StopReason.EndTurn),
-            )
-          },
+          ),
         )
       case Scene.Permission =>
         ChatModel.empty.copy(

@@ -92,6 +92,7 @@ Do not serve `target/` with a static file server. Preview restages on change and
 | Dashboard | `Ctrl+\` |
 | Always-approve | `Ctrl+O` |
 | Voice | `Ctrl+Space` / `/voice` |
+| Follow the tail | Click ↓, `End`, or `Ctrl+End`. Vim `G`. |
 
 ## Modules
 

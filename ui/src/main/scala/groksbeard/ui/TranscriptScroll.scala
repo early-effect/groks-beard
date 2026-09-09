@@ -7,9 +7,15 @@ import groksbeard.core.TranscriptFollow
 import zio.*
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import scala.scalajs.js
 
 object TranscriptScroll:
+  private val goTail = new AtomicReference[Option[() => Unit]](None)
+
+  def jump(): Unit =
+    goTail.get().foreach(_())
+
   def bind(el: dom.Element): URIO[Scope, Unit] =
     val follow                   = new AtomicBoolean(true)
     val ignore                   = new AtomicBoolean(false)
@@ -53,13 +59,21 @@ object TranscriptScroll:
             catch case _: Throwable => ()
           }
       catch case _: Throwable => ()
+    def toTail(): Unit =
+      live {
+        follow.set(true)
+        writeFollow(true)
+        pin()
+      }
     val obs = new ascent.dom.MutationObserver((_, _) => raf(_ => pin()))
     obs.observe(el, JsDom.subtreeMutations)
+    goTail.set(Some(toTail))
     pin()
     mark()
     Dom.listen(el, Events.onScroll)(_ => ZIO.succeed(mark())) *>
       ZIO
         .addFinalizer(ZIO.succeed {
+          goTail.set(None)
           obs.disconnect()
           rafId.foreach { id =>
             try ascent.dom.window.cancelAnimationFrame(id)

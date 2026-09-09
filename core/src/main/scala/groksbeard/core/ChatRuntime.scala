@@ -156,7 +156,7 @@ final class ChatRuntime private (
 
   def openDashboard: UIO[Unit] = exclusive(doDashboard)
 
-  def openWorkflows: UIO[Unit] = exclusive(post(HostMsg.Workflows(Nil)))
+  def openWorkflows: UIO[Unit] = exclusive(snap.flatMap(s => post(HostMsg.Workflows(s.workflows))))
 
   def openDoctor: UIO[Unit] = exclusive(doDoctor)
 
@@ -185,9 +185,12 @@ final class ChatRuntime private (
       )
   }
 
-  def resumeSession(id: SessionId, restoreCode: Boolean = false): UIO[Unit] = exclusive {
-    edit(_.copy(restoreCodeNext = restoreCode)) *> doResume(id)
-  }
+  def resumeSession(id: SessionId, restoreCode: Boolean = false, hasHistory: Boolean = false): UIO[Unit] =
+    exclusive {
+      edit(_.copy(restoreCodeNext = restoreCode)) *> doResume(id, hasHistory)
+    }
+
+  def workflowControl(verb: String, name: String): UIO[Unit] = exclusive(doWorkflowControl(verb, name))
 
   def sendNow(id: QueueId): UIO[Unit] = exclusive(doSendNow(id))
 
@@ -466,7 +469,10 @@ final class ChatRuntime private (
           val next = if s.modeId == ModeId.Auto then ModeId.Normal else ModeId.Auto
           doSetMode(next)
         case Some(cmd) if SessionCommands.isWorkflowRuns(cmd.name, cmd.args) =>
-          post(HostMsg.Workflows(Nil))
+          snap.flatMap(st => post(HostMsg.Workflows(st.workflows)))
+        case Some(cmd) if SessionCommands.isWorkflowManage(cmd.name, cmd.args).nonEmpty =>
+          val (verb, handle) = SessionCommands.isWorkflowManage(cmd.name, cmd.args).get
+          doWorkflowControl(verb, handle)
         case _ =>
           val chosen = PromptChip.chipsForSend(s.chips, activeFile(), s.settingsState.includeActiveFileByDefault)
           val pics   = if images.nonEmpty then images else s.pendingImages
@@ -677,23 +683,31 @@ final class ChatRuntime private (
         snap.flatMap(st => rpc(AcpMethod.SessionNew, SessionNewParams(st.sessionCwd).asJson))
     }
 
-  private def doResume(id: SessionId): UIO[Unit] =
+  private def doResume(id: SessionId, hasHistory: Boolean): UIO[Unit] =
     snap.flatMap { s =>
       if id.isEmpty then doPostList(open = true)
       else if s.pendingResume.contains(id) && !s.initialized then ZIO.unit
+      else if s.restoreCodeNext then loadResume(id, s)
+      else if ChatRuntime.canAttach(s, id, hasHistory) then attachResume(id, s.sessionCwd)
       else if s.sessionId.contains(id) && s.pendingResume.isEmpty && !s.loading then doPostList(open = false)
-      else
-        val meta =
-          if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
-        val initialized = s.initialized
-        val cwd         = s.sessionCwd
-        edit(st => st.bumpEpoch.cancelPendingResume) *> leaveCurrent *> stopLoops *>
-          edit(_.beginResume(id)) *>
-          post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *>
-          (if initialized then
-             rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id))
-           else ZIO.unit)
+      else loadResume(id, s)
     }
+
+  private def attachResume(id: SessionId, cwd: String): UIO[Unit] =
+    doPostList(open = false) *> rpc(AcpMethod.SessionResume, SessionResumeParams(id, cwd).asJson)
+
+  private def loadResume(id: SessionId, s: ChatState): UIO[Unit] =
+    val meta =
+      if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
+    val initialized = s.initialized
+    val cwd         = s.sessionCwd
+    edit(st => st.bumpEpoch.cancelPendingResume) *> leaveCurrent *> stopLoops *>
+      edit(_.beginResume(id)) *>
+      post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *>
+      (if initialized then
+         rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id))
+       else ZIO.unit)
+  end loadResume
 
   private def openChangesUnlocked: UIO[Unit] =
     val files = store.pending
@@ -951,7 +965,7 @@ final class ChatRuntime private (
             edit(_.copy(pendingForkPrompt = None)) *> post(HostMsg.Error("Fork failed"))
           case Some(forked) =>
             (if forked.newCwd.nonEmpty then edit(_.copy(sessionCwd = forked.newCwd)) else ZIO.unit) *>
-              doResume(forked.newSessionId)
+              doResume(forked.newSessionId, hasHistory = false)
 
   private def sendForkPrompt: UIO[Unit] =
     bag
@@ -1012,10 +1026,23 @@ final class ChatRuntime private (
 
   private def rpc(method: AcpMethod, params: Json, loadSessionId: Option[SessionId] = None): UIO[Unit] =
     bag.modify(_.takeRpc(method, loadSessionId)).flatMap { id =>
-      val req = Rpc.Request(id, method.value, params)
-      framed.recordOutgoing(req)
-      absorb(transport.write(Ndjson.encode(Rpc.toLine(req))))
+      writeRpc(id, method, params)
     }
+
+  private def rpcSlash(method: AcpMethod, params: Json): UIO[Unit] =
+    bag
+      .modify { s =>
+        val (id, next) = s.takeRpc(method, None)
+        (id, next.copy(slashPass = next.slashPass + id))
+      }
+      .flatMap { id =>
+        writeRpc(id, method, params)
+      }
+
+  private def writeRpc(id: RpcId, method: AcpMethod, params: Json): UIO[Unit] =
+    val req = Rpc.Request(id, method.value, params)
+    framed.recordOutgoing(req)
+    absorb(transport.write(Ndjson.encode(Rpc.toLine(req))))
 
   private def ingestChunk(chunk: String): UIO[Unit] =
     snap.flatMap { s =>
@@ -1099,7 +1126,8 @@ final class ChatRuntime private (
         }
       } *> ZIO.foreachDiscard(msgs) {
         case HostMsg.AvailableCommands(cmds) =>
-          post(HostMsg.AvailableCommands(SessionCommands.merge(cmds)))
+          val merged = SessionCommands.merge(cmds)
+          edit(_.copy(commands = merged)) *> post(HostMsg.AvailableCommands(merged))
         case _ => ZIO.unit
       }
     }
@@ -1109,7 +1137,6 @@ final class ChatRuntime private (
     val cfg = SessionState.decodeUpdate(p) match
       case Some(AcpUpdate.ConfigOptions(opts)) => edit(_.withConfig(opts))
       case _                                   => ZIO.unit
-    val wf = WorkflowRuns.fold(p, Nil)
     cfg *> foldTasks(p, loading = false).flatMap { folded =>
       snap.flatMap { s =>
         val msgs = SessionUpdate.hostMsgs(p, s.currentTurn)
@@ -1119,8 +1146,9 @@ final class ChatRuntime private (
             SessionState.decodeUpdate(p) match
               case Some(_) => ZIO.unit
               case None    => ZIO.logWarning(s"ignored session/update ${sessionUpdateKind(p)}")
+        val wf     = WorkflowRuns.fold(p, s.workflows)
         val wfPost = wf match
-          case Some(runs) => post(HostMsg.Workflows(runs))
+          case Some(runs) => edit(_.copy(workflows = runs)) *> post(HostMsg.Workflows(runs))
           case None       => ZIO.unit
         note *> wfPost *> ZIO.foreachDiscard(msgs) { msg =>
           val out = msg match
@@ -1131,8 +1159,9 @@ final class ChatRuntime private (
               m.occupancy match
                 case Some(o) => edit(_.copy(occupancy = Some(o)))
                 case None    => ZIO.unit
-            case HostMsg.ToolCall(_, row) => edit(_.noteLiveTool(row))
-            case _                        => ZIO.unit
+            case HostMsg.AvailableCommands(cmds) => edit(_.copy(commands = cmds))
+            case HostMsg.ToolCall(_, row)        => edit(_.noteLiveTool(row))
+            case _                               => ZIO.unit
           stamp *> post(out)
         }
       }
@@ -1142,7 +1171,10 @@ final class ChatRuntime private (
   private def ingestResponse(id: RpcId, result: Option[Json], error: Option[RpcError]): UIO[Unit] =
     bag.modify(_.popMethod(id)).flatMap { method =>
       val quiet =
-        method.exists(m => m == AcpMethod.SessionLoad || m == AcpMethod.RewindPoints || m == AcpMethod.SessionFork)
+        method.exists(m =>
+          m == AcpMethod.SessionLoad || m == AcpMethod.SessionResume || m == AcpMethod.RewindPoints ||
+            m == AcpMethod.SessionFork
+        )
       val errPost =
         if quiet then ZIO.unit
         else error.map(e => post(HostMsg.Error(e.message))).getOrElse(ZIO.unit)
@@ -1163,6 +1195,8 @@ final class ChatRuntime private (
           ingestSessionNew(result)
         case Some(AcpMethod.SessionLoad) =>
           ingestLoad(id, result, error)
+        case Some(AcpMethod.SessionResume) =>
+          ingestResume(result, error)
         case Some(AcpMethod.RewindPoints) =>
           if error.isDefined then ZIO.unit
           else post(HostMsg.RewindList(Rewind.decodePoints(result.getOrElse(Json.Null))))
@@ -1171,7 +1205,14 @@ final class ChatRuntime private (
         case Some(AcpMethod.RewindExecute) =>
           ingestRewind(error)
         case Some(AcpMethod.SessionPrompt) =>
-          ingestPromptDone(result)
+          bag
+            .modify { s =>
+              if s.slashPass.contains(id) then (true, s.copy(slashPass = s.slashPass - id))
+              else (false, s)
+            }
+            .flatMap { quiet =>
+              if quiet then ZIO.unit else ingestPromptDone(result)
+            }
         case _ => ZIO.unit)
     }
 
@@ -1470,9 +1511,50 @@ final class ChatRuntime private (
     snap.flatMap { s =>
       val msgs           = SessionUpdate.hostMsgs(p, TurnId(s"child-${sid.value}"))
       val (next, folded) = s.foldChildMsgs(sid, msgs)
-      WorkflowRuns.fold(p, Nil)
-      put(folded) *> post(HostMsg.ChildTranscript(sid, next))
+      val wf             = WorkflowRuns.fold(p, folded.workflows)
+      val withWf         = wf.fold(folded)(runs => folded.copy(workflows = runs))
+      put(withWf) *> post(HostMsg.ChildTranscript(sid, next)) *>
+        wf.map(runs => post(HostMsg.Workflows(runs))).getOrElse(ZIO.unit)
     }
+
+  private def ingestResume(result: Option[Json], error: Option[RpcError]): UIO[Unit] =
+    snap.flatMap { s =>
+      error match
+        case Some(err) =>
+          val kind = SessionLoad.classify(err.message, Some(err.code.toString))
+          val sid  = s.sessionId.getOrElse(SessionId.empty)
+          post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
+            (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
+        case None =>
+          val applied =
+            result match
+              case Some(json) =>
+                json.as[SessionNewResult] match
+                  case Right(decoded) =>
+                    decoded.modes.foreach(m => framed.state.commitMode(m.currentModeId))
+                    s.withSession(decoded, json)
+                  case Left(_) => s
+              case None => s
+          put(applied) *> postMeta *> post(HostMsg.settings(applied.settingsState)) *> doPostList(open = false)
+    }
+
+  private def doWorkflowControl(verb: String, name: String): UIO[Unit] =
+    val handle = name.trim
+    val kind   = verb.trim.toLowerCase
+    if handle.isEmpty || !WorkflowRuns.Verbs.contains(kind) then ZIO.unit
+    else
+      snap.flatMap { s =>
+        if !WorkflowRuns.offers(s.commands) then post(HostMsg.Error(WorkflowRuns.Missing))
+        else
+          val sid  = s.sid(fallbackSessionId)
+          val text = WorkflowRuns.command(kind, handle)
+          rpcSlash(
+            AcpMethod.SessionPrompt,
+            SessionPromptParams(sid, List(PromptBlock.text(text))).asJson,
+          )
+      }
+    end if
+  end doWorkflowControl
 
   private def doDashboard: UIO[Unit] =
     snap.flatMap { s =>
@@ -1536,6 +1618,14 @@ end ChatRuntime
 
 object ChatRuntime:
   val ProductTitle: String = "Grok's Beard"
+
+  def canAttach(s: ChatState, id: SessionId, hasHistory: Boolean): Boolean =
+    hasHistory &&
+      id.nonEmpty &&
+      s.sessionId.contains(id) &&
+      s.pendingResume.isEmpty &&
+      !s.loading &&
+      AgentCapabilities.offersSession(s.agentCaps, "resume")
 
   val DefaultModes: List[ModeOption] = List(
     ModeOption(ModeId.Normal, "Normal"),

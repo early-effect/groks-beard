@@ -12,6 +12,8 @@ final class FakeAgent(
     rejectFork: Boolean = false,
     worktreeMeta: Boolean = false,
     omitConfigOptions: Boolean = false,
+    omitResume: Boolean = false,
+    omitWorkflow: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -35,7 +37,8 @@ final class FakeAgent(
               loadSession = true,
               promptCapabilities = Some(PromptCapabilities(embeddedContext = true, image = false)),
               sessionCapabilities = Some(
-                Json.Obj("list" -> Json.Obj(), "resume" -> Json.Obj(), "close" -> Json.Obj())
+                if omitResume then Json.Obj("list" -> Json.Obj(), "close"  -> Json.Obj())
+                else Json.Obj("list"               -> Json.Obj(), "resume" -> Json.Obj(), "close" -> Json.Obj())
               ),
             )
         List(Rpc.ok(id, InitializeResult(1, caps).asJson))
@@ -49,7 +52,7 @@ final class FakeAgent(
                 List(
                   SlashCommand("compact", "Compact context"),
                   SlashCommand("always-approve", "Skip permission prompts"),
-                )
+                ) ++ (if omitWorkflow then Nil else List(SlashCommand("workflow", "Launch or manage a workflow")))
               ),
             ),
           ),

@@ -258,6 +258,16 @@ object SessionIndexSpec extends ZIOSpecDefault:
           merged.exists(_.name == "copy"),
           merged.exists(_.name == "export"),
           SessionCommands.intercept("hello").isEmpty,
+          SessionCommands.intercept("/workflow runs").contains(ClientCommand("workflow", "runs")),
+          SessionCommands
+            .isWorkflowManage("workflow", "pause review-changes")
+            .contains(("pause", "review-changes")),
+          SessionCommands
+            .intercept("/workflow pause review-changes")
+            .contains(
+              ClientCommand("workflow", "pause review-changes")
+            ),
+          SessionCommands.intercept("/workflow review-changes").isEmpty,
         )
       },
     )

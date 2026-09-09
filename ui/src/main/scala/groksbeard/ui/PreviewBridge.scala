@@ -3,6 +3,7 @@ package groksbeard.ui
 import groksbeard.core.*
 
 final class PreviewBridge extends HostBridge:
+  var sent: List[WebviewMsg]            = Nil
   private var listener: HostMsg => Unit = _ => ()
   private var settings: SettingsState   = SettingsState.defaults
   private var modeId: ModeId            = ModeId.Normal
@@ -26,6 +27,7 @@ final class PreviewBridge extends HostBridge:
       SlashCommand("compact", "Compact context"),
       SlashCommand("always-approve", "Skip permission prompts"),
       SlashCommand("init", "Initialize project memory"),
+      SlashCommand("workflow", "Launch or manage a workflow"),
     )
   )
 
@@ -66,6 +68,7 @@ final class PreviewBridge extends HostBridge:
   private var uiVim      = false
 
   def post(msg: WebviewMsg): Unit =
+    sent = sent :+ msg
     msg match
       case WebviewMsg.Ready =>
         currentId = SessionId.empty
@@ -195,24 +198,26 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.ClearTranscript)
         emitMeta(SessionId.empty, "Grok's Beard")
         emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
-      case WebviewMsg.ResumeSession(id, _) =>
+      case WebviewMsg.ResumeSession(id, _, hasHistory) =>
         currentId = id
         pickerOpen = false
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
-        emit(HostMsg.ClearTranscript)
         emitMeta(id, title)
-        emit(
-          HostMsg.Transcript(
-            List(
-              TurnView(
-                TurnId("resume-turn"),
-                user = Some(TurnUser("hello from disk")),
-                agent = s"Resumed **$title**.",
-                stopReason = Some(StopReason.EndTurn),
+        if !hasHistory then
+          emit(HostMsg.ClearTranscript)
+          emit(
+            HostMsg.Transcript(
+              List(
+                TurnView(
+                  TurnId("resume-turn"),
+                  user = Some(TurnUser("hello from disk")),
+                  agent = s"Resumed **$title**.",
+                  stopReason = Some(StopReason.EndTurn),
+                )
               )
             )
           )
-        )
+        end if
         emit(HostMsg.SessionList(sessions, id, openPicker = false))
       case WebviewMsg.OpenSessionPicker =>
         pickerOpen = true
@@ -329,6 +334,19 @@ final class PreviewBridge extends HostBridge:
         )
       case WebviewMsg.OpenWorkflows =>
         emit(HostMsg.Workflows(List(WorkflowRun("review-changes", "verify", "running", "2/4"))))
+      case WebviewMsg.WorkflowControl(verb, name) =>
+        emit(
+          HostMsg.Workflows(
+            WorkflowRuns.applyVerb(
+              List(
+                WorkflowRun("review-changes", "verify", "running", "2/4"),
+                WorkflowRun("deep-research", "gather", "running", "1/3"),
+              ),
+              name,
+              verb,
+            )
+          )
+        )
       case WebviewMsg.OpenDoctor =>
         emit(
           HostMsg.DoctorReport(
@@ -369,6 +387,8 @@ final class PreviewBridge extends HostBridge:
             case "vim_mode"     => uiVim = value == "true"
             case _              => ()
           emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
+    end match
+  end post
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f

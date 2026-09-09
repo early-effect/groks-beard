@@ -827,6 +827,70 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("jump-tail click resticks follow") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                (1 to 12).foreach { i =>
+                  bridge.push(HostMsg.UserMessage(s"t$i", s"prompt $i"))
+                  bridge.push(HostMsg.AgentChunk(s"t$i", "reply\n" * 8))
+                  bridge.push(HostMsg.TurnEnd(s"t$i", "end_turn"))
+                }
+              }
+              _  <- waitPresent(root, "transcript")
+              el <- ZIO.succeed(root.element.queryHtml("""[data-testid="transcript"]"""))
+              _  <- ZIO.succeed(el.setAttribute("style", "max-height:140px;overflow-y:auto"))
+              _  <- ZIO.succeed {
+                el.scrollTop = el.scrollHeight.toDouble
+                ChatChromeSpec.fireScroll(el)
+              }
+              _ <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+              _ <- ZIO.succeed {
+                el.scrollTop = 0
+                ChatChromeSpec.fireScroll(el)
+              }
+              _   <- waitSelector(root, """[data-testid="transcript"][data-follow="false"]""")
+              _   <- waitPresent(root, "jump-tail")
+              _   <- root.button("jump-tail").click
+              on  <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+              top <- waitScrollTop(root, """[data-testid="transcript"]""", 32)
+            yield assertTrue(on, top > 32)
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+End from the draft resticks follow") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                (1 to 12).foreach { i =>
+                  bridge.push(HostMsg.UserMessage(s"t$i", s"prompt $i"))
+                  bridge.push(HostMsg.AgentChunk(s"t$i", "reply\n" * 8))
+                  bridge.push(HostMsg.TurnEnd(s"t$i", "end_turn"))
+                }
+              }
+              _  <- waitPresent(root, "transcript")
+              el <- ZIO.succeed(root.element.queryHtml("""[data-testid="transcript"]"""))
+              _  <- ZIO.succeed(el.setAttribute("style", "max-height:140px;overflow-y:auto"))
+              _  <- ZIO.succeed {
+                el.scrollTop = 0
+                ChatChromeSpec.fireScroll(el)
+              }
+              _   <- waitSelector(root, """[data-testid="transcript"][data-follow="false"]""")
+              _   <- ZIO.succeed(fireCtrlKey(root, "draft", "End", "End"))
+              on  <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+              top <- waitScrollTop(root, """[data-testid="transcript"]""", 32)
+            yield assertTrue(on, top > 32)
+          }
+        yield result
+        end for
+      },
       test("todos scene lists entries and Hide dismisses the pane") {
         val bridge = PreviewBridge()
         for
@@ -2403,6 +2467,52 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("workflow overlay p pauses the selected run without Stop") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Workflows)
+          result <- withMounted(ui) { root =>
+            for
+              _      <- waitPresent(root, "workflow-review-changes")
+              _      <- root.getByTestId("workflow-review-changes").click
+              _      <- root.textarea("draft").press("p")
+              paused <- waitContains(root, "workflow-review-changes", "paused")
+            yield assertTrue(
+              paused.contains("paused"),
+              bridge.sent.exists {
+                case WebviewMsg.WorkflowControl("pause", "review-changes") => true
+                case _                                                     => false
+              },
+              !bridge.sent.exists {
+                case WebviewMsg.Cancel => true
+                case _                 => false
+              },
+            )
+          }
+        yield result
+        end for
+      },
+      test("dashboard click of the current session keeps the transcript") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Dashboard)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "user-t1")
+              _    <- root.button("dash-disk-1").click
+              kept <- waitPresent(root, "user-t1")
+              _    <- waitGone(root, "user-resume-turn")
+            yield assertTrue(
+              kept,
+              bridge.sent.exists {
+                case WebviewMsg.ResumeSession(id, _, true) => id.value == "disk-1"
+                case _                                     => false
+              },
+            )
+          }
+        yield result
+        end for
+      },
       test("slash workflow runs opens the workflows pane") {
         val bridge = PreviewBridge()
         for
@@ -2520,6 +2630,13 @@ object ChatChromeSpec extends ZIOSpecDefault:
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to disappear"))(5.seconds)
 
+  private def waitScrollTop(root: AscentRoot, sel: String, min: Double)(using Trace): IO[Throwable, Double] =
+    def loop: IO[Throwable, Double] =
+      ZIO.succeed(root.element.queryHtml(sel).scrollTop).flatMap { top =>
+        if top > min then ZIO.succeed(top) else ZIO.sleep(20.millis) *> loop
+      }
+    loop.timeoutFail(new RuntimeException(s"timed out waiting for $sel scrollTop > $min"))(5.seconds)
+
   private def fireScroll(el: ascent.dom.HTMLElement): Unit =
     val _ = el.dispatchEvent(new ascent.dom.Event("scroll"))
 
@@ -2587,7 +2704,7 @@ final class GatedResumeBridge extends HostBridge:
       case WebviewMsg.Ready =>
         emit(HostMsg.Ready)
         emit(HostMsg.SessionList(sessions, "", openPicker = false))
-      case WebviewMsg.ResumeSession(id, _) =>
+      case WebviewMsg.ResumeSession(id, _, _) =>
         pending = Some(id)
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
         emit(HostMsg.ClearTranscript)

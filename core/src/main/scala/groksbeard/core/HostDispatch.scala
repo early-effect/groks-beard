@@ -5,22 +5,24 @@ import zio.*
 object HostDispatch:
   def apply(runtime: ChatRuntime, msg: WebviewMsg, extra: HostMsg => UIO[Unit]): UIO[Unit] =
     msg match
-      case WebviewMsg.Ready                          => runtime.ready
-      case WebviewMsg.Send(text, images)             => runtime.send(text, images)
-      case WebviewMsg.Queue(text, images)            => runtime.queue(text, images)
-      case WebviewMsg.QueueSendNow(id)               => runtime.sendNow(id)
-      case WebviewMsg.QueueDrop(id)                  => runtime.dropQueued(id)
-      case WebviewMsg.StopTask(id)                   => runtime.stopTask(id)
-      case WebviewMsg.Cancel                         => runtime.cancel
-      case WebviewMsg.CancelTurnChoice(_, keep)      => runtime.cancelTurn(keep)
-      case WebviewMsg.SetMode(id)                    => runtime.setMode(id)
-      case WebviewMsg.SetModel(id, effort)           => runtime.setModel(id, Option(effort).filter(_.nonEmpty))
-      case WebviewMsg.SetEffort(level)               => runtime.setEffort(level)
-      case WebviewMsg.CycleMode                      => runtime.cycleMode
-      case WebviewMsg.SlashPick(name)                => runtime.slashPick(name)
-      case WebviewMsg.Fork(worktree, directive)      => runtime.forkSession(worktree, directive)
-      case WebviewMsg.NewSession                     => runtime.newSession
-      case WebviewMsg.ResumeSession(id, restore)     => runtime.resumeSession(id, restore)
+      case WebviewMsg.Ready                                  => runtime.ready
+      case WebviewMsg.Send(text, images)                     => runtime.send(text, images)
+      case WebviewMsg.Queue(text, images)                    => runtime.queue(text, images)
+      case WebviewMsg.QueueSendNow(id)                       => runtime.sendNow(id)
+      case WebviewMsg.QueueDrop(id)                          => runtime.dropQueued(id)
+      case WebviewMsg.StopTask(id)                           => runtime.stopTask(id)
+      case WebviewMsg.Cancel                                 => runtime.cancel
+      case WebviewMsg.CancelTurnChoice(_, keep)              => runtime.cancelTurn(keep)
+      case WebviewMsg.SetMode(id)                            => runtime.setMode(id)
+      case WebviewMsg.SetModel(id, effort)                   => runtime.setModel(id, Option(effort).filter(_.nonEmpty))
+      case WebviewMsg.SetEffort(level)                       => runtime.setEffort(level)
+      case WebviewMsg.CycleMode                              => runtime.cycleMode
+      case WebviewMsg.SlashPick(name)                        => runtime.slashPick(name)
+      case WebviewMsg.Fork(worktree, directive)              => runtime.forkSession(worktree, directive)
+      case WebviewMsg.NewSession                             => runtime.newSession
+      case WebviewMsg.ResumeSession(id, restore, hasHistory) =>
+        runtime.resumeSession(id, restore, hasHistory)
+      case WebviewMsg.WorkflowControl(verb, name)    => runtime.workflowControl(verb, name)
       case WebviewMsg.OpenSessionPicker              => runtime.openPicker
       case WebviewMsg.CloseSessionPicker             => runtime.closePicker
       case WebviewMsg.RenameSession(id, title, auto) =>

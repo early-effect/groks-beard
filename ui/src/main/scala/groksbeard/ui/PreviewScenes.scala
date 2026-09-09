@@ -94,7 +94,14 @@ object PreviewScenes:
               thought = "Need the file first.",
               stopReason = Some(StopReason.EndTurn),
             )
-          ),
+          ) ++ (2 to 10).toList.map { i =>
+            TurnView(
+              id = TurnId(s"t$i"),
+              user = Some(TurnUser(s"Keep going $i")),
+              agent = s"Still working through item $i.\n\n" + ("More context so the transcript overflows.\n" * 4),
+              stopReason = Some(StopReason.EndTurn),
+            )
+          },
         )
       case Scene.Permission =>
         ChatModel.empty.copy(
@@ -382,11 +389,24 @@ object PreviewScenes:
       case Scene.Workflows =>
         ChatModel.empty.copy(
           inSession = true,
-          workflows = List(WorkflowRun("review-changes", "verify", "running", "2/4")),
+          commands = List(SlashCommand("workflow", "Launch or manage a workflow")),
+          workflows = List(
+            WorkflowRun("review-changes", "verify", "running", "2/4"),
+            WorkflowRun("deep-research", "gather", "running", "1/3"),
+          ),
         )
       case Scene.Dashboard =>
         ChatModel.empty.copy(
           inSession = true,
+          sessionId = SessionId("disk-1"),
+          turns = List(
+            TurnView(
+              TurnId("t1"),
+              user = Some(TurnUser("keep me")),
+              agent = "ok",
+              stopReason = Some(StopReason.EndTurn),
+            )
+          ),
           dashboard = List(DashRow(SessionId("disk-1"), "Effect plan", "/repo", "idle", "Continue the plan", 10)),
         )
       case Scene.Btw =>

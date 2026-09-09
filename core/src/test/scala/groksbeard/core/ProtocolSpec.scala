@@ -69,6 +69,20 @@ object ProtocolSpec extends ZIOSpecDefault:
           wf.toJson.fromJson[WebviewMsg] == Right(wf),
         )
       },
+      test("setSetting and settingsState round-trip shareBackend") {
+        val set: WebviewMsg = WebviewMsg.SetSetting(SettingKey.ShareBackend, false)
+        val msg             = HostMsg.settings(SettingsState.defaults.copy(shareBackend = false))
+        val legacy          =
+          """{"_tag":"settingsState","cliPath":"","nodePath":"","includeActiveFileByDefault":true,"useCtrlEnterToSend":false,"changesPresentation":"toast"}"""
+        assertTrue(
+          set.toJson.fromJson[WebviewMsg] == Right(set),
+          msg.toJson.fromJson[HostMsg] == Right(msg),
+          legacy.fromJson[HostMsg].exists {
+            case s: HostMsg.Settings => s.shareBackend
+            case _                   => false
+          },
+        )
+      },
       test("renameSession and deleteSession round-trip") {
         val rename: WebviewMsg = WebviewMsg.RenameSession("s1", "Plan")
         val auto: WebviewMsg   = WebviewMsg.RenameSession("s1", "", auto = true)

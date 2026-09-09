@@ -120,6 +120,14 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionLoad.copy(SessionLoadKind.Locked) == "This session is open in the TUI",
         )
       },
+      test("SessionLoad classifies lock from error data when the message is generic") {
+        import zio.json.ast.Json
+        val data = Json.Obj("reason" -> Json.Str("already open in another client"))
+        assertTrue(
+          SessionLoad.classify("could not load session", json = Some(data)) == SessionLoadKind.Locked,
+          SessionLoad.classify("could not load session") == SessionLoadKind.Failed,
+        )
+      },
       test("dedupEmpty keeps the newest unused draft and every session with messages") {
         val rows = List(
           SessionRow("used", "Real work", activityMs = 9, messages = Some(4)),

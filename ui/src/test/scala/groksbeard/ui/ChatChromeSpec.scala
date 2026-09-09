@@ -118,6 +118,20 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("settings share Grok defaults on and toggles off") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Settings)
+          result <- withMounted(ui) { root =>
+            for
+              before <- root.button("setting-share-backend").innerText
+              _      <- root.button("setting-share-backend").click
+              after  <- waitText(root, "setting-share-backend", "Share Grok: off")
+            yield assertTrue(before.contains("on"), after.contains("off"))
+          }
+        yield result
+        end for
+      },
       test("settings arrows from the composer move the highlight") {
         val bridge = PreviewBridge()
         for
@@ -127,8 +141,8 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _     <- waitPresent(root, "settings-panel")
               _     <- root.textarea("draft").press("ArrowDown")
               _     <- root.textarea("draft").press("Enter")
-              after <- waitContains(root, "setting-active-file", "off")
-            yield assertTrue(after.contains("off"))
+              after <- waitText(root, "setting-ctrl-enter", "Ctrl+Enter to send: on")
+            yield assertTrue(after.contains("on"))
           }
         yield result
         end for

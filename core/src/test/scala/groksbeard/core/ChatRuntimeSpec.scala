@@ -1677,12 +1677,20 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       },
       test("setSetting posts the patched settings") {
         chat() { (rt, posted) =>
-          rt.setSetting("useCtrlEnterToSend", true) *> posted.get.map { msgs =>
-            assertTrue(msgs.exists {
-              case s: HostMsg.Settings => s.useCtrlEnterToSend
-              case _                   => false
-            })
-          }
+          rt.setSetting(SettingKey.UseCtrlEnterToSend, true) *>
+            rt.setSetting(SettingKey.ShareBackend, false) *>
+            posted.get.map { msgs =>
+              assertTrue(
+                msgs.exists {
+                  case s: HostMsg.Settings => s.useCtrlEnterToSend
+                  case _                   => false
+                },
+                msgs.exists {
+                  case s: HostMsg.Settings => !s.shareBackend
+                  case _                   => false
+                },
+              )
+            }
         }
       },
       test("renameSession posts the new title on sessionMeta and the list") {

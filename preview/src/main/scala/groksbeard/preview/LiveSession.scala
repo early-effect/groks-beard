@@ -41,7 +41,7 @@ object LiveSession:
             }
             .as(ZIO.unit)
         case Right(cmd) =>
-          val args = Spawn.grokAgentStdioArgs()
+          val args = Spawn.grokAgentStdioArgs(shareBackend = true)
           log(s"spawning $cmd ${args.mkString(" ")}")
           val note     = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
           val gone     = new java.util.concurrent.atomic.AtomicReference[UIO[Unit]](ZIO.unit)

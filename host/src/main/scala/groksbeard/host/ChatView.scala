@@ -16,10 +16,12 @@ final class ChatView(
     rememberSelection: PromptChip => Unit = _ => (),
 ) extends WebviewViewProvider:
 
-  private var runtime: Option[ChatRuntime] = None
-  private var missingCli: Option[String]   = None
-  private var pendingReady: Boolean        = false
-  private var toHost: HostMsg => UIO[Unit] = _ => ZIO.unit
+  private var runtime: Option[ChatRuntime]  = None
+  private var missingCli: Option[String]    = None
+  private var pendingReady: Boolean         = false
+  private var toHost: HostMsg => UIO[Unit]  = _ => ZIO.unit
+  private var spawnedShare: Option[Boolean] = None
+  private val spawnGen                      = new java.util.concurrent.atomic.AtomicInteger(0)
 
   def current: Option[ChatRuntime] = runtime
 
@@ -118,6 +120,12 @@ final class ChatView(
           case WebviewMsg.SetSetting(k, v) =>
             writeSetting(k, v)
             HostRuntime.runUIO(HostDispatch(rt, msg, post))
+            k match
+              case SettingKey.ShareBackend =>
+                v match
+                  case b: Boolean => rebindIfShareChanged(post, b)
+                  case _          => ()
+              case _ => ()
           case _ => HostRuntime.runUIO(HostDispatch(rt, msg, post))
       case None =>
         missingCli match
@@ -134,16 +142,20 @@ final class ChatView(
 
   private def bindAgent(post: HostMsg => UIO[Unit]): Unit =
     val cwd     = vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath).getOrElse(".")
-    val cliPath = vscode.workspace.getConfiguration("groksBeard").get[String]("cliPath").toOption.filter(_.nonEmpty)
-    val env     = (k: String) => nodeProcess.env.get(k).flatMap(_.toOption)
-    val win     = nodeProcess.platform == "win32"
+    val cliPath =
+      vscode.workspace.getConfiguration("groksBeard").get[String](SettingKey.CliPath.wire).toOption.filter(_.nonEmpty)
+    val env = (k: String) => nodeProcess.env.get(k).flatMap(_.toOption)
+    val win = nodeProcess.platform == "win32"
     CliLocator.locate(LocateGrok(cliPath, env, win, nodeFs.existsSync)) match
       case Left(searched) =>
         val err = Onboarding.missingCliMessage(searched)
         missingCli = Some(err)
         out.line(err)
       case Right(cmd) =>
-        val args = Spawn.grokAgentStdioArgs()
+        val share = readSettings().shareBackend
+        spawnedShare = Some(share)
+        val gen  = spawnGen.incrementAndGet()
+        val args = Spawn.grokAgentStdioArgs(shareBackend = share)
         out.line(s"spawning $cmd ${args.mkString(" ")}")
         val note = new java.util.concurrent.atomic.AtomicReference[String => UIO[Unit]](_ => ZIO.unit)
         val gone = new java.util.concurrent.atomic.AtomicReference[UIO[Unit]](ZIO.unit)
@@ -158,7 +170,7 @@ final class ChatView(
               cwd,
               out.line,
               onErr = line => note.get()(line),
-              onExit = _ => gone.get(),
+              onExit = _ => if spawnGen.get() == gen then gone.get() else ZIO.unit,
               run = HostRuntime.runUIO,
             )
             .flatMap { transport =>
@@ -221,7 +233,18 @@ final class ChatView(
   end bindAgent
 
   def refreshSettings(): Unit =
-    runtime.foreach(rt => HostRuntime.runUIO(rt.replaceSettings(readSettings())))
+    val next = readSettings()
+    runtime.foreach(rt => HostRuntime.runUIO(rt.replaceSettings(next)))
+    rebindIfShareChanged(toHost, next.shareBackend)
+
+  private def rebindIfShareChanged(post: HostMsg => UIO[Unit], share: Boolean): Unit =
+    if spawnedShare.contains(share) then ()
+    else
+      spawnGen.incrementAndGet()
+      runtime.foreach(rt => HostRuntime.runUIO(rt.close))
+      runtime = None
+      pendingReady = true
+      bindAgent(post)
 
   def addSelection(): Unit =
     activeSelectionChip() match
@@ -258,28 +281,28 @@ final class ChatView(
   private def readSettings(): SettingsState =
     val cfg = vscode.workspace.getConfiguration("groksBeard")
     SettingsState(
-      cliPath = cfg.get[String]("cliPath").toOption.getOrElse(""),
-      nodePath = cfg.get[String]("nodePath").toOption.getOrElse(""),
-      includeActiveFileByDefault = cfg.get[Boolean]("includeActiveFileByDefault").toOption.getOrElse(true),
-      useCtrlEnterToSend = cfg.get[Boolean]("useCtrlEnterToSend").toOption.getOrElse(false),
-      changesPresentation = cfg.get[String]("changesPresentation").toOption.getOrElse("toast"),
+      cliPath = cfg.get[String](SettingKey.CliPath.wire).toOption.getOrElse(""),
+      nodePath = cfg.get[String](SettingKey.NodePath.wire).toOption.getOrElse(""),
+      includeActiveFileByDefault = cfg.get[Boolean](SettingKey.IncludeActiveFile.wire).toOption.getOrElse(true),
+      useCtrlEnterToSend = cfg.get[Boolean](SettingKey.UseCtrlEnterToSend.wire).toOption.getOrElse(false),
+      changesPresentation = cfg.get[String](SettingKey.ChangesPresentation.wire).toOption.getOrElse("toast"),
+      shareBackend = cfg.get[Boolean](SettingKey.ShareBackend.wire).toOption.getOrElse(true),
     )
+  end readSettings
 
-  private def writeSetting(key: String, value: String | Boolean): Unit =
+  private def writeSetting(key: SettingKey, value: String | Boolean): Unit =
     val cfg = vscode.workspace.getConfiguration("groksBeard")
-    key match
-      case "includeActiveFileByDefault" | "useCtrlEnterToSend" =>
-        value match
-          case b: Boolean =>
-            val _ = cfg.update(key, b, ConfigurationTarget.Global)
-          case _ => ()
-      case "cliPath" | "nodePath" | "changesPresentation" =>
-        value match
-          case s: String =>
-            val _ = cfg.update(key, s, ConfigurationTarget.Global)
-          case _ => ()
-      case _ => ()
-    end match
+    if key.flag then
+      value match
+        case b: Boolean =>
+          val _ = cfg.update(key.wire, b, ConfigurationTarget.Global)
+        case _ => ()
+    else
+      value match
+        case s: String =>
+          val _ = cfg.update(key.wire, s, ConfigurationTarget.Global)
+        case _ => ()
+    end if
   end writeSetting
 
   private def workspaceRoot: Option[String] =

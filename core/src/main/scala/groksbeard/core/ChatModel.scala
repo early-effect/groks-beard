@@ -297,8 +297,17 @@ object ChatModel:
         model.copy(commands = commands)
       case HostMsg.MentionResults(query, files) =>
         model.copy(mentionQuery = query, mentionFiles = files)
-      case HostMsg.Settings(cliPath, nodePath, include, ctrl, pres) =>
-        model.copy(settings = SettingsState(cliPath, nodePath, include, ctrl, pres))
+      case s: HostMsg.Settings =>
+        model.copy(
+          settings = SettingsState(
+            s.cliPath,
+            s.nodePath,
+            s.includeActiveFileByDefault,
+            s.useCtrlEnterToSend,
+            s.changesPresentation,
+            s.shareBackend,
+          )
+        )
       case HostMsg.Transcript(turns) =>
         model.copy(
           turns = turns,

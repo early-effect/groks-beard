@@ -65,6 +65,7 @@ object SessionFacts:
       Some(FactRow("title", "Title", named, named)),
       sessionId(model).map(id => FactRow("session", "Session", id, id)),
       directory(model),
+      Some(backendRow(model)),
       Some(modelRow(model)),
       Some(modeRow(model)),
       Some(turnsRow(model)),
@@ -84,6 +85,10 @@ object SessionFacts:
 
   private def directory(model: ChatModel): Option[FactRow] =
     Option(model.cwd).map(_.trim).filter(_.nonEmpty).map(d => FactRow("directory", "Directory", d, d))
+
+  private def backendRow(model: ChatModel): FactRow =
+    val line = Spawn.backendLabel(model.settings.shareBackend)
+    FactRow("backend", "Backend", line, line)
 
   private def modelRow(model: ChatModel): FactRow =
     val line = modelLine(model)

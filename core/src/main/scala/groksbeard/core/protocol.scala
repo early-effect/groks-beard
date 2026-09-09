@@ -21,11 +21,20 @@ final case class SettingsState(
     includeActiveFileByDefault: Boolean,
     useCtrlEnterToSend: Boolean,
     changesPresentation: String,
+    shareBackend: Boolean = true,
 ) derives JsonCodec
 
 object SettingsState:
   val defaults: SettingsState =
-    SettingsState("", "", includeActiveFileByDefault = true, useCtrlEnterToSend = false, "toast")
+    SettingsState(
+      "",
+      "",
+      includeActiveFileByDefault = true,
+      useCtrlEnterToSend = false,
+      "toast",
+      shareBackend = true,
+    )
+end SettingsState
 
 @jsonDiscriminator("_tag")
 enum HostMsg derives JsonCodec:
@@ -55,6 +64,7 @@ enum HostMsg derives JsonCodec:
       includeActiveFileByDefault: Boolean,
       useCtrlEnterToSend: Boolean,
       changesPresentation: String,
+      shareBackend: Boolean = true,
   )
   @jsonHint("composerChip") case ComposerChip(
       path: String,
@@ -138,6 +148,7 @@ object HostMsg:
       state.includeActiveFileByDefault,
       state.useCtrlEnterToSend,
       state.changesPresentation,
+      state.shareBackend,
     )
 
   def permission(card: PermissionCard): HostMsg =
@@ -181,7 +192,7 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("setModel") case SetModel(modelId: ModelId, effort: String = "")
   @jsonHint("setEffort") case SetEffort(level: String)
   @jsonHint("openSettings") case OpenSettings
-  @jsonHint("setSetting") case SetSetting(key: String, value: String | Boolean)
+  @jsonHint("setSetting") case SetSetting(key: SettingKey, value: String | Boolean)
   @jsonHint("permissionChoice") case PermissionChoice(requestId: RequestId, optionId: String)
   @jsonHint("permissionPark") case PermissionPark(requestId: RequestId)
   @jsonHint("openDiff") case OpenDiff(requestId: RequestId)

@@ -204,6 +204,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, Enter inserts a newline and Ctrl/Cmd+Enter sends."
+        },
+        "groksBeard.shareBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Join a running Grok leader so the TUI and Beard stay in sync. Beard still starts a stdio client (`grok agent --leader stdio`). The TUI must enable leader mode itself (`[cli] use_leader`); Beard does not write that setting. Off starts a private agent (`--no-leader`)."
         }
       }
     },

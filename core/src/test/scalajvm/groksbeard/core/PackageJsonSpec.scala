@@ -28,6 +28,7 @@ object PackageJsonSpec extends ZIOSpecDefault:
           json.contains("ctrl+shift+;"),
           json.contains("includeActiveFileByDefault"),
           json.contains("useCtrlEnterToSend"),
+          json.contains("shareBackend"),
           json.contains("editorHasSelection"),
         )
       }

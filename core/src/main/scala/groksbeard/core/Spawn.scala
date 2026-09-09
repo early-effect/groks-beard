@@ -3,9 +3,15 @@ package groksbeard.core
 object Spawn:
   val AgentStdio: List[String] = List("agent", "stdio")
 
-  def grokAgentStdioArgs(trustFolder: Boolean = false): List[String] =
-    if trustFolder then "--trust" :: AgentStdio else AgentStdio
+  /** `--leader` joins `~/.grok/leader.sock` or auto-starts that leader. `--no-leader` is a private backend. */
+  def grokAgentStdioArgs(trustFolder: Boolean = false, shareBackend: Boolean = true): List[String] =
+    val trust  = if trustFolder then List("--trust") else Nil
+    val leader = if shareBackend then List("--leader") else List("--no-leader")
+    trust ::: "agent" :: leader ::: List("stdio")
 
   def assertNoYoloArgs(args: List[String]): Boolean =
-    !args.contains("--always-approve") && !args.contains("--yolo") && !args.contains("--no-leader")
+    !args.contains("--always-approve") && !args.contains("--yolo")
+
+  def backendLabel(shareBackend: Boolean): String =
+    if shareBackend then "Shared Grok" else "Private agent"
 end Spawn

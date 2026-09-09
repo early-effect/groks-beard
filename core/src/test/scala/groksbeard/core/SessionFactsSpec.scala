@@ -26,10 +26,20 @@ object SessionFactsSpec extends ZIOSpecDefault:
           SessionFacts.sessionId(model).contains("sess_1"),
           SessionFacts.modelLine(model) == "Grok 4.6 · high",
           SessionFacts.turns(model) == 1,
-          ids == List("title", "session", "directory", "model", "mode", "turns", "context", "mcp"),
+          ids == List("title", "session", "directory", "backend", "model", "mode", "turns", "context", "mcp"),
+          rows.find(_.id == "backend").exists(_.value == "Shared Grok"),
           rows.find(_.id == "context").exists(_.value.contains("12k")),
           rows.find(_.id == "mcp").exists(_.value == "metals"),
           SessionFacts.block(SessionPane.Info, model).contains("sess_1"),
+        )
+      },
+      test("info backend row follows shareBackend") {
+        val shared   = SessionFacts.info(ChatModel.empty)
+        val isolated =
+          SessionFacts.info(ChatModel.empty.copy(settings = SettingsState.defaults.copy(shareBackend = false)))
+        assertTrue(
+          shared.find(_.id == "backend").exists(_.value == "Shared Grok"),
+          isolated.find(_.id == "backend").exists(_.value == "Private agent"),
         )
       },
       test("context rows split used, free, and window without inventing categories") {

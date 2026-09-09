@@ -2027,7 +2027,7 @@ object ChatApp:
           case OpenMenu.Mode     => c.modes.map(_.id.value)
           case OpenMenu.Model    => c.models.map(_.modelId.value)
           case OpenMenu.Effort   => levelsOf(c).map(_.value)
-          case OpenMenu.Settings => List("useCtrlEnterToSend", "includeActiveFileByDefault")
+          case OpenMenu.Settings => SettingKey.Panel.map(_.wire)
 
       def menuStart(c: ChatModel, menu: OpenMenu): Int =
         val ids = menuIds(c, menu)
@@ -2147,18 +2147,13 @@ object ChatApp:
           chat.update(_.copy(effort = level.value, error = None)) *>
           ZIO.succeed(bridge.post(WebviewMsg.SetEffort(level.value)))
 
-      def chooseSetting(id: String): UIO[Unit] =
+      def chooseSetting(key: SettingKey): UIO[Unit] =
         chat.get.flatMap { c =>
-          id match
-            case "useCtrlEnterToSend" =>
-              val next = !c.settings.useCtrlEnterToSend
-              chat.update(_.copy(settings = c.settings.copy(useCtrlEnterToSend = next))) *>
-                ZIO.succeed(bridge.post(WebviewMsg.SetSetting("useCtrlEnterToSend", next)))
-            case "includeActiveFileByDefault" =>
-              val next = !c.settings.includeActiveFileByDefault
-              chat.update(_.copy(settings = c.settings.copy(includeActiveFileByDefault = next))) *>
-                ZIO.succeed(bridge.post(WebviewMsg.SetSetting("includeActiveFileByDefault", next)))
-            case _ => ZIO.unit
+          key.toggle(c.settings) match
+            case None       => ZIO.unit
+            case Some(next) =>
+              chat.update(_.copy(settings = key.patch(c.settings, next))) *>
+                ZIO.succeed(bridge.post(WebviewMsg.SetSetting(key, next)))
         }
 
       def pickMenuRow(menu: OpenMenu, id: String): UIO[Unit] =
@@ -2172,7 +2167,7 @@ object ChatApp:
             chat.get.flatMap { c =>
               levelsOf(c).find(_.value == id).map(chooseEffort).getOrElse(ZIO.unit)
             }
-          case OpenMenu.Settings => chooseSetting(id)
+          case OpenMenu.Settings => SettingKey.parse(id).map(chooseSetting).getOrElse(ZIO.unit)
 
       def onMenuKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
         val key = e.key
@@ -2870,7 +2865,7 @@ object ChatApp:
       chooseMode: ModeId => UIO[Unit],
       chooseModel: ModelOption => UIO[Unit],
       chooseEffort: EffortLevel => UIO[Unit],
-      chooseSetting: String => UIO[Unit],
+      chooseSetting: SettingKey => UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       when(openMenu.map(_.contains(OpenMenu.Mode)))(
@@ -2940,28 +2935,17 @@ object ChatApp:
           TestId("settings-panel"),
           forEach(
             Squawk.zipWith(chat, menuIdx) { (c, idx) =>
-              List(
-                (
-                  "ctrl-enter",
-                  "useCtrlEnterToSend",
-                  if c.settings.useCtrlEnterToSend then "Ctrl+Enter to send: on" else "Ctrl+Enter to send: off",
-                  idx.contains(0),
-                ),
-                (
-                  "active-file",
-                  "includeActiveFileByDefault",
-                  if c.settings.includeActiveFileByDefault then "Include active file: on"
-                  else "Include active file: off",
-                  idx.contains(1),
-                ),
-              )
+              SettingKey.Panel.zipWithIndex.map { (key, i) =>
+                (key, key.panelLabel(c.settings), idx.contains(i))
+              }
             }
-          )(t => s"${t._1}-${t._3}-${t._4}") { t =>
-            val (testId, id, label, on) = t
+          )(t => s"${t._1.wire}-${t._2}-${t._3}") { t =>
+            val (key, label, on) = t
             E.button(
               if on then Send else MenuItem,
-              TestId(s"setting-$testId"),
-              Ev.onClick(_ => chooseSetting(id)),
+              TestId(s"setting-${key.testId}"),
+              A.title(key.hint),
+              Ev.onClick(_ => chooseSetting(key)),
               label,
             )
           },
@@ -3034,6 +3018,9 @@ object ChatApp:
       E.button(
         Chip,
         TestId("settings"),
+        A.title(
+          chat.map(c => s"Settings · ${Spawn.backendLabel(c.settings.shareBackend)}")
+        ),
         Ev.onClick(_ => toggleMenu(OpenMenu.Settings)),
         "Settings",
       ),

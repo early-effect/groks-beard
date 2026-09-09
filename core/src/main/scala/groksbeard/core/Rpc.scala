@@ -3,7 +3,7 @@ package groksbeard.core
 import zio.json.*
 import zio.json.ast.Json
 
-final case class RpcError(code: Int, message: String) derives JsonCodec
+final case class RpcError(code: Int, message: String, data: Option[Json] = None) derives JsonCodec
 
 enum RpcId:
   case Str(value: String)

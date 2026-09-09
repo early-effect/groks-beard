@@ -216,9 +216,9 @@ final class ChatRuntime private (
     edit(_.copy(settingsState = next)) *> post(HostMsg.settings(next))
   }
 
-  def setSetting(key: String, value: String | Boolean): UIO[Unit] = exclusive {
+  def setSetting(key: SettingKey, value: String | Boolean): UIO[Unit] = exclusive {
     snap.flatMap { s =>
-      val next = ChatRuntime.patchSettings(s.settingsState, key, value)
+      val next = key.patch(s.settingsState, value)
       put(s.copy(settingsState = next)) *> post(HostMsg.settings(next))
     }
   }
@@ -1304,7 +1304,7 @@ final class ChatRuntime private (
         val base   = popped.copy(loading = false, pendingResume = None)
         error match
           case Some(err) =>
-            val kind = SessionLoad.classify(err.message, Some(err.code.toString))
+            val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
             val sid  = wanted.getOrElse(SessionId.empty)
             put(base.copy(pendingForkPrompt = None)) *>
               post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
@@ -1521,7 +1521,7 @@ final class ChatRuntime private (
     snap.flatMap { s =>
       error match
         case Some(err) =>
-          val kind = SessionLoad.classify(err.message, Some(err.code.toString))
+          val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
           val sid  = s.sessionId.getOrElse(SessionId.empty)
           post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
             (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
@@ -1688,27 +1688,4 @@ object ChatRuntime:
   def seedSettings(base: SettingsState, includeActiveFile: () => Boolean): SettingsState =
     base.copy(includeActiveFileByDefault = includeActiveFile())
 
-  def patchSettings(state: SettingsState, key: String, value: String | Boolean): SettingsState =
-    key match
-      case "useCtrlEnterToSend" =>
-        value match
-          case b: Boolean => state.copy(useCtrlEnterToSend = b)
-          case _          => state
-      case "includeActiveFileByDefault" =>
-        value match
-          case b: Boolean => state.copy(includeActiveFileByDefault = b)
-          case _          => state
-      case "changesPresentation" =>
-        value match
-          case s: String => state.copy(changesPresentation = s)
-          case _         => state
-      case "cliPath" =>
-        value match
-          case s: String => state.copy(cliPath = s)
-          case _         => state
-      case "nodePath" =>
-        value match
-          case s: String => state.copy(nodePath = s)
-          case _         => state
-      case _ => state
 end ChatRuntime

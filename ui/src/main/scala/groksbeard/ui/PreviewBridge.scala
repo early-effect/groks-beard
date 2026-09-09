@@ -108,28 +108,7 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.OpenSettings =>
         emit(HostMsg.settings(settings))
       case WebviewMsg.SetSetting(key, value) =>
-        settings = key match
-          case "useCtrlEnterToSend" =>
-            value match
-              case b: Boolean => settings.copy(useCtrlEnterToSend = b)
-              case _          => settings
-          case "includeActiveFileByDefault" =>
-            value match
-              case b: Boolean => settings.copy(includeActiveFileByDefault = b)
-              case _          => settings
-          case "changesPresentation" =>
-            value match
-              case s: String => settings.copy(changesPresentation = s)
-              case _         => settings
-          case "cliPath" =>
-            value match
-              case s: String => settings.copy(cliPath = s)
-              case _         => settings
-          case "nodePath" =>
-            value match
-              case s: String => settings.copy(nodePath = s)
-              case _         => settings
-          case _ => settings
+        settings = key.patch(settings, value)
         emit(HostMsg.settings(settings))
       case WebviewMsg.Fork(worktree, directive) =>
         val where = if worktree then "a worktree" else "this workspace"

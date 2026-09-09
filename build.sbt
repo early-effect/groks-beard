@@ -157,6 +157,25 @@ lazy val ui = (projectMatrix in file("ui"))
           javaTimePolyfill,
           MyVersions.chekhovUi,
           chekhovBrowser := "firefox",
+          chekhovInstall := Def.uncached {
+            val log      = streams.value.log
+            val browsers = chekhovBrowsers.value.toList
+            def go(n: Int): Unit =
+              chekhov.protocol.PinnedPlaywright.install(
+                browsers = browsers,
+                log      = msg => log.info(msg),
+              ) match
+                case Right(cli) =>
+                  log.info(
+                    s"Pinned Playwright ${chekhov.protocol.PinnedPlaywright.version} CLI: $cli (${browsers.map(_.channelName).mkString(", ")})"
+                  )
+                case Left(err) if n < 3 =>
+                  log.warn(s"chekhovInstall attempt $n failed: $err; retrying")
+                  Thread.sleep(8000)
+                  go(n + 1)
+                case Left(err) => sys.error(err)
+            go(1)
+          },
           Test / fork    := false,
           Test / jsEnv   := Def.uncached(chekhovJSEnv.value),
           Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),

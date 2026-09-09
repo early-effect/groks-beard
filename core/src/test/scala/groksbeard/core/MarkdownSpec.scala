@@ -5,6 +5,42 @@ import zio.test.*
 object MarkdownSpec extends ZIOSpecDefault:
   def spec =
     suite("Markdown")(
+      test("parses a GFM table, ordered list, and grouped quote") {
+        val blocks = Markdown.parse(
+          """> first
+            |> second
+            |
+            |1. alpha
+            |2. beta
+            |
+            || What | Value |
+            || --- | --- |
+            || module | 3.9.0 |
+            || fallback | 3.8.4 |
+            |""".stripMargin
+        )
+        val quote = blocks.collectFirst { case Markdown.Block.Quote(in) =>
+          in.collect { case Markdown.Inline.Text(t) => t }.mkString
+        }
+        val ordered = blocks.collectFirst { case Markdown.Block.Ordered(items) => items.size }
+        val table   = blocks.collectFirst { case Markdown.Block.Table(h, rows) => (h.size, rows.size) }
+        assertTrue(
+          quote.contains("first second"),
+          ordered.contains(2),
+          table.contains((2, 2)),
+        )
+      },
+      test("a pipe row without a separator is a paragraph") {
+        val lone                                         = Markdown.parse("| a | b |")
+        val ragged                                       = Markdown.parse("| Feature | Status |\n| Fast | yes |")
+        val sep                                          = Markdown.parse("| --- | --- |")
+        def paras(blocks: List[Markdown.Block]): Boolean =
+          blocks.nonEmpty && blocks.forall {
+            case Markdown.Block.Paragraph(_) => true
+            case _                           => false
+          }
+        assertTrue(paras(lone), paras(ragged), ragged.size == 2, paras(sep))
+      },
       test("parses headings, fences, bullets, and inlines") {
         val blocks = Markdown.parse(
           """# Title

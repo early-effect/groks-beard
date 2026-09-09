@@ -21,7 +21,9 @@ object Markdown:
     case Heading(level: Int, inlines: List[Inline])
     case Fence(lang: Option[String], body: String)
     case Bullet(items: List[List[Inline]])
+    case Ordered(items: List[List[Inline]])
     case Quote(inlines: List[Inline])
+    case Table(headers: List[List[Inline]], rows: List[List[List[Inline]]])
 
   object Block:
     given Eq[Block] = (a, b) => a == b
@@ -77,22 +79,59 @@ object Markdown:
         val level = headingLevel(line).get
         val body  = line.dropWhile(_ == '#').trim
         Block.Heading(level, inlines(body)) :: parseBlocks(rest)
-      case line :: rest if line.startsWith("> ") || line == ">" =>
-        val body = if line == ">" then "" else line.drop(2)
-        Block.Quote(inlines(body)) :: parseBlocks(rest)
+      case line :: rest if isQuote(line) =>
+        val (group, after) = (line :: rest).span(isQuote)
+        Block.Quote(inlines(group.map(quoteBody).mkString(" "))) :: parseBlocks(after)
       case line :: rest if isBullet(line) =>
         val (group, after) = (line :: rest).span(isBullet)
         val items          = group.map(l => inlines(l.replaceFirst("^[-*]\\s+", "")))
         Block.Bullet(items) :: parseBlocks(after)
+      case line :: rest if isOrdered(line) =>
+        val (group, after) = (line :: rest).span(isOrdered)
+        val items          = group.map(l => inlines(l.replaceFirst("^\\d+\\.\\s+", "")))
+        Block.Ordered(items) :: parseBlocks(after)
+      case line :: rest if isTableRow(line) && rest.headOption.exists(isTableSep) =>
+        val header        = cells(line).map(inlines)
+        val (body, after) = rest.drop(1).span(isTableRow)
+        val rows          = body.map(l => cells(l).map(inlines))
+        Block.Table(header, rows) :: parseBlocks(after)
       case line :: rest =>
-        val (group, after) = (line :: rest).span(l =>
-          l.trim.nonEmpty && !l.startsWith("```") && headingLevel(l).isEmpty && !isBullet(l) &&
-            !l.startsWith("> ")
-        )
-        Block.Paragraph(inlines(group.mkString(" "))) :: parseBlocks(after)
+        val (group, after)    = (line :: rest).span(continuesParagraph)
+        val (taken, leftover) =
+          if group.isEmpty then (List(line), rest) else (group, after)
+        Block.Paragraph(inlines(taken.mkString(" "))) :: parseBlocks(leftover)
+
+  private def continuesParagraph(line: String): Boolean =
+    line.trim.nonEmpty && !line.startsWith("```") && headingLevel(line).isEmpty && !isBullet(line) &&
+      !isQuote(line) && !isOrdered(line) && !isTableRow(line)
 
   private def isBullet(line: String): Boolean =
     line.startsWith("- ") || line.startsWith("* ")
+
+  private def isOrdered(line: String): Boolean =
+    val i = line.indexOf(". ")
+    i > 0 && line.take(i).forall(_.isDigit)
+
+  private def isQuote(line: String): Boolean =
+    line.startsWith("> ") || line == ">"
+
+  private def quoteBody(line: String): String =
+    if line == ">" then "" else line.drop(2)
+
+  private def isTableRow(line: String): Boolean =
+    val t = line.trim
+    t.startsWith("|") && t.count(_ == '|') >= 2
+
+  private def isTableSep(line: String): Boolean =
+    val t = line.trim
+    t.startsWith("|") && t.exists(_ == '-') && t.forall(c => c == '|' || c == '-' || c == ':' || c.isWhitespace)
+
+  private def cells(line: String): List[String] =
+    val t   = line.trim
+    val cut =
+      val a = if t.startsWith("|") then t.drop(1) else t
+      if a.endsWith("|") then a.dropRight(1) else a
+    cut.split("\\|", -1).map(_.trim).toList
 
   private def headingLevel(line: String): Option[Int] =
     val hashes = line.takeWhile(_ == '#').length

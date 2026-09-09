@@ -34,6 +34,9 @@ object Tasks:
   def running(rows: List[TaskRow]): List[TaskRow] =
     rows.filter(r => TaskStatus.isLive(r.status))
 
+  def isLive(rows: List[TaskRow]): Boolean =
+    running(rows).nonEmpty
+
   def grouped(rows: List[TaskRow]): List[(Option[String], List[TaskRow])] =
     val subs = rows.filter(_.kind == TaskKind.Subagent)
     val rest = rows.filterNot(_.kind == TaskKind.Subagent)

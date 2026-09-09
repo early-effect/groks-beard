@@ -1,13 +1,21 @@
 package groksbeard.ui
 
 import ascent.*
+import ascent.css.CssClass
+import ascent.css.Styles.*
 import ascent.dsl.*
+import ascent.dsl.Arg
 import groksbeard.core.Markdown
 import groksbeard.core.Markdown.{Block, Inline}
 import groksbeard.core.TurnView
 import zio.Chunk
 
 object ChatMarkdown:
+  object TableWrap
+      extends CssClass(
+        overflowX.auto,
+        maxWidth.pct(100),
+      )
 
   def parts(turn: TurnView): (Seq[(String, Block)], String) =
     val (done, tail) =
@@ -35,7 +43,25 @@ object ChatMarkdown:
       case Block.Fence(_, body) => E.pre(E.code(body))
       case Block.Bullet(items)  =>
         E.ul(items.map(item => E.li(item.map(inline)*))*)
-      case Block.Quote(in) => E.blockquote(in.map(inline)*)
+      case Block.Ordered(items) =>
+        E.ol(items.map(item => E.li(item.map(inline)*))*)
+      case Block.Quote(in)            => E.blockquote(in.map(inline)*)
+      case Block.Table(headers, rows) =>
+        E.div(
+          TableWrap,
+          TestId("md-table"),
+          E.table(
+            E.thead(E.tr(headers.map(cell => E.th(cell.map(inline)*))*)),
+            E.tbody(
+              rows.zipWithIndex.map { (row, i) =>
+                E.tr(
+                  TestId(s"md-row-$i"),
+                  Arg.ArgsArg(row.map(cell => Arg.ChildArg(E.td(cell.map(inline)*)))),
+                )
+              }*
+            ),
+          ),
+        )
 
   private def inline(n: Inline): ascent.ast.UI[Any] =
     n match

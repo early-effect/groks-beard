@@ -616,6 +616,35 @@ object ChatChromeSpec extends ZIOSpecDefault:
           }
         yield result
       },
+      test("transcript scene renders headings, tables, fences, and lists") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              agent <- waitPresent(root, "agent-t1") *> root.getByTestId("agent-t1").innerText
+              table <- waitPresent(root, "md-table") *> root.getByTestId("md-table").innerText
+              row   <- waitPresent(root, "md-row-0") *> root.getByTestId("md-row-0").innerText
+              el    <- ZIO.succeed(root.element.querySelector("""[data-testid="agent-t1"]"""))
+              ol     = Option(el.querySelector("ol li")).exists(_.textContent.contains("Prefer the common setting"))
+              fence  = Option(el.querySelector("pre code")).exists(_.textContent.contains("no ThisBuild"))
+              jsHref = Option(el.querySelector("""a[href^="javascript:"]""")).isEmpty
+              https  = Option(el.querySelector("""a[href^="https://"]""")).isDefined
+            yield assertTrue(
+              agent.contains("What sbt 2.x actually says"),
+              agent.contains("entry is"),
+              table.contains("What"),
+              table.contains("Value"),
+              row.contains("3.9.0"),
+              ol,
+              fence,
+              jsHref,
+              https,
+            )
+          }
+        yield result
+        end for
+      },
       test("a tool path in the transcript is clickable") {
         val bridge = PreviewBridge()
         for
@@ -767,7 +796,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
-      test("todos scene lists entries and Hide collapses them") {
+      test("todos scene lists entries and Hide dismisses the pane") {
         val bridge = PreviewBridge()
         for
           ui     <- ChatApp.component(bridge, None, Scene.Todos)
@@ -777,7 +806,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               row  <- waitPresent(root, "todo-2") *> root.getByTestId("todo-2").innerText
               done <- waitPresent(root, "todo-1") *> root.getByTestId("todo-1").innerText
               _    <- root.button("todos-toggle").click
-              _    <- waitGone(root, "todos-list")
+              _    <- waitGone(root, "todos")
             yield assertTrue(
               head.contains("Todos 1/3"),
               head.contains("Wire ACP plan updates"),
@@ -796,7 +825,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
             for
               _ <- waitPresent(root, "todos-list")
               _ <- ZIO.succeed(fireCtrlT(root, "draft"))
-              _ <- waitGone(root, "todos-list")
+              _ <- waitGone(root, "todos")
               _ <- ZIO.succeed(fireCtrlT(root, "draft"))
               _ <- waitPresent(root, "todos-list")
             yield assertTrue(true)
@@ -804,7 +833,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
-      test("tasks scene lists running work and Hide collapses them") {
+      test("tasks scene lists running work and Hide dismisses the pane") {
         val bridge = PreviewBridge()
         for
           ui     <- ChatApp.component(bridge, None, Scene.Tasks)
@@ -814,7 +843,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
               status <- waitPresent(root, "tasks-status") *> root.getByTestId("tasks-status").innerText
               row    <- waitPresent(root, "task-loop-1") *> root.getByTestId("task-loop-1").innerText
               _      <- root.button("tasks-toggle").click
-              _      <- waitGone(root, "tasks-list")
+              _      <- waitGone(root, "tasks")
             yield assertTrue(
               head.contains("Tasks 3 running"),
               status.contains("1 command"),
@@ -834,7 +863,7 @@ object ChatChromeSpec extends ZIOSpecDefault:
             for
               _ <- waitPresent(root, "tasks-list")
               _ <- ZIO.succeed(fireCtrlG(root, "draft"))
-              _ <- waitGone(root, "tasks-list")
+              _ <- waitGone(root, "tasks")
               _ <- ZIO.succeed(fireCtrlG(root, "draft"))
               _ <- waitPresent(root, "tasks-list")
             yield assertTrue(true)
@@ -903,11 +932,15 @@ object ChatChromeSpec extends ZIOSpecDefault:
               block <- waitContains(root, "subagent-sub-1", "Subagent running")
               _     <- ZIO.succeed(bridge.push(HostMsg.Tasks(List(live.copy(status = TaskStatus.Completed)))))
               done  <- waitContains(root, "subagent-sub-1", "Subagent completed")
+              _     <- waitGone(root, "tasks")
+              _     <- ZIO.succeed(fireCtrlG(root, "draft"))
+              hist  <- waitPresent(root, "task-sub-1") *> root.getByTestId("task-sub-1").innerText
             yield assertTrue(
               group.contains("Subagents"),
               block.contains("Subagent running"),
               done.contains("Subagent completed"),
               !done.contains("Task completed"),
+              hist.contains("Research spawn_subagent"),
             )
           }
         yield result
@@ -932,6 +965,19 @@ object ChatChromeSpec extends ZIOSpecDefault:
               }
               head <- waitPresent(root, "todos") *> root.getByTestId("todos").innerText
               row  <- waitPresent(root, "todo-1") *> root.getByTestId("todo-1").innerText
+              _    <- ZIO.succeed {
+                bridge.push(
+                  HostMsg.Todos(
+                    List(
+                      TodoEntry("Checkout branch", Todos.Completed, "medium"),
+                      TodoEntry("Write tests", Todos.Completed, "high"),
+                    )
+                  )
+                )
+              }
+              _ <- waitGone(root, "todos")
+              _ <- ZIO.succeed(fireCtrlT(root, "draft"))
+              _ <- waitPresent(root, "todos-list")
             yield assertTrue(head.contains("Todos 0/2"), row.contains("Checkout branch"))
           }
         yield result

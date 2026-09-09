@@ -48,6 +48,9 @@ object Todos:
       val (done, n) = progress(entries)
       s"Todos $done/$n"
 
+  def isLive(entries: List[TodoEntry]): Boolean =
+    entries.exists(_.status != TodoStatus.Completed)
+
   def rowKey(entry: TodoEntry, index: Int): String =
     entry.id.filter(_.nonEmpty).getOrElse((index + 1).toString)
 

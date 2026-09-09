@@ -720,19 +720,74 @@ object ChatApp:
 
   object AgentMsg
       extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(10),
         fontSize.px(13),
         color(fg),
-        whiteSpace.preWrap,
         overflowWrap.anywhere,
         minWidth.px(0),
         maxWidth.pct(100),
         Selector(" p", margin.zero),
-        Selector(" pre", margin.zero, whiteSpace.preWrap, overflowWrap.anywhere),
-        Selector(" h1", margin.zero),
-        Selector(" h2", margin.zero),
-        Selector(" h3", margin.zero),
-        Selector(" ul", margin.zero),
-        Selector(" blockquote", margin.zero),
+        Selector(" h1", margin.zero, fontSize.px(18), fontWeight(600)),
+        Selector(" h2", margin.zero, fontSize.px(15), fontWeight(600)),
+        Selector(" h3", margin.zero, fontSize.px(13), fontWeight(600)),
+        Selector(" ul", margin.zero, paddingLeft.px(18)),
+        Selector(" ol", margin.zero, paddingLeft.px(18)),
+        Selector(" li", margin.zero),
+        Selector(
+          " pre",
+          margin.zero,
+          padding.px(8),
+          backgroundColor(inputBg),
+          border(Border.solid(1.px, widgetBorder)),
+          borderRadius.px(6),
+          whiteSpace.pre,
+          overflowX.auto,
+          overflowWrap.normal,
+          fontSize.px(12),
+          alignSelf.start,
+          maxWidth.pct(100),
+          boxSizing.borderBox,
+        ),
+        Selector(
+          " code",
+          fontSize.px(12),
+          backgroundColor(inputBg),
+          border(Border.solid(1.px, widgetBorder)),
+          borderRadius.px(3),
+          padding(1.px, 5.px),
+        ),
+        Selector(
+          " pre code",
+          backgroundColor(Color.transparent),
+          border.none,
+          padding.zero,
+          fontSize.px(12),
+        ),
+        Selector(
+          " blockquote",
+          margin.zero,
+          padding(2.px, 0.px, 2.px, 10.px),
+          borderLeft(Border.solid(2.px, widgetBorder)),
+          color(muted),
+        ),
+        Selector(" table", borderCollapse.collapse, fontSize.px(12)),
+        Selector(
+          " th",
+          textAlign.left,
+          padding(4.px, 8.px),
+          borderBottom(Border.solid(1.px, widgetBorder)),
+          fontWeight(600),
+          whiteSpace.nowrap,
+        ),
+        Selector(
+          " td",
+          textAlign.left,
+          padding(4.px, 8.px),
+          borderBottom(Border.solid(1.px, widgetBorder)),
+          verticalAlign.top,
+        ),
       )
 
   object ThoughtBody
@@ -1130,12 +1185,18 @@ object ChatApp:
               case _ => ZIO.unit
             } *> chat.get.flatMap { before =>
               val next     = batch.foldLeft(before)((m, msg) => ChatModel.applyMsg(m, msg, now))
-              val autoTodo = before.todos.isEmpty && next.todos.nonEmpty
-              val autoTask = before.tasks.isEmpty && next.tasks.nonEmpty
-              val autoQ    = before.queue.isEmpty && next.queue.nonEmpty
+              val autoTodo = !Todos.isLive(before.todos) && Todos.isLive(next.todos)
+              val hideTodo = (Todos.isLive(before.todos) && !Todos.isLive(next.todos)) ||
+                (before.todos.nonEmpty && next.todos.isEmpty)
+              val autoTask = !Tasks.isLive(before.tasks) && Tasks.isLive(next.tasks)
+              val hideTask = (Tasks.isLive(before.tasks) && !Tasks.isLive(next.tasks)) ||
+                (before.tasks.nonEmpty && next.tasks.isEmpty)
+              val autoQ = before.queue.isEmpty && next.queue.nonEmpty
               chat.update(_ => next) *>
                 ZIO.when(autoTodo)(todosOpen.set(true)).unit *>
+                ZIO.when(hideTodo)(todosOpen.set(false)).unit *>
                 ZIO.when(autoTask)(tasksOpen.set(true)).unit *>
+                ZIO.when(hideTask)(tasksOpen.set(false)).unit *>
                 ZIO.when(autoQ)(queueOpen.set(true) *> queueIdx.set(Some((next.queue.size - 1).max(0)))).unit
             }
           }
@@ -3370,7 +3431,7 @@ object ChatApp:
       todosOpen: ascent.Source[Boolean],
       toggleTodos: UIO[Unit],
   ): ascent.ast.UI[Any] =
-    when(Squawk.zipWith(chat, todosOpen)((c, open) => open || c.todos.nonEmpty))(
+    when(todosOpen)(
       E.div(
         ChangesPane,
         TestId("todos"),
@@ -3378,7 +3439,7 @@ object ChatApp:
           ChangesHead,
           TestId("todos-toggle"),
           A.`type`("button"),
-          A.title("Toggle todos (Ctrl+T)"),
+          A.title("Hide todos (Ctrl+T)"),
           Ev.onClick(_ => toggleTodos),
           E.strong(chat.map(c => Todos.headline(c.todos))),
           E.span(
@@ -3390,32 +3451,30 @@ object ChatApp:
                 doing.getOrElse("")
             },
           ),
-          E.span(todosOpen.map(open => if open then "Hide" else "Show")),
+          E.span("Hide"),
         ),
-        when(todosOpen)(
-          E.div(
-            ChangesList,
-            TestId("todos-list"),
-            when(chat.map(_.todos.isEmpty))(
-              E.p(Copy, TestId("todos-empty"), "No todos")
-            ),
-            forEach(chat.map(_.todos.zipWithIndex))(p => s"${p._2}-${p._1.content}") { pair =>
-              val (entry, i) = pair
-              val key        = Todos.rowKey(entry, i)
-              val kind       = Todos.kind(entry.status)
-              val body       =
-                kind match
-                  case Todos.Completed  => E.span(TodoDone, entry.content)
-                  case Todos.InProgress => E.span(TodoDoing, entry.content)
-                  case _                => E.span(entry.content)
-              E.div(
-                FileRow,
-                TestId(s"todo-$key"),
-                E.span(TodoMark, Todos.mark(entry.status)),
-                body,
-              )
-            },
-          )
+        E.div(
+          ChangesList,
+          TestId("todos-list"),
+          when(chat.map(_.todos.isEmpty))(
+            E.p(Copy, TestId("todos-empty"), "No todos")
+          ),
+          forEach(chat.map(_.todos.zipWithIndex))(p => s"${p._2}-${p._1.content}") { pair =>
+            val (entry, i) = pair
+            val key        = Todos.rowKey(entry, i)
+            val kind       = Todos.kind(entry.status)
+            val body       =
+              kind match
+                case Todos.Completed  => E.span(TodoDone, entry.content)
+                case Todos.InProgress => E.span(TodoDoing, entry.content)
+                case _                => E.span(entry.content)
+            E.div(
+              FileRow,
+              TestId(s"todo-$key"),
+              E.span(TodoMark, Todos.mark(entry.status)),
+              body,
+            )
+          },
         ),
       )
     )
@@ -3427,7 +3486,7 @@ object ChatApp:
       toggleTasks: UIO[Unit],
       stopTask: TaskId => UIO[Unit],
   ): ascent.ast.UI[Any] =
-    when(Squawk.zipWith(chat, tasksOpen)((c, open) => open || c.tasks.nonEmpty))(
+    when(tasksOpen)(
       E.div(
         ChangesPane,
         TestId("tasks"),
@@ -3435,36 +3494,34 @@ object ChatApp:
           ChangesHead,
           TestId("tasks-toggle"),
           A.`type`("button"),
-          A.title("Toggle tasks (Ctrl+G)"),
+          A.title("Hide tasks (Ctrl+G)"),
           Ev.onClick(_ => toggleTasks),
           E.strong(chat.map(c => Tasks.headline(c.tasks))),
           E.span(SessionMetaLine, chat.map(c => Tasks.statusLine(c.tasks))),
-          E.span(tasksOpen.map(open => if open then "Hide" else "Show")),
+          E.span("Hide"),
         ),
-        when(tasksOpen)(
-          E.div(
-            ChangesList,
-            TestId("tasks-list"),
-            when(chat.map(_.tasks.isEmpty))(
-              E.p(Copy, TestId("tasks-empty"), "No tasks")
-            ),
-            forEach(chat.map(c => Tasks.grouped(c.tasks)))(g => g._1.getOrElse("rest")) { group =>
-              val (heading, rows) = group
-              E.div(
-                ChangesTurn,
-                TestId(heading.fold("tasks-group-rest")(_ => "tasks-group-subagents")),
-                heading match
-                  case Some(title) => E.div(SessionMetaLine, title)
-                  case None        => E.span()
-                ,
-                Arg.ArgsArg(
-                  rows.zipWithIndex.map { (row, i) =>
-                    Arg.ChildArg(renderTaskRow(row, i, stopTask))
-                  }
-                ),
-              )
-            },
-          )
+        E.div(
+          ChangesList,
+          TestId("tasks-list"),
+          when(chat.map(_.tasks.isEmpty))(
+            E.p(Copy, TestId("tasks-empty"), "No tasks")
+          ),
+          forEach(chat.map(c => Tasks.grouped(c.tasks)))(g => g._1.getOrElse("rest")) { group =>
+            val (heading, rows) = group
+            E.div(
+              ChangesTurn,
+              TestId(heading.fold("tasks-group-rest")(_ => "tasks-group-subagents")),
+              heading match
+                case Some(title) => E.div(SessionMetaLine, title)
+                case None        => E.span()
+              ,
+              Arg.ArgsArg(
+                rows.zipWithIndex.map { (row, i) =>
+                  Arg.ChildArg(renderTaskRow(row, i, stopTask))
+                }
+              ),
+            )
+          },
         ),
       )
     )

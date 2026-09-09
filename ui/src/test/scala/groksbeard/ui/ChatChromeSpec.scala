@@ -63,12 +63,12 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Slash)
           result <- withMounted(ui) { root =>
             for
-              _     <- waitPresent(root, "slash-compact")
-              _     <- waitPresent(root, "slash-always-approve")
-              _     <- root.textarea("draft").press("ArrowDown")
-              _     <- root.textarea("draft").press("Enter")
-              draft <- waitValue(root, "/always-approve ")
-            yield assertTrue(draft == "/always-approve ")
+              _    <- waitPresent(root, "slash-compact")
+              _    <- waitPresent(root, "slash-always-approve")
+              _    <- root.textarea("draft").press("ArrowDown")
+              _    <- root.textarea("draft").press("Enter")
+              mode <- waitText(root, "mode", "Always approve")
+            yield assertTrue(mode == "Always approve")
           }
         yield result
         end for
@@ -1875,6 +1875,594 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("esc on a running turn toasts Ctrl+C and does not stop") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t-run"), "go")))
+              _     <- waitPresent(root, "activity")
+              _     <- root.textarea("draft").press("Escape")
+              toast <- waitPresent(root, "status") *> root.getByTestId("status").innerText
+              still <- waitPresent(root, "activity")
+            yield assertTrue(toast.contains("Ctrl+C"), still)
+          }
+        yield result
+        end for
+      },
+      test("child scene opens a framed transcript") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Child)
+          result <- withMounted(ui) { root =>
+            for frame <- waitPresent(root, "child-frame") *> root.getByTestId("child-transcript").innerText
+            yield assertTrue(frame.contains("Child is working"))
+          }
+        yield result
+      },
+      test("child steer adds a user line") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Child)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "child-draft")
+              _     <- root.textarea("child-draft").fill("steer note")
+              _     <- root.button("child-send").click
+              _     <- waitPresent(root, "child-turn-child-steer")
+              frame <- root.getByTestId("child-transcript").innerText
+            yield assertTrue(frame.contains("Heard: steer note"))
+          }
+        yield result
+        end for
+      },
+      test("cancel scene lists 1-4 keep/stop choices") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "cancel-turn")
+              one  <- waitPresent(root, "cancel-1") *> root.getByTestId("cancel-1").innerText
+              four <- root.getByTestId("cancel-4").innerText
+            yield assertTrue(one.contains("Stop running"), four.contains("Always continue"))
+          }
+        yield result
+        end for
+      },
+      test("agents scene has agents and personas") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Agents)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "agents")
+              _ <- waitPresent(root, "agent-explore")
+              _ <- root.button("agents-tab-personas").click
+              _ <- waitPresent(root, "persona-concise")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("plan-view, doctor, theme, workflows, dashboard, btw, images, voice scenes mount") {
+        val bridge                      = PreviewBridge()
+        def scene(s: Scene, id: String) =
+          ChatApp.component(bridge, None, s).flatMap { ui =>
+            withMounted(ui)(root => waitPresent(root, id))
+          }
+        for
+          plan  <- scene(Scene.PlanView, "plan-view")
+          doc   <- scene(Scene.Doctor, "doctor")
+          theme <- scene(Scene.Theme, "theme")
+          wf    <- scene(Scene.Workflows, "workflows")
+          dash  <- scene(Scene.Dashboard, "dashboard")
+          btw   <- scene(Scene.Btw, "btw")
+          img   <- scene(Scene.Images, "image-0")
+          voice <- scene(Scene.Voice, "voice")
+        yield assertTrue(plan, doc, theme, wf, dash, btw, img, voice)
+        end for
+      },
+      test("theme click sets data-theme tokyonight") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Theme)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "theme-tokyonight")
+              _ <- root.button("theme-tokyonight").click
+              _ <- waitGone(root, "theme")
+              attr = Option(root.element.getAttribute("data-theme"))
+              html = Option(ascent.dom.window.document.documentElement.getAttribute("data-theme"))
+            yield assertTrue(attr.contains("tokyonight") || html.contains("tokyonight"))
+          }
+        yield result
+        end for
+      },
+      test("compact scene marks data-compact") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Compact)
+          result <- withMounted(ui) { root =>
+            waitSelector(root, """[data-compact="true"]""").map(assertTrue(_))
+          }
+        yield result
+      },
+      test("image chip can be removed") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Images)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "image-0")
+              _ <- root.button("image-remove-image-0").click
+              _ <- waitGone(root, "image-0")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("resume picker has Restore code") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "sessions")
+              _   <- root.button("sessions").click
+              _   <- waitPresent(root, "session-picker")
+              box <- waitPresent(root, "resume-restore")
+            yield assertTrue(box)
+          }
+        yield result
+        end for
+      },
+      test("vim mode selects a turn") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "turn-t1")
+              _   <- ZIO.succeed(bridge.push(HostMsg.UiPrefs("vscode", compact = false, vim = true)))
+              _   <- waitSelector(root, """[data-vim="true"]""")
+              _   <- root.getByTestId("turn-t1").click
+              sel <- waitSelector(root, """[data-selected="true"]""")
+            yield assertTrue(sel)
+          }
+        yield result
+        end for
+      },
+      test("idle Esc Esc stashes a draft and shows the caption") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "draft")
+              _     <- root.textarea("draft").fill("keep me")
+              _     <- root.textarea("draft").press("Escape")
+              toast <- waitContains(root, "status", CancelTurn.ClearHint)
+              _     <- root.textarea("draft").press("Escape")
+              _     <- waitValue(root, "")
+              cap   <- waitPresent(root, "stash") *> root.getByTestId("stash").innerText
+            yield assertTrue(toast.contains("press again"), cap.contains(DraftStash.Caption))
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+S stashes and restores a draft") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "draft")
+              _   <- root.textarea("draft").fill("stashed draft")
+              _   <- ZIO.succeed(fireCtrlS(root, "draft"))
+              _   <- waitValue(root, "")
+              _   <- waitPresent(root, "stash")
+              _   <- ZIO.succeed(fireCtrlS(root, "draft"))
+              got <- waitValue(root, "stashed draft")
+            yield assertTrue(got == "stashed draft")
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+S stash restores after send") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "draft")
+              _   <- root.textarea("draft").fill("stashed draft")
+              _   <- ZIO.succeed(fireCtrlS(root, "draft"))
+              _   <- waitValue(root, "")
+              _   <- root.textarea("draft").fill("hello")
+              _   <- root.button("send").click
+              _   <- waitPresent(root, "user-preview-turn")
+              got <- waitValue(root, "stashed draft")
+            yield assertTrue(got == "stashed draft")
+          }
+        yield result
+        end for
+      },
+      test("Esc Esc stash does not restore after send") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "draft")
+              _    <- root.textarea("draft").fill("gone")
+              _    <- root.textarea("draft").press("Escape")
+              _    <- waitContains(root, "status", CancelTurn.ClearHint)
+              _    <- root.textarea("draft").press("Escape")
+              _    <- waitValue(root, "")
+              _    <- root.textarea("draft").fill("hello")
+              _    <- root.button("send").click
+              _    <- waitPresent(root, "user-preview-turn")
+              left <- root.textarea("draft").value
+            yield assertTrue(left.isEmpty)
+          }
+        yield result
+        end for
+      },
+      test("voice scene Esc disarms listening") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Voice)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "voice")
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "voice")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("slash voice toasts when the speech constructor is missing") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "draft")
+              _     <- root.textarea("draft").fill("/voice")
+              _     <- root.button("send").click
+              toast <- waitContains(root, "status", VoiceCapture.NoDevice)
+            yield assertTrue(toast.contains(VoiceCapture.NoDevice))
+          }
+        yield result
+        end for
+      },
+      test("cancel Esc keeps the turn running") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "cancel-turn")
+              _     <- root.textarea("draft").press("Escape")
+              _     <- waitGone(root, "cancel-turn")
+              still <- waitPresent(root, "activity")
+            yield assertTrue(still)
+          }
+        yield result
+        end for
+      },
+      test("cancel 1 stops running subagents") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "cancel-1")
+              _ <- root.textarea("draft").press("1")
+              _ <- waitGone(root, "cancel-turn")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("theme arrows preview then Esc reverts") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Theme)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "theme")
+              _ <- root.textarea("draft").press("ArrowDown")
+              previewed = Option(ascent.dom.window.document.documentElement.getAttribute("data-theme"))
+              _ <- root.textarea("draft").press("Escape")
+              _ <- waitGone(root, "theme")
+              restored = Option(ascent.dom.window.document.documentElement.getAttribute("data-theme"))
+            yield assertTrue(previewed.contains("auto"), restored.contains("vscode"))
+          }
+        yield result
+        end for
+      },
+      test("doctor fix lists CLI repair") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "draft")
+              _ <- root.textarea("draft").fill("/doctor fix")
+              _ <- root.button("send").click
+              _ <- waitPresent(root, "doctor")
+              _ <- ZIO.succeed(
+                bridge.push(
+                  HostMsg.DoctorReport(
+                    Doctor.collect(None, None, true, false, true, true, true, "/repo", 0, "ready", None)
+                  )
+                )
+              )
+              row <- waitPresent(root, "doctor-fix-cli") *> root.getByTestId("doctor-fix-cli").innerText
+            yield assertTrue(row.contains("CLI"))
+          }
+        yield result
+        end for
+      },
+      test("child queue checkbox is present") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Child)
+          result <- withMounted(ui) { root =>
+            waitPresent(root, "child-queue").map(assertTrue(_))
+          }
+        yield result
+      },
+      test("FileReader facade reads a constructed image file") {
+        val file = new groksbeard.facade.File(
+          scala.scalajs.js.Array[scala.scalajs.js.Any]("x"),
+          "paste.png",
+          groksbeard.facade.FilePropertyBag("image/png"),
+        )
+        ChatApp.readImage(file).map { got =>
+          assertTrue(got.exists { (mime, data, name) =>
+            mime == "image/png" && name == "paste.png" && data.nonEmpty
+          })
+        }
+      },
+      test("Stop on a running turn ends activity") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t-run"), "go")))
+              _     <- waitPresent(root, "activity")
+              label <- waitText(root, "send", "Stop")
+              _     <- root.button("send").click
+              _     <- waitGone(root, "activity")
+            yield assertTrue(label == "Stop")
+          }
+        yield result
+        end for
+      },
+      test("Ctrl+C clears a draft then a second Ctrl+C stops the turn") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t-run"), "go")))
+              _     <- waitPresent(root, "activity")
+              _     <- root.textarea("draft").fill("note")
+              _     <- ZIO.succeed(fireCtrlC(root, "draft"))
+              empty <- waitValue(root, "")
+              still <- waitPresent(root, "activity")
+              _     <- ZIO.succeed(fireCtrlC(root, "draft"))
+              _     <- waitGone(root, "activity")
+            yield assertTrue(empty.isEmpty, still)
+          }
+        yield result
+        end for
+      },
+      test("idle Esc Esc on an empty draft opens rewind") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "draft")
+              _     <- root.textarea("draft").press("Escape")
+              _     <- root.textarea("draft").press("Escape")
+              shown <- waitPresent(root, "rewind")
+            yield assertTrue(shown)
+          }
+        yield result
+        end for
+      },
+      test("vim j and k move the selected turn") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "turn-t1")
+              _    <- ZIO.succeed(bridge.push(HostMsg.UiPrefs("vscode", compact = false, vim = true)))
+              _    <- waitSelector(root, """[data-vim="true"]""")
+              _    <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t2"), "second")))
+              _    <- waitPresent(root, "turn-t2")
+              _    <- root.getByTestId("turn-t1").click
+              _    <- waitSelector(root, """[data-testid="turn-t1"][data-selected="true"]""")
+              _    <- ZIO.succeed(fireKey(root, "turn-t1", "j", "KeyJ"))
+              next <- waitSelector(root, """[data-testid="turn-t2"][data-selected="true"]""")
+              _    <- ZIO.succeed(fireKey(root, "turn-t2", "k", "KeyK"))
+              prev <- waitSelector(root, """[data-testid="turn-t1"][data-selected="true"]""")
+            yield assertTrue(next, prev)
+          }
+        yield result
+        end for
+      },
+      test("vim y on a turn does not type into the draft") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- waitPresent(root, "turn-t1")
+              _   <- ZIO.succeed(bridge.push(HostMsg.UiPrefs("vscode", compact = false, vim = true)))
+              _   <- waitSelector(root, """[data-vim="true"]""")
+              _   <- root.getByTestId("turn-t1").click
+              _   <- ZIO.succeed(fireKey(root, "turn-t1", "y", "KeyY"))
+              got <- root.textarea("draft").value
+            yield assertTrue(got.isEmpty)
+          }
+        yield result
+        end for
+      },
+      test("vim on does not steal j from the focused draft") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Transcript)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "turn-t1")
+              _     <- ZIO.succeed(bridge.push(HostMsg.UiPrefs("vscode", compact = false, vim = true)))
+              _     <- waitSelector(root, """[data-vim="true"]""")
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t2"), "second")))
+              _     <- waitPresent(root, "turn-t2")
+              _     <- root.getByTestId("turn-t1").click
+              _     <- waitSelector(root, """[data-testid="turn-t1"][data-selected="true"]""")
+              _     <- root.textarea("draft").click
+              _     <- ZIO.succeed(fireKey(root, "draft", "j", "KeyJ"))
+              still <- waitSelector(root, """[data-testid="turn-t1"][data-selected="true"]""")
+            yield assertTrue(still)
+          }
+        yield result
+        end for
+      },
+      test("cancel 2 keeps subagents") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "cancel-2")
+              _     <- root.textarea("draft").press("2")
+              _     <- waitGone(root, "cancel-turn")
+              _     <- waitGone(root, "activity")
+              still <- waitPresent(root, "subagent-sub-1")
+            yield assertTrue(still)
+          }
+        yield result
+        end for
+      },
+      test("cancel 3 persists always stop") {
+        val bridge = PersistSpy()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "cancel-3")
+              _ <- root.textarea("draft").press("3")
+              _ <- waitGone(root, "cancel-turn")
+            yield assertTrue(
+              bridge.configs.contains(("ui", "cancel_subagents_on_turn_cancel", "always_stop"))
+            )
+          }
+        yield result
+        end for
+      },
+      test("cancel 4 persists always continue") {
+        val bridge = PersistSpy()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Cancel)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "cancel-4")
+              _     <- root.textarea("draft").press("4")
+              _     <- waitGone(root, "cancel-turn")
+              still <- waitPresent(root, "subagent-sub-1")
+            yield assertTrue(
+              still,
+              bridge.configs.contains(("ui", "cancel_subagents_on_turn_cancel", "always_continue")),
+            )
+          }
+        yield result
+        end for
+      },
+      test("slash view-plan opens the plan overlay") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- root.textarea("draft").fill("/view-plan")
+              _     <- root.button("send").click
+              shown <- waitPresent(root, "plan-view")
+            yield assertTrue(shown)
+          }
+        yield result
+        end for
+      },
+      test("slash workflow runs opens the workflows pane") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- root.textarea("draft").fill("/workflow runs")
+              _     <- root.button("send").click
+              shown <- waitPresent(root, "workflows")
+            yield assertTrue(shown)
+          }
+        yield result
+        end for
+      },
+      test("slash config-agents opens agents") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- root.textarea("draft").fill("/config-agents")
+              _   <- root.button("send").click
+              _   <- waitPresent(root, "agents")
+              row <- waitPresent(root, "agent-explore")
+            yield assertTrue(row)
+          }
+        yield result
+        end for
+      },
+      test("slash personas opens the personas tab") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- root.textarea("draft").fill("/personas")
+              _   <- root.button("send").click
+              row <- waitPresent(root, "persona-concise")
+            yield assertTrue(row)
+          }
+        yield result
+        end for
+      },
+      test("slash minimal then fullscreen toggles compact chrome") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _   <- root.textarea("draft").fill("/minimal")
+              _   <- root.button("send").click
+              on  <- waitSelector(root, """[data-compact="true"]""")
+              _   <- root.textarea("draft").fill("/fullscreen")
+              _   <- root.button("send").click
+              off <- waitSelector(root, """[data-compact="false"]""")
+            yield assertTrue(on, off)
+          }
+        yield result
+        end for
+      },
     )
 
   private def waitText(root: AscentRoot, testId: String, expected: String)(using Trace): IO[Throwable, String] =
@@ -1941,9 +2529,19 @@ object ChatChromeSpec extends ZIOSpecDefault:
   private def fireCtrlG(root: AscentRoot, testId: String): Unit =
     fireCtrlKey(root, testId, "g", "KeyG")
 
+  private def fireCtrlS(root: AscentRoot, testId: String): Unit =
+    fireCtrlKey(root, testId, "s", "KeyS")
+
+  private def fireCtrlC(root: AscentRoot, testId: String): Unit =
+    fireCtrlKey(root, testId, "c", "KeyC")
+
   private def fireCtrlKey(root: AscentRoot, testId: String, key: String, code: String): Unit =
     val el = root.element.queryHtml(s"""[data-testid="$testId"]""")
     val _  = el.dispatchEvent(JsDom.keyDown(key, code, ctrl = true))
+
+  private def fireKey(root: AscentRoot, testId: String, key: String, code: String, shift: Boolean = false): Unit =
+    val el = root.element.queryHtml(s"""[data-testid="$testId"]""")
+    val _  = el.dispatchEvent(JsDom.keyDown(key, code, shift = shift))
 end ChatChromeSpec
 
 /** Pushes HostMsg the way EventSource onmessage does: many callbacks, no backpressure. */
@@ -1951,10 +2549,23 @@ final class PushBridge extends HostBridge:
   private var listener: HostMsg => Unit = _ => ()
   def post(msg: WebviewMsg): Unit       =
     msg match
-      case WebviewMsg.RewindTo(index) => listener(HostMsg.Rewound(index))
-      case _                          => ()
+      case WebviewMsg.RewindTo(index)                            => listener(HostMsg.Rewound(index))
+      case WebviewMsg.Cancel | WebviewMsg.CancelTurnChoice(_, _) =>
+        listener(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
+      case _ => ()
   def onHost(f: HostMsg => Unit): Unit = listener = f
   def push(msg: HostMsg): Unit         = listener(msg)
+end PushBridge
+
+final class PersistSpy extends HostBridge:
+  private val inner                           = PreviewBridge()
+  var configs: List[(String, String, String)] = Nil
+  def post(msg: WebviewMsg): Unit             =
+    msg match
+      case WebviewMsg.PersistConfig(t, k, v) => configs = configs :+ (t, k, v)
+      case _                                 => ()
+    inner.post(msg)
+  def onHost(f: HostMsg => Unit): Unit = inner.onHost(f)
 
 /** ResumeSession holds the snapshot until [[completeResume]], so tests can see loading chrome. */
 final class GatedResumeBridge extends HostBridge:
@@ -1976,7 +2587,7 @@ final class GatedResumeBridge extends HostBridge:
       case WebviewMsg.Ready =>
         emit(HostMsg.Ready)
         emit(HostMsg.SessionList(sessions, "", openPicker = false))
-      case WebviewMsg.ResumeSession(id) =>
+      case WebviewMsg.ResumeSession(id, _) =>
         pending = Some(id)
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
         emit(HostMsg.ClearTranscript)

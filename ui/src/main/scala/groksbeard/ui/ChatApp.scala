@@ -3,14 +3,17 @@ package groksbeard.ui
 import ascent.*
 import ascent.ast.Attr
 import ascent.css.Color
+import ascent.css.StateAttr
 import ascent.css.Styles.*
 import ascent.domtypes.AttrValue
 import ascent.dsl.*
 import ascent.dsl.Arg
 import groksbeard.core.*
+import groksbeard.facade.{Browser, MicConstraints, SpeechRec, SpeechRecInstance}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import scala.scalajs.js
 import zio.*
 import zio.stream.ZStream
 
@@ -24,7 +27,8 @@ final case class SessionLeave(id: SessionId, fromPicker: Boolean) derives Eq
 
 enum Scene:
   case Empty, Slash, Mentions, Settings, Transcript, Permission, Plan, Question, Elicit, Changes, Resume, Todos,
-    Tasks, Palette, Mcps, Queue, SessionInfo, Context
+    Tasks, Palette, Mcps, Queue, SessionInfo, Context, Child, Cancel, Agents, PlanView, Workflows, Dashboard, Btw,
+    Theme, Compact, Doctor, Voice, Images
 
 object Scene:
   def from(name: String): Scene =
@@ -46,11 +50,39 @@ object Scene:
       case "queue"        => Scene.Queue
       case "session-info" => Scene.SessionInfo
       case "context"      => Scene.Context
+      case "child"        => Scene.Child
+      case "cancel"       => Scene.Cancel
+      case "agents"       => Scene.Agents
+      case "plan-view"    => Scene.PlanView
+      case "workflows"    => Scene.Workflows
+      case "dashboard"    => Scene.Dashboard
+      case "btw"          => Scene.Btw
+      case "theme"        => Scene.Theme
+      case "compact"      => Scene.Compact
+      case "doctor"       => Scene.Doctor
+      case "voice"        => Scene.Voice
+      case "images"       => Scene.Images
       case _              => Scene.Empty
 end Scene
 
 object ChatApp:
   given toolOutEq: Eq[Map[ToolCallId, String]] = (a, b) => a == b
+
+  private enum VoiceEvt:
+    case Heard(text: String)
+    case Fail(msg: String)
+
+  private def takeFlag(flag: ascent.Source[Boolean], act: => UIO[Unit]): UIO[Boolean] =
+    flag.get.flatMap(on => if on then act.as(true) else ZIO.succeed(false))
+
+  private def takeSome[A](src: ascent.Source[Option[A]], act: A => UIO[Unit]): UIO[Boolean] =
+    src.get.flatMap:
+      case Some(a) => act(a).as(true)
+      case None    => ZIO.succeed(false)
+
+  private def firstHit(steps: UIO[Boolean]*): UIO[Boolean] =
+    ZIO.foldLeft(steps.toList)(false): (done, step) =>
+      if done then ZIO.succeed(true) else step
 
   private def isMenuNav(key: String, shift: Boolean): Boolean =
     key == "ArrowUp" || key == "ArrowDown" || key == "Home" || key == "End" ||
@@ -118,6 +150,23 @@ object ChatApp:
         overflow.hidden,
         boxSizing.borderBox,
         position.relative,
+      )
+
+  object CompactRules
+      extends GlobalStyle(
+        Selector("[data-compact='true']", fontSize.px(12)),
+        Selector("[data-compact='true'] [data-testid='draft']", minHeight.px(52), padding.px(6)),
+      )
+
+  object ThemeChoice
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        alignItems.flexStart,
+        gap.px(2),
+        width.pct(100),
+        boxSizing.borderBox,
+        textAlign.left,
       )
 
   object Toolbar
@@ -1120,10 +1169,27 @@ object ChatApp:
         else if scene == Scene.Context then Some(SessionPane.Context)
         else None
       )
-      leaving        <- sq(Option.empty[SessionLeave])
-      pendingDelete  <- sq(Option.empty[SessionId])
-      lastIdleEsc    <- Ref.make(Option.empty[Long])
-      lastCancelMs   <- Ref.make(Option.empty[Long])
+      leaving       <- sq(Option.empty[SessionLeave])
+      pendingDelete <- sq(Option.empty[SessionId])
+      lastIdleEsc   <- Ref.make(Option.empty[Long])
+      lastCancelMs  <- Ref.make(Option.empty[Long])
+      stash         <- sq(Option.empty[DraftStash])
+      cancelOpen    <- sq(scene == Scene.Cancel)
+      agentsOpen    <- sq(scene == Scene.Agents)
+      planViewOpen  <- sq(scene == Scene.PlanView)
+      workflowsOpen <- sq(scene == Scene.Workflows)
+      dashboardOpen <- sq(scene == Scene.Dashboard)
+      doctorOpen    <- sq(scene == Scene.Doctor)
+      themeOpen     <- sq(scene == Scene.Theme)
+      voiceOn       <- sq(scene == Scene.Voice)
+      voiceRec  = new AtomicReference[Option[SpeechRecInstance]](None)
+      voicePush = new AtomicReference[ChatApp.VoiceEvt => Unit](_ => ())
+      childDraft     <- sq("")
+      childQueue     <- sq(false)
+      agentsTab      <- sq(if scene == Scene.Agents then "agents" else "agents")
+      doctorFix      <- sq(false)
+      restoreCode    <- sq(false)
+      themePreview   <- sq(Option.empty[String])
       questionDraft  <- sq(QuestionDraft.empty)
       historyBrowse  <- sq(Option.empty[Int])
       historyPickIdx <- sq(Option.empty[Int])
@@ -1170,6 +1236,20 @@ object ChatApp:
                   paletteOpen.set(true) *> ZIO.succeed(Dom.focusFirst(ChatApp.PaletteFilterSel))
               case HostMsg.OpenMcps =>
                 paletteOpen.set(false) *> sessionPane.set(None) *> mcpsOpen.set(true)
+              case _: HostMsg.PlanView =>
+                planViewOpen.set(true)
+              case _: HostMsg.Agents =>
+                agentsOpen.set(true)
+              case _: HostMsg.Workflows =>
+                workflowsOpen.set(true)
+              case _: HostMsg.Dashboard =>
+                dashboardOpen.set(true)
+              case _: HostMsg.DoctorReport =>
+                doctorOpen.set(true)
+              case HostMsg.UiPrefs(theme, _, _) =>
+                ZIO.succeed(ChatApp.paintTheme(theme))
+              case _: HostMsg.Btw =>
+                ZIO.unit
               case HostMsg.ToolCall(_, row) =>
                 toolOut.update { m =>
                   m.updated(row.id, m.getOrElse(row.id, row.output.getOrElse("")))
@@ -1207,6 +1287,20 @@ object ChatApp:
         }
         .runDrain
         .forkScoped
+      voiceFib <- ZStream
+        .asyncScoped[Any, Nothing, ChatApp.VoiceEvt] { emit =>
+          ZIO.succeed {
+            voicePush.set(evt => emit(ZIO.succeed(Chunk.single(evt))))
+          }
+        }
+        .mapZIO {
+          case ChatApp.VoiceEvt.Heard(text) => draft.update(d => VoiceCapture.append(d, text))
+          case ChatApp.VoiceEvt.Fail(msg)   =>
+            ZIO.succeed(ChatApp.stopRec(voiceRec)) *> voiceOn.set(false) *>
+              chat.update(_.copy(error = Some(msg)))
+        }
+        .runDrain
+        .forkScoped
       _ <- bound.await
       _ <- hist.location.get.flatMap(loc => lastHref.set(loc.href))
       _ <- hist.location.get.flatMap { loc =>
@@ -1235,7 +1329,38 @@ object ChatApp:
     yield
 
       def stopHost: UIO[Unit] =
-        clockFib.interrupt.unit *> burstFib.interrupt.unit *> locSub.cancel
+        ZIO.succeed(ChatApp.stopRec(voiceRec)) *>
+          clockFib.interrupt.unit *> burstFib.interrupt.unit *> voiceFib.interrupt.unit *> locSub.cancel
+
+      def setVoice(on: Boolean): UIO[Unit] =
+        ZIO.succeed(ChatApp.stopRec(voiceRec)) *> (
+          if !on then voiceOn.set(false)
+          else
+            SpeechRec.create() match
+              case None =>
+                voiceOn.set(false) *> chat.update(_.copy(error = Some(VoiceCapture.NoDevice)))
+              case Some(rec) =>
+                val started =
+                  try
+                    ChatApp.probeMic()
+                    rec.continuous = true
+                    rec.interimResults = false
+                    rec.lang = "en-US"
+                    rec.onresult = (e: groksbeard.facade.SpeechRecognitionEvent) =>
+                      val spoken = SpeechRec.finalTranscript(e)
+                      if spoken.nonEmpty then voicePush.get()(ChatApp.VoiceEvt.Heard(spoken))
+                    rec.onerror = (e: groksbeard.facade.SpeechRecognitionErrorEvent) =>
+                      val code = Option(e.error).getOrElse("")
+                      if code == "not-allowed" || code == "audio-capture" || code == "service-not-allowed" then
+                        voicePush.get()(ChatApp.VoiceEvt.Fail(VoiceCapture.NoDevice))
+                    rec.onend = () => ()
+                    rec.start()
+                    voiceRec.set(Some(rec))
+                    true
+                  catch case _: Throwable => false
+                if started then voiceOn.set(true)
+                else voiceOn.set(false) *> chat.update(_.copy(error = Some(VoiceCapture.NoDevice)))
+        )
 
       val slashShown = Squawk.zipWith(draft, chat) { (d, c) =>
         if PromptHistory.query(d).isDefined then Nil
@@ -1327,6 +1452,50 @@ object ChatApp:
                 draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
               case Some(cmd) if SessionCommands.isFork(cmd.name) =>
                 draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
+              case Some(cmd) if SessionCommands.isViewPlan(cmd.name) =>
+                draft.set("") *> planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+              case Some(cmd) if SessionCommands.isBtw(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Btw(cmd.args)))
+              case Some(cmd) if SessionCommands.isPersonas(cmd.name) =>
+                draft.set("") *> agentsTab.set("personas") *> agentsOpen.set(true) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
+              case Some(cmd) if SessionCommands.isConfigAgents(cmd.name) =>
+                draft.set("") *> agentsTab.set("agents") *> agentsOpen.set(true) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
+              case Some(cmd) if SessionCommands.isDashboard(cmd.name) =>
+                draft.set("") *> dashboardOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDashboard))
+              case Some(cmd) if SessionCommands.isTheme(cmd.name) =>
+                draft.set("") *>
+                  (if cmd.args.isEmpty then themeOpen.set(true)
+                   else ZIO.succeed(bridge.post(WebviewMsg.SetTheme(cmd.args))))
+              case Some(cmd) if SessionCommands.isCompact(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.ToggleCompact))
+              case Some(cmd) if SessionCommands.isFullscreen(cmd.name) =>
+                draft.set("") *> chat.update(_.copy(compact = false)) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.PersistConfig("ui", "compact_mode", "false")))
+              case Some(cmd) if SessionCommands.isVim(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.ToggleVim))
+              case Some(cmd) if SessionCommands.isDoctor(cmd.name) =>
+                draft.set("") *> doctorFix.set(cmd.args.trim == "fix") *> doctorOpen.set(true) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.OpenDoctor))
+              case Some(cmd) if SessionCommands.isVoice(cmd.name) =>
+                draft.set("") *> setVoice(true)
+              case Some(cmd) if SessionCommands.isAlwaysApprove(cmd.name) =>
+                draft.set("") *>
+                  ZIO.succeed(
+                    bridge.post(
+                      WebviewMsg.SetMode(
+                        if c.modeId == ModeId.AlwaysApprove then ModeId.Normal else ModeId.AlwaysApprove
+                      )
+                    )
+                  )
+              case Some(cmd) if SessionCommands.isAuto(cmd.name) =>
+                draft.set("") *>
+                  ZIO.succeed(
+                    bridge.post(WebviewMsg.SetMode(if c.modeId == ModeId.Auto then ModeId.Normal else ModeId.Auto))
+                  )
+              case Some(cmd) if SessionCommands.isWorkflowRuns(cmd.name, cmd.args) =>
+                draft.set("") *> workflowsOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenWorkflows))
               case Some(cmd) if SessionCommands.isHistory(cmd.name) =>
                 val list = PromptHistory.filter(PromptHistory.entries(c), cmd.args)
                 historyPickIdx.get.flatMap { idx =>
@@ -1338,9 +1507,17 @@ object ChatApp:
                 else ZIO.unit
               case _ =>
                 val msg =
-                  if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed) else WebviewMsg.Send(trimmed)
+                  if ChatModel.turnIsRunning(c) then WebviewMsg.Queue(trimmed, c.images)
+                  else WebviewMsg.Send(trimmed, c.images)
                 ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false) *>
-                  historyBrowse.set(None) *> historyPickIdx.set(None)
+                  historyBrowse.set(None) *> historyPickIdx.set(None) *>
+                  chat.update(_.copy(images = Nil)) *>
+                  stash.get.flatMap:
+                    case Some(s) if s.restoreAfterSend =>
+                      draft.set(s.text) *>
+                        chat.update(_.copy(chips = s.chips, images = s.images)) *>
+                        stash.set(None)
+                    case _ => ZIO.unit
             end match
           }
         }
@@ -1376,6 +1553,78 @@ object ChatApp:
             val tag = el.tagName.toLowerCase
             tag == "textarea" || tag == "input"
           case _ => false
+
+      def themeNav(key: String): UIO[Unit] =
+        themePreview.get.flatMap { cur =>
+          chat.get.flatMap { m =>
+            val ids  = Theme.All.map(_.id)
+            val now  = cur.getOrElse(Theme.canonicalize(m.theme))
+            val i    = math.max(0, ids.indexOf(now))
+            val next =
+              key match
+                case "ArrowDown" => ids((i + 1) % ids.size)
+                case "ArrowUp"   => ids((i - 1 + ids.size) % ids.size)
+                case "Home"      => ids.head
+                case "End"       => ids.last
+                case _           => now
+            if key == "Enter" then
+              themePreview.set(None) *> themeOpen.set(false) *>
+                ZIO.succeed(bridge.post(WebviewMsg.SetTheme(next))) *>
+                ZIO.succeed(ChatApp.paintTheme(next))
+            else themePreview.set(Some(next)) *> ZIO.succeed(ChatApp.paintTheme(next))
+          }
+        }
+
+      def applyVim(c: ChatModel, motion: VimNav.Motion): UIO[Unit] =
+        val ids = c.turns.map(_.id)
+        if ids.isEmpty then ZIO.unit
+        else
+          val cur =
+            c.selectedTurn.flatMap(id => Option(ids.indexOf(id)).filter(_ >= 0)).getOrElse(ids.size - 1)
+          val next = VimNav.step(cur, ids.size, motion)
+          val sel  = ids.lift(next)
+          motion match
+            case VimNav.Motion.Yank =>
+              val text = sel.flatMap(id => c.turns.find(_.id == id)).map(t => t.agent).getOrElse("")
+              chat.update(_.copy(selectedTurn = sel)) *> writeClipboard(text)
+            case VimNav.Motion.Fold =>
+              chat.update(_.copy(selectedTurn = sel)) *>
+                sel.map(id => ChatApp.toggleDetails(s"""[data-testid="thought-${id.value}"]""")).getOrElse(ZIO.unit)
+            case VimNav.Motion.Collapse | VimNav.Motion.Expand =>
+              chat.update(_.copy(selectedTurn = sel)) *>
+                sel.map(id => ChatApp.toggleDetails(s"""[data-testid="turn-${id.value}"]""")).getOrElse(ZIO.unit)
+            case _ =>
+              chat.update(_.copy(selectedTurn = sel))
+          end match
+        end if
+      end applyVim
+
+      def ingestClipboard(e: ascent.dom.ClipboardEvent): UIO[Unit] =
+        ChatApp.imageFiles(e.clipboardData) match
+          case Nil   => ZIO.unit
+          case files =>
+            ZIO.succeed(e.preventDefault()) *> ZIO.foreachDiscard(files)(ingestImageFile)
+
+      def ingestDrop(e: ascent.dom.DragEvent): UIO[Unit] =
+        ChatApp.imageFiles(e.dataTransfer) match
+          case Nil   => ZIO.unit
+          case files =>
+            ZIO.succeed(e.preventDefault()) *> ZIO.foreachDiscard(files)(ingestImageFile)
+
+      def ingestImageFile(file: ascent.dom.File): UIO[Unit] =
+        ChatApp.readImage(file: js.Any).flatMap {
+          case None                     => ZIO.unit
+          case Some((mime, data, name)) =>
+            chat.get.flatMap { c =>
+              val chip = ImageAttach.mint(c.images.size + 1, mime, data, name)
+              chat.update(_.copy(images = c.images :+ chip)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.AddImage(mime, data, name)))
+            }
+        }
+
+      def dropImage(id: String): UIO[Unit] =
+        chat.update(m => m.copy(images = m.images.filterNot(_.id == id))) *>
+          ZIO.succeed(bridge.post(WebviewMsg.RemoveImage(id)))
 
       def onPaletteKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
         paletteOpen.get.flatMap {
@@ -1432,6 +1681,100 @@ object ChatApp:
             else ZIO.succeed(false)
         }
 
+      def toastEsc: UIO[Unit] =
+        wallMs.flatMap: now =>
+          lastCancelMs.set(Some(now)) *> lastIdleEsc.set(None) *>
+            chat.update(_.copy(error = Some(CancelTurn.EscHint)))
+
+      def closeChild: UIO[Unit] =
+        chat.update(_.copy(attachedChild = None)) *> ZIO.succeed(bridge.post(WebviewMsg.DetachChild))
+
+      def closeBtw: UIO[Unit] =
+        chat.update(_.copy(btw = None, btwDone = false))
+
+      def onEscape(c: ChatModel): UIO[Unit] =
+        draft.get.flatMap: text =>
+          mentionShown.get.flatMap: mentions =>
+            firstHit(
+              takeSome(openMenu, _ => hideMenu),
+              takeFlag(cancelOpen, cancelOpen.set(false)),
+              takeFlag(
+                themeOpen,
+                chat.get.flatMap { m =>
+                  themeOpen.set(false) *> themePreview.set(None) *> ZIO.succeed(ChatApp.paintTheme(m.theme))
+                },
+              ),
+              takeFlag(agentsOpen, agentsOpen.set(false)),
+              takeFlag(planViewOpen, planViewOpen.set(false) *> chat.update(_.copy(planView = None))),
+              takeFlag(workflowsOpen, workflowsOpen.set(false)),
+              takeFlag(dashboardOpen, dashboardOpen.set(false)),
+              takeFlag(doctorOpen, doctorOpen.set(false)),
+              takeFlag(voiceOn, setVoice(false)),
+              ZIO
+                .succeed(c.attachedChild.nonEmpty)
+                .flatMap(on => if on then closeChild.as(true) else ZIO.succeed(false)),
+              ZIO.succeed(c.btw.nonEmpty).flatMap(on => if on then closeBtw.as(true) else ZIO.succeed(false)),
+              takeFlag(paletteOpen, closePalette),
+              takeFlag(mcpsOpen, closeMcps),
+              takeSome(sessionPane, _ => closeSessionPane),
+              takeSome(pendingDelete, _ => cancelDelete),
+              ZIO
+                .succeed(c.rewindConfirm.nonEmpty)
+                .flatMap(on => if on then cancelRewind.as(true) else ZIO.succeed(false)),
+              ZIO
+                .succeed(c.rewind.nonEmpty)
+                .flatMap(on => if on then closeRewindPicker.as(true) else ZIO.succeed(false)),
+              ZIO
+                .succeed(c.forkAsk.nonEmpty)
+                .flatMap(on => if on then chat.update(_.copy(forkAsk = None)).as(true) else ZIO.succeed(false)),
+              ZIO
+                .succeed(mentions.nonEmpty)
+                .flatMap(on =>
+                  if on then (dismissed.set(true) *> mentionIdx.set(None)).as(true) else ZIO.succeed(false)
+                ),
+              ZIO
+                .succeed(PromptHistory.query(text).isDefined)
+                .flatMap: on =>
+                  if on then (draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)).as(true)
+                  else ZIO.succeed(false),
+              takeSome(historyBrowse, _ => historyBrowse.set(None)),
+              ZIO.succeed(c.pickerOpen).flatMap(on => if on then closePicker.as(true) else ZIO.succeed(false)),
+              ZIO
+                .succeed(c.permission.isDefined)
+                .flatMap(on => if on then parkPermission.as(true) else ZIO.succeed(false)),
+              ZIO
+                .succeed(c.question.isDefined)
+                .flatMap: on =>
+                  if on then ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))).as(true)
+                  else ZIO.succeed(false),
+              ZIO
+                .succeed(c.plan.isDefined)
+                .flatMap: on =>
+                  if on then
+                    ZIO
+                      .succeed(bridge.post(WebviewMsg.PlanVerdict(c.plan.get.requestId, PlanOutcome.Abandoned)))
+                      .as(true)
+                  else ZIO.succeed(false),
+              ZIO
+                .succeed(c.elicit.isDefined)
+                .flatMap: on =>
+                  if on then ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))).as(true)
+                  else ZIO.succeed(false),
+              takeFlag(queueOpen, queueOpen.set(false)),
+              takeFlag(todosOpen, todosOpen.set(false)),
+              takeFlag(tasksOpen, tasksOpen.set(false)),
+            ).flatMap: hit =>
+              if hit then ZIO.unit
+              else if ChatModel.turnIsRunning(c) then toastEsc
+              else idleEsc(c, text)
+
+      def onCtrlC(c: ChatModel): UIO[Unit] =
+        draft.get.flatMap: text =>
+          if text.trim.nonEmpty || c.chips.nonEmpty || c.images.nonEmpty then
+            draft.set("") *> chat.update(_.copy(chips = Nil, images = Nil, error = None))
+          else if ChatModel.turnIsRunning(c) then requestCancel(c)
+          else ZIO.unit
+
       def onCardKey(e: ascent.dom.KeyboardEvent): UIO[Unit] =
         onPaletteKey(e).flatMap {
           case true  => ZIO.unit
@@ -1466,143 +1809,92 @@ object ChatApp:
           else if e.ctrlKey && !e.metaKey && !e.shiftKey && key == "4" && !c.pickerOpen then
             if typingInField(e) then ZIO.unit
             else steal(toggleQueue)
-          else if key == "Escape" then
-            steal {
-              openMenu.get.flatMap {
-                case Some(_) => hideMenu
-                case None    =>
-                  paletteOpen.get.flatMap {
-                    case true  => closePalette
-                    case false =>
-                      mcpsOpen.get.flatMap {
-                        case true  => closeMcps
-                        case false =>
-                          sessionPane.get.flatMap {
-                            case Some(_) => closeSessionPane
-                            case None    =>
-                              pendingDelete.get.flatMap {
-                                case Some(_) => cancelDelete
-                                case None    =>
-                                  if c.rewindConfirm.nonEmpty then cancelRewind
-                                  else if c.rewind.nonEmpty then closeRewindPicker
-                                  else if c.forkAsk.nonEmpty then chat.update(_.copy(forkAsk = None))
-                                  else
-                                    mentionShown.get.flatMap { mentions =>
-                                      if mentions.nonEmpty then dismissed.set(true) *> mentionIdx.set(None)
-                                      else
-                                        draft.get.flatMap { text =>
-                                          if PromptHistory.query(text).isDefined then
-                                            draft.set("") *> historyPickIdx.set(None) *> historyBrowse.set(None)
-                                          else
-                                            historyBrowse.get.flatMap {
-                                              case Some(_) => historyBrowse.set(None)
-                                              case None    =>
-                                                if c.pickerOpen then closePicker
-                                                else if c.permission.isDefined then parkPermission
-                                                else if c.question.isDefined then
-                                                  ZIO.succeed(
-                                                    bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))
-                                                  )
-                                                else if c.plan.isDefined then
-                                                  ZIO.succeed(
-                                                    bridge.post(
-                                                      WebviewMsg.PlanVerdict(
-                                                        c.plan.get.requestId,
-                                                        PlanOutcome.Abandoned,
-                                                      )
-                                                    )
-                                                  )
-                                                else if c.elicit.isDefined then
-                                                  ZIO.succeed(
-                                                    bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))
-                                                  )
-                                                else
-                                                  queueOpen.get.flatMap {
-                                                    case true  => queueOpen.set(false)
-                                                    case false =>
-                                                      todosOpen.get.flatMap {
-                                                        case true  => todosOpen.set(false)
-                                                        case false =>
-                                                          tasksOpen.get.flatMap {
-                                                            case true  => tasksOpen.set(false)
-                                                            case false =>
-                                                              if ChatModel.turnIsRunning(c) then
-                                                                nowMs.get.flatMap { now =>
-                                                                  lastCancelMs.set(Some(now)) *>
-                                                                    lastIdleEsc.set(None) *>
-                                                                    ZIO.succeed(bridge.post(WebviewMsg.Cancel))
-                                                                }
-                                                              else idleRewindEsc(c, text)
-                                                          }
-                                                      }
-                                                  }
-                                            }
-                                        }
-                                    }
-                              }
-                          }
-                      }
-                  }
-              }
-            }
+          else if key == "Escape" then steal(onEscape(c))
+          else if ctrlOrMeta && !e.shiftKey && (key == "c" || key == "C") then steal(onCtrlC(c))
+          else if (e.ctrlKey || e.altKey) && !e.shiftKey && (key == "s" || key == "S") then steal(chordStash)
+          else if e.ctrlKey && !e.metaKey && !e.shiftKey && (key == "o" || key == "O") then
+            steal(
+              ZIO.succeed(
+                bridge.post(
+                  WebviewMsg.SetMode(
+                    if c.modeId == ModeId.AlwaysApprove then ModeId.Normal else ModeId.AlwaysApprove
+                  )
+                )
+              )
+            )
+          else if e.ctrlKey && !e.shiftKey && key == "\\" then
+            steal(dashboardOpen.update(!_) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDashboard)))
+          else if (e.ctrlKey && !e.shiftKey && key == " ") || key == "F8" then
+            steal(voiceOn.get.flatMap(on => setVoice(!on)))
           else
-            (if typingInField(e) then ZIO.succeed(false) else onMenuKey(e)).flatMap {
-              case true  => ZIO.unit
-              case false =>
-                if e.shiftKey && key == "Tab" && !ctrlOrMeta then
-                  steal {
-                    if c.question.isDefined || c.permission.isDefined then ZIO.unit
-                    else hideMenu *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
-                  }
-                else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
-                  steal(ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))))
-                else
-                  pendingDelete.get.flatMap {
-                    case Some(_) if key == "y" || key == "Y"                         => steal(confirmDelete)
-                    case Some(_) if key == "n" || key == "N"                         => steal(cancelDelete)
-                    case _ if c.rewindConfirm.nonEmpty && (key == "y" || key == "Y") =>
-                      steal(confirmRewind)
-                    case _ if c.rewindConfirm.nonEmpty && (key == "n" || key == "N") =>
-                      steal(cancelRewind)
-                    case _ =>
-                      c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
-                        case Some(opt) =>
-                          steal(
-                            ZIO.succeed(
-                              bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId))
-                            )
-                          )
-                        case None =>
-                          c.question match
-                            case Some(_) if typingInField(e) => ZIO.unit
-                            case Some(card)                  =>
-                              questionDraft.get.flatMap { held =>
-                                val d = QuestionDraft.align(card, held)
-                                QuestionDraft.navKey(key) match
-                                  case Some("prev") => steal(questionDraft.set(QuestionDraft.prev(card, d)))
-                                  case Some("next") => steal(questionDraft.set(QuestionDraft.next(card, d)))
-                                  case _            =>
-                                    QuestionDraft.current(card, d).flatMap(q => QuestionDraft.optionKey(key, q)) match
-                                      case Some(oid) => steal(applyQuestionPick(card, oid))
-                                      case None      => ZIO.unit
-                                end match
-                              }
-                            case None =>
-                              c.plan match
-                                case Some(card) if !typingInField(e) && (key == "a" || key == "A") =>
+            themeOpen.get.flatMap { theme =>
+              if theme && ChatApp.isThemeNav(key) then steal(themeNav(key))
+              else
+                cancelOpen.get.flatMap: open =>
+                  if open && CancelTurn.pick(key).nonEmpty then steal(applyCancelChoice(CancelTurn.pick(key).get))
+                  else if !typingInField(e) && c.vim && VimNav.motion(key, e.shiftKey).nonEmpty then
+                    steal(applyVim(c, VimNav.motion(key, e.shiftKey).get))
+                  else
+                    (if typingInField(e) then ZIO.succeed(false) else onMenuKey(e)).flatMap {
+                      case true  => ZIO.unit
+                      case false =>
+                        if e.shiftKey && key == "Tab" && !ctrlOrMeta then
+                          steal {
+                            if c.question.isDefined || c.permission.isDefined then ZIO.unit
+                            else hideMenu *> ZIO.succeed(bridge.post(WebviewMsg.CycleMode))
+                          }
+                        else if e.shiftKey && (key == "X" || key == "x") && c.question.isDefined then
+                          steal(ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))))
+                        else
+                          pendingDelete.get.flatMap {
+                            case Some(_) if key == "y" || key == "Y"                         => steal(confirmDelete)
+                            case Some(_) if key == "n" || key == "N"                         => steal(cancelDelete)
+                            case _ if c.rewindConfirm.nonEmpty && (key == "y" || key == "Y") =>
+                              steal(confirmRewind)
+                            case _ if c.rewindConfirm.nonEmpty && (key == "n" || key == "N") =>
+                              steal(cancelRewind)
+                            case _ =>
+                              c.permission.flatMap(p => ComposerQuery.permissionOption(key, p.options)) match
+                                case Some(opt) =>
                                   steal(
                                     ZIO.succeed(
-                                      bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Approved))
+                                      bridge.post(WebviewMsg.PermissionChoice(c.permission.get.requestId, opt.optionId))
                                     )
                                   )
-                                case Some(card) if !typingInField(e) && (key == "q" || key == "Q") =>
-                                  steal(
-                                    ZIO.succeed(
-                                      bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Abandoned))
-                                    )
-                                  )
-                                case _ => ZIO.unit
-                  }
+                                case None =>
+                                  c.question match
+                                    case Some(_) if typingInField(e) => ZIO.unit
+                                    case Some(card)                  =>
+                                      questionDraft.get.flatMap { held =>
+                                        val d = QuestionDraft.align(card, held)
+                                        QuestionDraft.navKey(key) match
+                                          case Some("prev") => steal(questionDraft.set(QuestionDraft.prev(card, d)))
+                                          case Some("next") => steal(questionDraft.set(QuestionDraft.next(card, d)))
+                                          case _            =>
+                                            QuestionDraft
+                                              .current(card, d)
+                                              .flatMap(q => QuestionDraft.optionKey(key, q)) match
+                                              case Some(oid) => steal(applyQuestionPick(card, oid))
+                                              case None      => ZIO.unit
+                                        end match
+                                      }
+                                    case None =>
+                                      c.plan match
+                                        case Some(card) if !typingInField(e) && (key == "a" || key == "A") =>
+                                          steal(
+                                            ZIO.succeed(
+                                              bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Approved))
+                                            )
+                                          )
+                                        case Some(card) if !typingInField(e) && (key == "q" || key == "Q") =>
+                                          steal(
+                                            ZIO.succeed(
+                                              bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Abandoned))
+                                            )
+                                          )
+                                        case _ => ZIO.unit
+                          }
+                    }
             }
         }
       end handleShellKey
@@ -1616,12 +1908,14 @@ object ChatApp:
 
       def openSession(id: SessionId): UIO[Unit] =
         chat.get.flatMap { c =>
-          val gen = leaveGen.incrementAndGet()
-          leaving.set(Some(SessionLeave(id, c.pickerOpen))) *>
-            chat.update(adoptView(_, id, waiting)) *>
-            commit(hist, lastHref, BeardPath.sessionHref(id), WebviewMsg.ResumeSession(id), bridge) *>
-            (ZIO.sleep(LeaveMs.millis) *>
-              ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkIn(scope).unit
+          restoreCode.get.flatMap { restore =>
+            val gen = leaveGen.incrementAndGet()
+            leaving.set(Some(SessionLeave(id, c.pickerOpen))) *>
+              chat.update(adoptView(_, id, waiting)) *>
+              commit(hist, lastHref, BeardPath.sessionHref(id), WebviewMsg.ResumeSession(id, restore), bridge) *>
+              (ZIO.sleep(LeaveMs.millis) *>
+                ZIO.when(leaveGen.get() == gen)(leaving.set(None))).forkIn(scope).unit
+          }
         }
 
       def showPicker(c: ChatModel, leave: Option[SessionLeave]): Boolean =
@@ -1911,6 +2205,13 @@ object ChatApp:
             case PaletteKind.Settings    => showMenu(OpenMenu.Settings)
             case PaletteKind.SessionInfo => openSessionPane(SessionPane.Info)
             case PaletteKind.Context     => openSessionPane(SessionPane.Context)
+            case PaletteKind.Agents      => agentsOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
+            case PaletteKind.Dashboard => dashboardOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDashboard))
+            case PaletteKind.PlanView  => planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+            case PaletteKind.Workflows => workflowsOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenWorkflows))
+            case PaletteKind.Doctor    => doctorOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDoctor))
+            case PaletteKind.Theme     => themeOpen.set(true)
+            case PaletteKind.Voice     => setVoice(true)
             case PaletteKind.Slash(name) => pickSlash(name)
         )
 
@@ -1934,6 +2235,36 @@ object ChatApp:
         else if SessionCommands.isTasks(name) then draft.set("") *> toggleTasks
         else if SessionCommands.isLoop(name) then draft.set("/loop ")
         else if SessionCommands.isFork(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send("/fork")))
+        else if SessionCommands.isViewPlan(name) then
+          draft.set("") *> planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+        else if SessionCommands.isBtw(name) then draft.set("/btw ")
+        else if SessionCommands.isPersonas(name) then
+          draft.set("") *> agentsTab.set("personas") *> agentsOpen.set(true) *>
+            ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
+        else if SessionCommands.isConfigAgents(name) then
+          draft.set("") *> agentsTab.set("agents") *> agentsOpen.set(true) *>
+            ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
+        else if SessionCommands.isDashboard(name) then
+          draft.set("") *> dashboardOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDashboard))
+        else if SessionCommands.isTheme(name) then draft.set("") *> themeOpen.set(true)
+        else if SessionCommands.isCompact(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.ToggleCompact))
+        else if SessionCommands.isFullscreen(name) then
+          draft.set("") *> chat.update(_.copy(compact = false)) *>
+            ZIO.succeed(bridge.post(WebviewMsg.PersistConfig("ui", "compact_mode", "false")))
+        else if SessionCommands.isVim(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.ToggleVim))
+        else if SessionCommands.isDoctor(name) then
+          draft.set("") *> doctorFix.set(false) *> doctorOpen.set(true) *>
+            ZIO.succeed(bridge.post(WebviewMsg.OpenDoctor))
+        else if SessionCommands.isVoice(name) then draft.set("") *> setVoice(true)
+        else if SessionCommands.isAlwaysApprove(name) then
+          chat.get.flatMap { c =>
+            draft.set("") *>
+              ZIO.succeed(
+                bridge.post(
+                  WebviewMsg.SetMode(if c.modeId == ModeId.AlwaysApprove then ModeId.Normal else ModeId.AlwaysApprove)
+                )
+              )
+          }
         else
           draft.set(s"/$name ") *>
             ZIO.succeed(bridge.post(WebviewMsg.SlashPick(name)))
@@ -1983,19 +2314,70 @@ object ChatApp:
       def armRewind(point: RewindPoint): UIO[Unit] =
         chat.update(_.copy(rewindConfirm = Some(point)))
 
+      def idleEsc(c: ChatModel, text: String): UIO[Unit] =
+        wallMs.flatMap { now =>
+          lastCancelMs.get.flatMap { cancelAt =>
+            if cancelAt.exists(now - _ < 1000L) then ZIO.unit
+            else if text.trim.nonEmpty || c.chips.nonEmpty || c.images.nonEmpty then
+              lastIdleEsc.get.flatMap { prev =>
+                if prev.exists(now - _ <= 800L) then
+                  lastIdleEsc.set(None) *>
+                    stash.set(DraftStash.take(text, c.chips, restoreAfterSend = false, c.images)) *>
+                    draft.set("") *>
+                    chat.update(_.copy(chips = Nil, images = Nil, error = Some(DraftStash.SavedToast)))
+                else lastIdleEsc.set(Some(now)) *> chat.update(_.copy(error = Some(CancelTurn.ClearHint)))
+              }
+            else idleRewindEsc(c, text)
+          }
+        }
+
       def idleRewindEsc(c: ChatModel, text: String): UIO[Unit] =
-        if text.trim.nonEmpty || Rewind.fromTurns(c.turns).isEmpty then lastIdleEsc.set(None)
+        if Rewind.fromTurns(c.turns).isEmpty then lastIdleEsc.set(None)
         else
-          nowMs.get.flatMap { now =>
-            lastCancelMs.get.flatMap { cancelAt =>
-              if cancelAt.exists(now - _ < 1000L) then ZIO.unit
-              else
-                lastIdleEsc.get.flatMap { prev =>
-                  if prev.exists(now - _ <= 800L) then lastIdleEsc.set(None) *> openRewindPicker
-                  else lastIdleEsc.set(Some(now))
-                }
+          wallMs.flatMap { now =>
+            lastIdleEsc.get.flatMap { prev =>
+              if prev.exists(now - _ <= 800L) then lastIdleEsc.set(None) *> openRewindPicker
+              else lastIdleEsc.set(Some(now))
             }
           }
+
+      def requestCancel(c: ChatModel): UIO[Unit] =
+        if CancelTurn.needsPanel(c.tasks, None) then cancelOpen.set(true)
+        else ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+
+      def applyCancelChoice(choice: CancelChoice): UIO[Unit] =
+        val keep     = CancelTurn.keepChildren(choice)
+        val remember =
+          CancelTurn.remember(choice) match
+            case Some(keepAlways) =>
+              val value = if keepAlways then "always_continue" else "always_stop"
+              ZIO.succeed(bridge.post(WebviewMsg.PersistConfig("ui", "cancel_subagents_on_turn_cancel", value)))
+            case None => ZIO.unit
+        remember *> cancelOpen.set(false) *> ZIO.succeed(
+          bridge.post(WebviewMsg.CancelTurnChoice(choice.toString, keep))
+        )
+      end applyCancelChoice
+
+      def chordStash: UIO[Unit] =
+        draft.get.flatMap { text =>
+          chat.get.flatMap { c =>
+            stash.get.flatMap { held =>
+              if DraftStash.isEmpty(text, c.chips, c.images) then
+                held match
+                  case None    => ZIO.unit
+                  case Some(s) =>
+                    draft.set(s.text) *>
+                      chat.update(
+                        _.copy(chips = s.chips, images = s.images, error = Some(DraftStash.RestoredToast))
+                      ) *>
+                      stash.set(None)
+              else
+                stash.set(DraftStash.take(text, c.chips, restoreAfterSend = true, c.images)) *>
+                  draft.set("") *>
+                  chat.update(_.copy(chips = Nil, images = Nil, error = Some(DraftStash.SavedToast)))
+            }
+          }
+        }
 
       def cancelRewind: UIO[Unit] = chat.update(_.copy(rewindConfirm = None))
 
@@ -2070,15 +2452,28 @@ object ChatApp:
               dismissed.set(false) *> mentionIdx.set(Some(0)) *>
                 ZIO.succeed(bridge.post(WebviewMsg.MentionQuery(q))))
 
+      val shownTheme =
+        Squawk.zipWith(chat, themePreview) { (c, p) => p.getOrElse(Theme.canonicalize(c.theme)) }
       E.div(
         Shell,
         Page,
+        CompactRules,
+        StateAttr("data-theme", shownTheme).toAttr,
+        StateAttr("data-compact", chat.map(c => if c.compact then "true" else "false")).toAttr,
+        StateAttr("data-vim", chat.map(c => if c.vim then "true" else "false")).toAttr,
+        Attr.ReactiveAttr("style", shownTheme.map(id => AttrValue.Str(ChatApp.themeInline(id)))),
         Ev.onKeyDown(onCardKey),
-        Lifecycle.onMountScoped[ascent.dom.Element, Any](_ => ZIO.addFinalizer(stopHost).unit),
+        Ev.onPaste(e => ingestClipboard(e)),
+        Ev.onDrop(e => ingestDrop(e)),
+        Ev.sync.onDragOver(e => e.preventDefault()),
+        Lifecycle.onMountScoped[ascent.dom.Element, Any] { _ =>
+          chat.get.flatMap(c => ZIO.succeed(ChatApp.paintTheme(c.theme))) *>
+            ZIO.addFinalizer(stopHost).unit
+        },
         Dom.onDocument[ascent.dom.Element, Any](Events.onKeyDown) { (_, ev) =>
           ev.keyboard.fold(ZIO.unit)(onCardKey)
         },
-        renderToolbar(chat, toggleMenu, openPicker, startNew),
+        renderToolbar(chat, toggleMenu, openPicker, startNew, stash),
         E.div(
           Stage,
           when(Squawk.zipWith(chat, leaving)(showPicker))(
@@ -2087,10 +2482,12 @@ object ChatApp:
               pickerQuery,
               leaving,
               pendingDelete,
+              restoreCode,
               s => pickerQuery.set(s),
               closePicker,
               openSession,
               toggleDelete,
+              restoreCode.update(!_),
             )
           ),
           when(Squawk.zipWith(chat, leaving)((c, l) => stageIdle(l) && !c.pickerOpen && ChatModel.isLoading(c)))(
@@ -2157,7 +2554,17 @@ object ChatApp:
               TestId("transcript"),
               Lifecycle.onMountScoped[ascent.dom.Element, Any](TranscriptScroll.bind),
               forEachSignal(chat.map(_.turns))(_.id.value) { (id, _, turn) =>
-                renderTurn(bridge, id, turn, toolOut)
+                renderTurn(
+                  bridge,
+                  id,
+                  turn,
+                  toolOut,
+                  chat.map(_.selectedTurn.contains(TurnId(id))),
+                  chat.update(_.copy(selectedTurn = Some(TurnId(id)))),
+                  sid =>
+                    chat.update(_.copy(attachedChild = Some(SessionId(sid)))) *>
+                      ZIO.succeed(bridge.post(WebviewMsg.AttachChild(TaskId(sid)))),
+                )
               },
             )
           ),
@@ -2201,6 +2608,45 @@ object ChatApp:
         renderTasks(chat, tasksOpen, toggleTasks, stopTask),
         renderQueue(chat, queueOpen, queueIdx, toggleQueue, sendQueuedNow, dropQueued, editQueued),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
+        renderCancelTurn(cancelOpen, chat, applyCancelChoice),
+        renderChildFrame(
+          chat,
+          childDraft,
+          childQueue,
+          closeChild,
+          t =>
+            val body = t.trim
+            if body.isEmpty then ZIO.unit
+            else
+              childQueue.get.flatMap { queued =>
+                childDraft.set("") *>
+                  chat.get.flatMap: c =>
+                    c.attachedChild.fold(ZIO.unit): sid =>
+                      ZIO.succeed(bridge.post(WebviewMsg.SteerChild(TaskId(sid.value), body, queued)))
+              }
+          ,
+          s => childDraft.set(s),
+          childQueue.update(!_),
+        ),
+        renderAgents(agentsOpen, agentsTab, chat, agentsOpen.set(false), tab => agentsTab.set(tab)),
+        renderPlanView(planViewOpen, chat, planViewOpen.set(false) *> chat.update(_.copy(planView = None))),
+        renderWorkflows(workflowsOpen, chat, workflowsOpen.set(false)),
+        renderDashboard(dashboardOpen, chat, dashboardOpen.set(false), openSession),
+        renderDoctor(doctorOpen, doctorFix, chat, doctorOpen.set(false)),
+        renderTheme(
+          themeOpen,
+          chat,
+          themePreview,
+          themeOpen.set(false) *> themePreview.set(None) *> chat.get.flatMap(m =>
+            ZIO.succeed(ChatApp.paintTheme(m.theme))
+          ),
+          id =>
+            themePreview.set(None) *> themeOpen.set(false) *>
+              ZIO.succeed(bridge.post(WebviewMsg.SetTheme(id))) *> ZIO.succeed(ChatApp.paintTheme(id)),
+        ),
+        renderBtw(chat, closeBtw),
+        renderVoice(voiceOn),
+        renderImages(chat, dropImage),
         when(chat.map(_.error.nonEmpty))(
           E.div(
             Toast,
@@ -2313,6 +2759,7 @@ object ChatApp:
           onSessionPaneKey,
           onQueueKey,
           openSessionPane(SessionPane.Context),
+          requestCancel,
         ),
       )
     end for
@@ -2429,6 +2876,7 @@ object ChatApp:
       toggleMenu: OpenMenu => UIO[Unit],
       openPicker: UIO[Unit],
       startNew: UIO[Unit],
+      stash: ascent.Source[Option[DraftStash]],
   ): ascent.ast.UI[Any] =
     E.div(
       Toolbar,
@@ -2473,6 +2921,9 @@ object ChatApp:
         A.title("Resume a previous session"),
         Ev.onClick(_ => openPicker),
         chat.map(sessionLabel),
+        when(stash.map(_.nonEmpty))(
+          E.span(SessionMetaLine, TestId("stash"), DraftStash.Caption)
+        ),
       ),
       E.div(ToolbarGrow),
       E.button(
@@ -2518,6 +2969,7 @@ object ChatApp:
       onSessionPaneKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       onQueueKey: ascent.dom.KeyboardEvent => UIO[Boolean],
       openContext: UIO[Unit],
+      requestCancel: ChatModel => UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       Composer,
@@ -2551,7 +3003,7 @@ object ChatApp:
         onSessionPaneKey,
         onQueueKey,
       ),
-      renderComposerBar(bridge, chat, sendDraft, openContext),
+      renderComposerBar(bridge, chat, sendDraft, openContext, requestCancel),
     )
 
   private def renderActivityStrip(
@@ -2659,6 +3111,7 @@ object ChatApp:
       chat: ascent.Source[ChatModel],
       sendDraft: UIO[Unit],
       openContext: UIO[Unit],
+      requestCancel: ChatModel => UIO[Unit],
   ): ascent.ast.UI[Any] =
     E.div(
       ComposerBar,
@@ -2671,7 +3124,7 @@ object ChatApp:
         A.`type`("button"),
         Ev.onClick(_ =>
           chat.get.flatMap { c =>
-            if ChatModel.turnIsRunning(c) then ZIO.succeed(bridge.post(WebviewMsg.Cancel))
+            if ChatModel.turnIsRunning(c) then requestCancel(c)
             else sendDraft
           }
         ),
@@ -2807,8 +3260,78 @@ object ChatApp:
   private def writeClipboard(text: String): UIO[Unit] =
     ZIO.succeed {
       try
-        val _ = ascent.dom.window.navigator.clipboard.writeText(text)
+        val _ = Browser.navigator.clipboard.writeText(text)
       catch case _: Throwable => ()
+    }
+
+  private def stopRec(slot: AtomicReference[Option[SpeechRecInstance]]): Unit =
+    slot.getAndSet(None).foreach { rec =>
+      try rec.stop()
+      catch case _: Throwable => ()
+      try rec.abort()
+      catch case _: Throwable => ()
+    }
+
+  private def probeMic(): Unit =
+    try
+      val _ = Browser.navigator.mediaDevices.getUserMedia(MicConstraints())
+    catch case _: Throwable => ()
+
+  def isThemeNav(key: String): Boolean =
+    key == "ArrowDown" || key == "ArrowUp" || key == "Home" || key == "End" || key == "Enter"
+
+  def paintTheme(id: String): Unit =
+    val theme = Theme.canonicalize(id)
+    try
+      val el = ascent.dom.window.document.documentElement.asInstanceOf[ascent.dom.HTMLElement]
+      el.setAttribute("data-theme", theme)
+      Theme.All.flatMap(_.vars.keys).toSet.foreach(k => el.style.removeProperty(k))
+      Theme.pick(theme).foreach { t =>
+        t.vars.foreach { (k, v) => el.style.setProperty(k, v) }
+      }
+    catch case _: Throwable => ()
+  end paintTheme
+
+  def themeInline(id: String): String =
+    Theme.pick(id).toList.flatMap(_.vars.toList).map((k, v) => s"$k: $v").mkString("; ")
+
+  def toggleDetails(sel: String): UIO[Unit] =
+    ZIO.succeed {
+      try
+        val el = ascent.dom.window.document.querySelector(sel)
+        if el != null then
+          val d =
+            if el.tagName.toLowerCase == "details" then el
+            else el.querySelector("details")
+          if d != null then if d.hasAttribute("open") then d.removeAttribute("open") else d.setAttribute("open", "")
+      catch case _: Throwable => ()
+    }
+
+  def imageFiles(dt: ascent.dom.DataTransfer): List[ascent.dom.File] =
+    if dt == null then Nil
+    else
+      val files = dt.files
+      if files == null then Nil
+      else
+        (0 until files.length).toList
+          .map(i => files.item(i))
+          .filter(f => f != null && f.`type`.startsWith("image/"))
+
+  def readImage(file: js.Any): UIO[Option[(String, String, String)]] =
+    ZIO.async { cb =>
+      try
+        val named  = file.asInstanceOf[groksbeard.facade.File]
+        val reader = new groksbeard.facade.FileReader()
+        reader.onload = (_: js.Any) =>
+          val raw   = Option(reader.result).map(_.toString).getOrElse("")
+          val comma = raw.indexOf(',')
+          val data  = if comma >= 0 then raw.substring(comma + 1) else raw
+          val mime  = Option(named.`type`).filter(_.nonEmpty).getOrElse("image/png")
+          val name  = Option(named.name).filter(_.nonEmpty).getOrElse("paste.png")
+          cb(ZIO.succeed(if data.isEmpty then None else Some((mime, data, name))))
+        reader.onerror = (_: js.Any) => cb(ZIO.succeed(None))
+        reader.readAsDataURL(file)
+      catch case _: Throwable => cb(ZIO.succeed(None))
     }
 
   private def heroLogo(logoSrc: Option[String]): ascent.ast.UI[Any] =
@@ -2892,12 +3415,17 @@ object ChatApp:
       id: String,
       turn: Squawk[TurnView],
       outputs: Squawk[Map[ToolCallId, String]],
+      selected: Squawk[Boolean],
+      onSelect: UIO[Unit],
+      attach: String => UIO[Unit] = _ => ZIO.unit,
   ): ascent.ast.UI[Any] =
     val parts = turn.map(ChatMarkdown.parts)
     val tail  = parts.map(_._2)
     E.section(
       Turn,
       TestId(s"turn-$id"),
+      Attr.ReactiveAttr("data-selected", selected.map(on => AttrValue.Str(if on then "true" else "false"))),
+      Ev.onClick(_ => onSelect),
       when(turn.map(_.user.exists(_.text.nonEmpty)))(
         E.div(UserMsg, TestId(s"user-$id"), turn.map(userTextOf))
       ),
@@ -2929,6 +3457,8 @@ object ChatApp:
               ToolBox,
               FileRow,
               TestId(s"subagent-$sid"),
+              A.role("button"),
+              Ev.onClick(_ => attach(sid)),
               E.span(TodoMark, row.map(r => Tasks.mark(r.status))),
               E.span(row.map(Tasks.lifecycle)),
             )
@@ -3539,7 +4069,7 @@ object ChatApp:
       E.span(TodoMark, Tasks.mark(row.status)),
       E.span(s"${TaskKind.label(row.kind)} · ${row.label}"),
       if row.detail.nonEmpty then E.span(SessionMetaLine, row.detail) else E.span(),
-      if row.owned && TaskStatus.isLive(row.status) then
+      if (row.owned || row.kind == TaskKind.Subagent) && TaskStatus.isLive(row.status) then
         E.button(
           Chip,
           TestId(s"task-stop-$key"),
@@ -3653,6 +4183,302 @@ object ChatApp:
       )
     )
 
+  private def overlay(id: String, title: String, close: UIO[Unit], body: ascent.ast.UI[Any]*): ascent.ast.UI[Any] =
+    E.div(
+      PaletteScrim,
+      TestId(id),
+      Ev.onClick(_ => close),
+      E.div(
+        PalettePanel,
+        Ev.onClick(e => ZIO.succeed(e.stopPropagation())),
+        E.div(ChangesHead, E.strong(title), E.button(Chip, TestId(s"$id-close"), Ev.onClick(_ => close), "Close")),
+        Arg.ArgsArg(body.toList.map(Arg.ChildArg(_))),
+      ),
+    )
+
+  private def renderCancelTurn(
+      open: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      pick: CancelChoice => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      E.div(
+        Cards,
+        TestId("cancel-turn"),
+        E.div(
+          Card,
+          E.h3(CancelTurn.Title),
+          E.p(Copy, chat.map(c => CancelTurn.heading(CancelTurn.liveSubagents(c.tasks).size))),
+          Arg.ArgsArg(
+            CancelTurn.rows.map { (n, choice, label) =>
+              Arg.ChildArg(
+                E.button(
+                  CardBtn,
+                  TestId(s"cancel-$n"),
+                  Ev.onClick(_ => pick(choice)),
+                  s"$n. $label",
+                )
+              )
+            }
+          ),
+        ),
+      )
+    )
+
+  private def renderChildFrame(
+      chat: ascent.Source[ChatModel],
+      childDraft: ascent.Source[String],
+      childQueue: ascent.Source[Boolean],
+      close: UIO[Unit],
+      send: String => UIO[Unit],
+      onDraft: String => UIO[Unit],
+      toggleQueue: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(chat.map(_.attachedChild.nonEmpty))(
+      overlay(
+        "child-frame",
+        "Subagent",
+        close,
+        E.div(
+          Transcript,
+          TestId("child-transcript"),
+          forEachSignal(chat.map(c => c.attachedChild.toList.flatMap(id => c.children.getOrElse(id.value, Nil))))(
+            _.id.value
+          ) { (id, _, turn) =>
+            E.div(
+              TestId(s"child-turn-$id"),
+              when(turn.map(_.user.exists(_.text.nonEmpty)))(
+                E.div(UserMsg, turn.map(_.user.map(_.text).getOrElse("")))
+              ),
+              E.div(AgentMsg, turn.map(_.agent)),
+            )
+          },
+        ),
+        E.textarea(
+          Draft,
+          TestId("child-draft"),
+          A.value(childDraft),
+          Events.onInput(e => onDraft(e.targetValue.getOrElse(""))),
+        ),
+        E.label(
+          TestId("child-queue"),
+          E.input(A.`type`("checkbox"), A.checked(childQueue), Ev.onClick(_ => toggleQueue)),
+          "Queue",
+        ),
+        E.button(Send, TestId("child-send"), Ev.onClick(_ => childDraft.get.flatMap(send)), "Send"),
+      )
+    )
+
+  private def renderAgents(
+      open: ascent.Source[Boolean],
+      tab: ascent.Source[String],
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+      setTab: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "agents",
+        "Agents",
+        close,
+        E.div(
+          ChipRow,
+          E.button(
+            Chip,
+            TestId("agents-tab-agents"),
+            Ev.onClick(_ => setTab("agents")),
+            "Agents",
+          ),
+          E.button(
+            Chip,
+            TestId("agents-tab-personas"),
+            Ev.onClick(_ => setTab("personas")),
+            "Personas",
+          ),
+        ),
+        when(tab.map(_ == "agents"))(
+          E.div(
+            TestId("agents-list"),
+            forEach(chat.map(_.agents))(_.name) { a =>
+              E.button(CardBtn, ThemeChoice, TestId(s"agent-${a.name}"), a.name, E.span(SessionMetaLine, a.description))
+            },
+          )
+        ),
+        when(tab.map(_ == "personas"))(
+          E.div(
+            TestId("personas-list"),
+            forEach(chat.map(_.personas))(_.name) { p =>
+              E.button(
+                CardBtn,
+                ThemeChoice,
+                TestId(s"persona-${p.name}"),
+                p.name,
+                E.span(SessionMetaLine, p.description),
+              )
+            },
+          )
+        ),
+      )
+    )
+
+  private def renderPlanView(
+      open: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "plan-view",
+        "Plan",
+        close,
+        E.div(AgentMsg, TestId("plan-view-md"), chat.map(c => c.planView.getOrElse("No plan written yet"))),
+      )
+    )
+
+  private def renderWorkflows(
+      open: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "workflows",
+        "Workflow runs",
+        close,
+        forEach(chat.map(_.workflows))(_.name) { run =>
+          E.div(
+            FileRow,
+            TestId(s"workflow-${run.name}"),
+            E.strong(run.name),
+            E.span(SessionMetaLine, s"${run.phase} · ${run.status}"),
+          )
+        },
+      )
+    )
+
+  private def renderDashboard(
+      open: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+      openSession: SessionId => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "dashboard",
+        "Dashboard",
+        close,
+        forEach(chat.map(_.dashboard))(_.id.value) { row =>
+          E.button(
+            CardBtn,
+            ThemeChoice,
+            TestId(s"dash-${row.id.value}"),
+            Ev.onClick(_ => close *> openSession(row.id)),
+            row.title,
+            E.span(SessionMetaLine, row.state),
+          )
+        },
+      )
+    )
+
+  private def renderDoctor(
+      open: ascent.Source[Boolean],
+      fixOnly: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      close: UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "doctor",
+        "Doctor",
+        close,
+        forEach(
+          Squawk.zipWith(chat, fixOnly) { (c, fix) =>
+            val rows = if fix then Doctor.fixes(c.doctor) else c.doctor
+            if fix && rows.isEmpty then List(("empty", None, true))
+            else rows.map(f => (f.id, Some(f), fix))
+          }
+        )(_._1) { row =>
+          val (_, finding, fix) = row
+          finding match
+            case None    => E.p(Copy, TestId("doctor-fix-empty"), "No automatic fixes.")
+            case Some(f) =>
+              E.div(
+                FileRow,
+                TestId(if fix then s"doctor-fix-${f.id}" else s"doctor-${f.id}"),
+                E.strong(f.label),
+                E.span(SessionMetaLine, if fix then f.fix.getOrElse(f.detail) else f.detail),
+              )
+        },
+      )
+    )
+
+  private def renderTheme(
+      open: ascent.Source[Boolean],
+      chat: ascent.Source[ChatModel],
+      preview: ascent.Source[Option[String]],
+      close: UIO[Unit],
+      set: String => UIO[Unit],
+  ): ascent.ast.UI[Any] =
+    when(open)(
+      overlay(
+        "theme",
+        "Theme",
+        close,
+        forEach(
+          Squawk.zipWith(chat, preview) { (c, p) =>
+            val on = p.getOrElse(Theme.canonicalize(c.theme))
+            Theme.All.map(t => (t, t.id == on))
+          }
+        )(_._1.id) { pair =>
+          val (t, on) = pair
+          E.button(
+            if on then Send else CardBtn,
+            ThemeChoice,
+            TestId(s"theme-${t.id}"),
+            Ev.onClick(_ => set(t.id)),
+            t.name,
+            E.span(SessionMetaLine, t.description),
+          )
+        },
+      )
+    )
+
+  private def renderBtw(chat: ascent.Source[ChatModel], close: UIO[Unit]): ascent.ast.UI[Any] =
+    when(chat.map(_.btw.nonEmpty))(
+      E.div(
+        Card,
+        TestId("btw"),
+        chat.map(_.btw.getOrElse("")),
+        E.button(Chip, TestId("btw-close"), Ev.onClick(_ => close), "Close"),
+      )
+    )
+
+  private def renderVoice(on: ascent.Source[Boolean]): ascent.ast.UI[Any] =
+    when(on)(E.div(Toast, TestId("voice"), VoiceCapture.Listening))
+
+  private def renderImages(chat: ascent.Source[ChatModel], drop: String => UIO[Unit]): ascent.ast.UI[Any] =
+    when(chat.map(_.images.nonEmpty))(
+      E.div(
+        ChipRow,
+        forEach(chat.map(_.images.zipWithIndex))(_._1.id) { pair =>
+          val (img, i) = pair
+          E.span(
+            Chip,
+            TestId(img.id),
+            ImageAttach.label(img, i),
+            E.button(
+              ChipRemove,
+              TestId(s"image-remove-${img.id}"),
+              A.`type`("button"),
+              A.title(s"Remove ${ImageAttach.label(img, i)}"),
+              Ev.onClick(_ => drop(img.id)),
+              "×",
+            ),
+          )
+        },
+      )
+    )
+
   private def renderDiff(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
     when(chat.map(_.diff.nonEmpty))(
       E.div(
@@ -3749,10 +4575,12 @@ object ChatApp:
       query: ascent.Source[String],
       leaving: ascent.Source[Option[SessionLeave]],
       pendingDelete: ascent.Source[Option[SessionId]],
+      restore: ascent.Source[Boolean],
       onQuery: String => UIO[Unit],
       close: UIO[Unit],
       openSession: SessionId => UIO[Unit],
       onDelete: SessionId => UIO[Unit],
+      toggleRestore: UIO[Unit],
   ): ascent.ast.UI[Any] =
     val shown =
       Squawk.zipWith(chat, Squawk.zipWith(query, Squawk.zipWith(leaving, pendingDelete)(Tuple2.apply))(Tuple2.apply)) {
@@ -3785,6 +4613,12 @@ object ChatApp:
         A.value(query),
         A.placeholder("Filter by title"),
         Events.onInput(e => onQuery(e.targetValue.getOrElse(""))),
+      ),
+      E.label(
+        SessionMetaLine,
+        TestId("resume-restore"),
+        E.input(A.`type`("checkbox"), A.checked(restore), Ev.onClick(_ => toggleRestore)),
+        "Restore code",
       ),
       E.div(
         PickerList,

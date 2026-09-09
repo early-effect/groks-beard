@@ -11,7 +11,7 @@ final class SessionState:
     planActive = id.value.toLowerCase.contains("plan")
 
 object SessionState:
-  val CommitBeforeContinue: Set[String] = Set("session/set_mode")
+  val CommitBeforeContinue: Set[AcpMethod] = Set(AcpMethod.SessionSetMode)
 
   def modeIdFromSessionResult(result: Json): Option[ModeId] =
     result

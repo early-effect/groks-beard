@@ -26,10 +26,17 @@ object JsDom:
     new SubtreeWatch(childList = true, subtree = true, characterData = true)
       .asInstanceOf[dom.MutationObserverInit]
 
-  def keyDown(key: String, code: String, ctrl: Boolean = false): dom.KeyboardEvent =
+  def keyDown(
+      key: String,
+      code: String,
+      ctrl: Boolean = false,
+      alt: Boolean = false,
+      shift: Boolean = false,
+  ): dom.KeyboardEvent =
     new dom.KeyboardEvent(
       "keydown",
-      new KeyInit(key, code, ctrl, bubbles = true, cancelable = true).asInstanceOf[dom.KeyboardEventInit],
+      new KeyInit(key, code, ctrl, alt, shift, bubbles = true, cancelable = true)
+        .asInstanceOf[dom.KeyboardEventInit],
     )
 
   private class JsonPost(
@@ -48,6 +55,8 @@ object JsDom:
       val key: String,
       val code: String,
       val ctrlKey: Boolean,
+      val altKey: Boolean,
+      val shiftKey: Boolean,
       val bubbles: Boolean,
       val cancelable: Boolean,
   ) extends js.Object

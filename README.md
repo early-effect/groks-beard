@@ -53,7 +53,7 @@ sbt --no-server ~uiJS/ascentPreview
 # if Metals is not the build server: sbt --server ~uiJS/ascentPreview
 ```
 
-Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `tasks`, `palette`, `mcps`, `queue`, `session-info`, `context`.
+Open http://localhost:8765/ for live Grok. Canned chrome fixtures are `?scene=empty`, `slash`, `mentions`, `settings`, `transcript`, `permission`, `plan`, `question`, `elicit`, `changes`, `resume`, `todos`, `tasks`, `palette`, `mcps`, `queue`, `session-info`, `context`, `child`, `cancel`, `agents`, `plan-view`, `workflows`, `dashboard`, `btw`, `theme`, `compact`, `doctor`, `voice`, `images`.
 
 Do not serve `target/` with a static file server. Preview restages on change and reloads over SSE.
 
@@ -67,11 +67,13 @@ Do not serve `target/` with a static file server. Preview restages on change and
 - Follow-along: the transcript shows the file the agent is in. Click it to open; the editor does not jump on its own.
 - Agent markdown: headings, nested lists, `+` bullets, fences, quote paragraphs, and GFM tables (with or without a leading `|`). `javascript:` stays text. `https` links open in a new tab. Plan cards use the same renderer.
 - Todos (`Ctrl+T`) and tasks (`Ctrl+G`): the pane opens while work is live, Hide dismisses it, and the shortcut reopens history. A still-running task line stays above the composer.
-- Subagents: a compact lifecycle row in the transcript, and a Subagents group in the tasks pane (`Ctrl+G`). No child-transcript attach, no kill, no `/config-agents`.
+- Subagents: compact lifecycle row, tasks group, child-transcript attach, kill, cancel-turn 1–4, limited steer composer.
+- `/config-agents`, `/view-plan`, stash (`Ctrl+S`, idle Esc Esc), `/btw`, `/dashboard`, `/workflow runs`, `/theme`, `/compact-mode` / `/minimal`, `/vim-mode`, `/doctor`, `/voice`.
+- ACP `session/set_config_option`, `embeddedContext` resource blocks, image chips (image block or resource blob), `session/list` for the dashboard.
 - Turn-grouped **Grok Changes**: Keep / Undo per file and per turn, including always-approve. Persist across reload in the editor.
 - Opt-in TUI bridge: selection, reveal, path-based diffs. No writes through MCP.
 
-Still missing versus the pager (see the internal `ROADMAP.md` gap audit): child-transcript attach, subagent kill, `/config-agents`, `/view-plan`, stash, `/btw`.
+`/settings`, `/theme`, `/vim-mode`, `/compact-mode`, and Always-stop write `$GROK_HOME/config.toml` only when you change them. Image paste attaches a chip even when `promptCapabilities.image` is false (sent as a resource blob). TTY-only doctor probes read as not applicable.
 
 ## Shortcuts
 
@@ -83,8 +85,13 @@ Still missing versus the pager (see the internal `ROADMAP.md` gap audit): child-
 | Toggle tasks | `Ctrl+G` (chat focused) |
 | Toggle queue | `Ctrl+4` (chat focused, when something is queued) |
 | Command palette | `Ctrl+P` / `Cmd+P` (chat focused), or `?` on an empty prompt |
-| Stop the running turn | `Escape` (chat focused) |
+| Stop the running turn | `Ctrl+C` on an empty draft, or Stop. Esc never cancels. |
+| Stash / restore draft | `Ctrl+S` / `Alt+S` |
+| Clear draft (stash) | idle `Esc Esc` within 800ms |
 | Rewind (idle, empty prompt) | `Esc Esc` within 800ms |
+| Dashboard | `Ctrl+\` |
+| Always-approve | `Ctrl+O` |
+| Voice | `Ctrl+Space` / `/voice` |
 
 ## Modules
 

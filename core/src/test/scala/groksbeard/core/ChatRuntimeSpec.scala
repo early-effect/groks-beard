@@ -1024,7 +1024,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           }
         }
       },
-      test("setModel writes session/set_model") {
+      test("setModel writes session/set_config_option") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
         chat(transport = wrap) { (rt, posted) =>
@@ -1035,7 +1035,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.setModel("grok-code-fast-1")
             msgs <- posted.get
           yield assertTrue(
-            lines.exists(l => l.contains("session/set_model") && l.contains("grok-code-fast-1")),
+            lines.exists(l => l.contains("session/set_config_option") && l.contains("grok-code-fast-1")),
             msgs.exists {
               case m: HostMsg.SessionMeta => m.modelId == "grok-code-fast-1"
               case _                      => false
@@ -1468,7 +1468,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(deleted.isEmpty)
         }
       },
-      test("setEffort writes session/set_model with reasoningEffort") {
+      test("setEffort writes session/set_config_option") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
         chat(transport = wrap) { (rt, posted) =>
@@ -1479,7 +1479,9 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.setEffort("xhigh")
             msgs <- posted.get
           yield assertTrue(
-            lines.exists(l => l.contains("session/set_model") && l.contains("reasoningEffort") && l.contains("xhigh")),
+            lines.exists(l =>
+              l.contains("session/set_config_option") && l.contains("reasoning_effort") && l.contains("xhigh")
+            ),
             msgs.exists {
               case m: HostMsg.SessionMeta => m.effort == "xhigh" && m.modelId == "grok-4.6"
               case _                      => false
@@ -1545,6 +1547,36 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("resume with restoreCode sends _meta.restoreCode") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.resumeSession(SessionId("disk-1"), restoreCode = true)
+          yield assertTrue(
+            lines.exists(l => l.contains("session/load") && l.contains("restoreCode"))
+          )
+        }
+      },
+      test("setTheme persists [ui] theme through SessionRepo") {
+        val disk = new java.util.concurrent.atomic.AtomicReference("")
+        chat(onWriteConfig = t => disk.set(t)) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.setTheme("tokyonight")
+            msgs <- posted.get
+          yield assertTrue(
+            disk.get().contains("theme = \"tokyonight\""),
+            msgs.exists {
+              case HostMsg.UiPrefs(theme, _, _) => theme == "tokyonight"
+              case _                            => false
+            },
+          )
+        }
+      },
       test("/model grok-4.6 high sets model and effort") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
@@ -1557,7 +1589,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.send("/model grok-4.6 xhigh")
             msgs <- posted.get
           yield assertTrue(
-            lines.exists(l => l.contains("session/set_model") && l.contains("grok-4.6") && l.contains("xhigh")),
+            lines.exists(l => l.contains("session/set_config_option") && l.contains("grok-4.6")),
+            lines.exists(l => l.contains("session/set_config_option") && l.contains("xhigh")),
             msgs.exists {
               case m: HostMsg.SessionMeta => m.modelId == "grok-4.6" && m.effort == "xhigh"
               case _                      => false
@@ -1838,6 +1871,62 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(blob.contains("q-2"), blob.contains("\"answers\""), blob.contains("[]"))
         }
       },
+      test("setModel falls back to session/set_model when configOptions are empty") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(omitConfigOptions = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.setModel("grok-code-fast-1")
+          yield assertTrue(
+            lines.exists(_.contains("session/set_model")),
+            !lines.exists(_.contains("session/set_config_option")),
+          )
+        }
+      },
+      test("openDashboard writes session/list when advertised") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.openDashboard
+          yield assertTrue(lines.exists(_.contains("session/list")))
+        }
+      },
+      test("btw writes the interject RPC") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.btw("also check errors")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("interject") && l.contains("also check errors")),
+            msgs.exists {
+              case HostMsg.Btw(text, _) => text.contains("also check errors")
+              case _                    => false
+            },
+          )
+        }
+      },
+      test("deleteSession writes session/close when advertised") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap, deleteOnDisk = _ => true) { (rt, _) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- rt.deleteSession("sess_test")
+          yield assertTrue(lines.exists(_.contains("session/close")))
+        }
+      },
       test("deleteSession of another id refreshes the open picker") {
         var rows = List(SessionRow("keep", "Keep", activityMs = 2), SessionRow("gone", "Gone", activityMs = 1))
         chat(
@@ -1922,6 +2011,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       readDisk: String => Option[String] = _ => None,
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
       planOnDisk: SessionId => List[TodoEntry] = _ => Nil,
+      onReadConfig: () => String = () => "",
+      onWriteConfig: String => Unit = _ => (),
       beforeInitialize: UIO[Unit] = ZIO.unit,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
@@ -1941,6 +2032,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               readDisk = readDisk,
               followFile = followFile,
               planOnDisk = planOnDisk,
+              onReadConfig = onReadConfig,
+              onWriteConfig = onWriteConfig,
             )
           )
         result <- body(rt, posted)

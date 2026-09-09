@@ -2,6 +2,7 @@ package groksbeard.host
 
 import groksbeard.core.*
 import groksbeard.host.vscode.*
+import zio.*
 
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSExportTopLevel
@@ -157,19 +158,25 @@ object Extension:
         "groksBeard.renameSession",
         () =>
           chat.current.foreach { rt =>
-            val current = rt.focusedTitle
-            val _       = vscode.window
-              .showInputBox(new InputBoxOptions("Session title", current, "New title, or --auto"))
-              .`then` { (value: js.UndefOr[String]) =>
-                value.toOption.map(_.trim).filter(_.nonEmpty).foreach { title =>
-                  SessionEdit.parseRename(title) match
-                    case Right(op) => HostRuntime.runUIO(rt.renameSession(rt.focusedId.getOrElse(SessionId.empty), op))
-                    case Left(err) if err != "empty" =>
-                      val _ = vscode.window.showErrorMessage(err)
-                    case _ => ()
+            HostRuntime.runUIO {
+              rt.focused.flatMap { (id, current) =>
+                ZIO.succeed {
+                  val _ = vscode.window
+                    .showInputBox(new InputBoxOptions("Session title", current, "New title, or --auto"))
+                    .`then` { (value: js.UndefOr[String]) =>
+                      value.toOption.map(_.trim).filter(_.nonEmpty).foreach { title =>
+                        SessionEdit.parseRename(title) match
+                          case Right(op) =>
+                            HostRuntime.runUIO(rt.renameSession(id.getOrElse(SessionId.empty), op))
+                          case Left(err) if err != "empty" =>
+                            val _ = vscode.window.showErrorMessage(err)
+                          case _ => ()
+                      }
+                      js.undefined
+                    }
                 }
-                js.undefined
               }
+            }
           },
       )
     )
@@ -178,18 +185,24 @@ object Extension:
         "groksBeard.deleteSession",
         () =>
           chat.current.foreach { rt =>
-            val id = rt.focusedId.getOrElse(SessionId.empty)
-            if id.isEmpty then
-              val _ = vscode.window.showWarningMessage("No session to delete.")
-            else
-              val title = Option(rt.focusedTitle).filter(_.nonEmpty).getOrElse("this session")
-              val _     = vscode.window
-                .showWarningMessage(s"Delete $title? This cannot be undone.", "Delete", "Cancel")
-                .`then` { (pick: js.UndefOr[String]) =>
-                  if pick.toOption.contains("Delete") then HostRuntime.runUIO(rt.deleteSession(id))
-                  js.undefined
+            HostRuntime.runUIO {
+              rt.focused.flatMap { (idOpt, title) =>
+                ZIO.succeed {
+                  val id = idOpt.getOrElse(SessionId.empty)
+                  if id.isEmpty then
+                    val _ = vscode.window.showWarningMessage("No session to delete.")
+                  else
+                    val label = Option(title).filter(_.nonEmpty).getOrElse("this session")
+                    val _     = vscode.window
+                      .showWarningMessage(s"Delete $label? This cannot be undone.", "Delete", "Cancel")
+                      .`then` { (pick: js.UndefOr[String]) =>
+                        if pick.toOption.contains("Delete") then HostRuntime.runUIO(rt.deleteSession(id))
+                        js.undefined
+                      }
+                  end if
                 }
-            end if
+              }
+            }
           },
       )
     )

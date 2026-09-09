@@ -120,6 +120,14 @@ enum HostMsg derives JsonCodec:
   @jsonHint("transcript") case Transcript(turns: List[TurnView] = Nil)
   @jsonHint("rewindList") case RewindList(points: List[RewindPoint] = Nil)
   @jsonHint("rewound") case Rewound(promptIndex: Int)
+  @jsonHint("childTranscript") case ChildTranscript(sessionId: SessionId, turns: List[TurnView] = Nil)
+  @jsonHint("planView") case PlanView(markdown: String)
+  @jsonHint("agents") case Agents(agents: List[AgentDef] = Nil, personas: List[PersonaDef] = Nil)
+  @jsonHint("workflows") case Workflows(runs: List[WorkflowRun] = Nil)
+  @jsonHint("dashboard") case Dashboard(rows: List[DashRow] = Nil)
+  @jsonHint("btw") case Btw(text: String, done: Boolean = false)
+  @jsonHint("doctor") case DoctorReport(findings: List[DoctorFinding] = Nil)
+  @jsonHint("uiPrefs") case UiPrefs(theme: String = "vscode", compact: Boolean = false, vim: Boolean = false)
 end HostMsg
 
 object HostMsg:
@@ -152,12 +160,13 @@ end HostMsg
 @jsonDiscriminator("_tag")
 enum WebviewMsg derives JsonCodec:
   @jsonHint("ready") case Ready
-  @jsonHint("send") case Send(text: String)
-  @jsonHint("queue") case Queue(text: String)
+  @jsonHint("send") case Send(text: String, images: List[ImageChip] = Nil)
+  @jsonHint("queue") case Queue(text: String, images: List[ImageChip] = Nil)
   @jsonHint("queueSendNow") case QueueSendNow(id: QueueId)
   @jsonHint("queueDrop") case QueueDrop(id: QueueId)
   @jsonHint("stopTask") case StopTask(id: TaskId)
   @jsonHint("cancel") case Cancel
+  @jsonHint("cancelTurn") case CancelTurnChoice(choice: String, keepChildren: Boolean = false)
   @jsonHint("slashPick") case SlashPick(name: String)
   @jsonHint("mentionQuery") case MentionQuery(query: String)
   @jsonHint("mentionPick") case MentionPick(path: String, absPath: String)
@@ -191,7 +200,7 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("undoAll") case UndoAll
   @jsonHint("closeDiff") case CloseDiff
   @jsonHint("newSession") case NewSession
-  @jsonHint("resumeSession") case ResumeSession(sessionId: SessionId)
+  @jsonHint("resumeSession") case ResumeSession(sessionId: SessionId, restoreCode: Boolean = false)
   @jsonHint("openSessionPicker") case OpenSessionPicker
   @jsonHint("closeSessionPicker") case CloseSessionPicker
   @jsonHint("renameSession") case RenameSession(sessionId: SessionId, title: String, auto: Boolean = false)
@@ -209,4 +218,20 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("setMcpEnabled") case SetMcpEnabled(name: String, enabled: Boolean)
   @jsonHint("fork") case Fork(worktree: Boolean, directive: String = "")
   @jsonHint("log") case Log(message: String, level: String = "error")
+  @jsonHint("attachChild") case AttachChild(id: TaskId)
+  @jsonHint("detachChild") case DetachChild
+  @jsonHint("steerChild") case SteerChild(id: TaskId, text: String, queue: Boolean = false)
+  @jsonHint("viewPlan") case ViewPlan
+  @jsonHint("openAgents") case OpenAgents
+  @jsonHint("openDashboard") case OpenDashboard
+  @jsonHint("openWorkflows") case OpenWorkflows
+  @jsonHint("openDoctor") case OpenDoctor
+  @jsonHint("openTheme") case OpenTheme
+  @jsonHint("btw") case Btw(text: String)
+  @jsonHint("setTheme") case SetTheme(id: String)
+  @jsonHint("toggleCompact") case ToggleCompact
+  @jsonHint("toggleVim") case ToggleVim
+  @jsonHint("addImage") case AddImage(mime: String, data: String, name: String = "")
+  @jsonHint("removeImage") case RemoveImage(id: String)
+  @jsonHint("persistConfig") case PersistConfig(table: String, key: String, value: String)
 end WebviewMsg

@@ -62,7 +62,9 @@ Playwright is not a substitute for that window.
 
 ## Visual review: click through, then hunt gutters
 
-Chekhov passing is not visual review. A screenshot of the default scene is not visual review. Before asking for commit approval, and again before every PR that touches UI:
+Chekhov passing is not visual review. A screenshot of the default scene is not visual review. Do not wait until the end of a UI change to open Firefox. Drive the headed **playwright-firefox** MCP in the same turn as the edit: navigate `http://localhost:8765/?scene=…`, click the new control, type, send, Esc, measure `#root`. A green Chekhov file you never opened in that window is not done.
+
+Before asking for commit approval, and again before every PR that touches UI:
 
 1. Open the live preview in a real Firefox window the human can see (`http://localhost:8765/` and the `?scene=` fixtures).
 2. **Use the thing you changed.** Click it, type in it, open it, close it, pick a row, send, cancel. If you added a picker, open the picker. If you added a chip, add and remove it. A passing `?scene=` that never expands the new control does not count.

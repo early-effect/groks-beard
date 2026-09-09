@@ -48,7 +48,7 @@ object LiveSession:
           val home     = GrokHome(env)
           val caps     = ClientCapabilities.forSpawn(None, verified = false, terminalHandlersReady = true)
           val envLayer =
-            HostOut.layer(emit) ++
+            (HostOut.layer(emit) ++
               SessionRepo.of(NioSessionFs, home, cwd) ++
               Mentions.layer(q => ZIO.attemptBlocking(MentionWalk.fromDisk(cwd, q)).orSystem) ++
               ChangesPersist.noop ++
@@ -60,7 +60,7 @@ object LiveSession:
                   args => ProcessCapture.run(cmd, args, cwd),
                   ZIO.attempt(Files.readString(JPath.of(home, "config.toml"))).orElseSucceed(""),
                 )
-              )
+              )) >+> UiPrefs.layer
           ProcessTransport
             .spawn(
               cmd,

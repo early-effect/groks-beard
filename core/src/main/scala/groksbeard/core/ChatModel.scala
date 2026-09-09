@@ -32,7 +32,13 @@ final case class TurnView(
 
 final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false) derives JsonCodec, Eq
 
-final case class QueuedPrompt(id: QueueId, text: String, chips: List[PromptChip] = Nil) derives JsonCodec, Eq
+final case class QueuedPrompt(
+    id: QueueId,
+    text: String,
+    chips: List[PromptChip] = Nil,
+    images: List[ImageChip] = Nil,
+) derives JsonCodec,
+      Eq
 
 object QueuedPrompt:
   def display(item: QueuedPrompt): String =
@@ -138,6 +144,21 @@ final case class ChatModel(
     rewindConfirm: Option[RewindPoint] = None,
     mcps: List[McpServerView] = Nil,
     forkAsk: Option[String] = None,
+    children: Map[String, List[TurnView]] = Map.empty,
+    attachedChild: Option[SessionId] = None,
+    planView: Option[String] = None,
+    agents: List[AgentDef] = Nil,
+    personas: List[PersonaDef] = Nil,
+    workflows: List[WorkflowRun] = Nil,
+    dashboard: List[DashRow] = Nil,
+    btw: Option[String] = None,
+    btwDone: Boolean = false,
+    doctor: List[DoctorFinding] = Nil,
+    theme: String = "vscode",
+    compact: Boolean = false,
+    vim: Boolean = false,
+    images: List[ImageChip] = Nil,
+    selectedTurn: Option[TurnId] = None,
 )
 
 object ChatModel:
@@ -215,7 +236,9 @@ object ChatModel:
               _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands |
               _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit |
               _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
-              _: HostMsg.ForkAsk =>
+              _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView | _: HostMsg.Agents |
+              _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw | _: HostMsg.DoctorReport |
+              _: HostMsg.UiPrefs =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -364,6 +387,12 @@ object ChatModel:
           rewind = Nil,
           rewindConfirm = None,
           forkAsk = None,
+          children = Map.empty,
+          attachedChild = None,
+          planView = None,
+          btw = None,
+          btwDone = false,
+          images = Nil,
         )
       case HostMsg.RewindList(points) =>
         val confirm =
@@ -387,6 +416,23 @@ object ChatModel:
           runningSinceMs = None,
           error = None,
         )
+      case HostMsg.ChildTranscript(sessionId, turns) =>
+        val key = sessionId.value
+        model.copy(children = model.children.updated(key, turns))
+      case HostMsg.PlanView(markdown) =>
+        model.copy(planView = Some(markdown), error = None)
+      case HostMsg.Agents(agents, personas) =>
+        model.copy(agents = agents, personas = personas)
+      case HostMsg.Workflows(runs) =>
+        model.copy(workflows = runs)
+      case HostMsg.Dashboard(rows) =>
+        model.copy(dashboard = rows)
+      case HostMsg.Btw(text, done) =>
+        model.copy(btw = Some(text), btwDone = done)
+      case HostMsg.DoctorReport(findings) =>
+        model.copy(doctor = findings)
+      case HostMsg.UiPrefs(theme, compact, vim) =>
+        model.copy(theme = theme, compact = compact, vim = vim)
 
   private def markRunning(model: ChatModel, nowMs: Long): ChatModel =
     if ChatModel.turnIsRunning(model) then model.copy(runningSinceMs = model.runningSinceMs.orElse(Some(nowMs)))

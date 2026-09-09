@@ -173,7 +173,7 @@ final class ChatView(
                   beforeInitialize = NodeMcp.awaitIn(cwd, post, out.line),
                 )
                 .provideSome[Scope](
-                  HostOut.layer(post) ++
+                  (HostOut.layer(post) ++
                     SessionRepo.of(NodeSessionFs, home, cwd) ++
                     Mentions.none ++
                     ChangesPersist.layer(disk.save, disk.load) ++
@@ -197,7 +197,7 @@ final class ChatView(
                         args => NodeCapture.run(cmd, args, cwd),
                         ZIO.attempt(nodeFs.readFileSync(s"$home/config.toml", "utf8")).orElseSucceed(""),
                       )
-                    )
+                    )) >+> UiPrefs.layer
                 )
                 .flatMap { rt =>
                   ZIO.succeed {

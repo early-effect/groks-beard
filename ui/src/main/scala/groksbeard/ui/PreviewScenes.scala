@@ -328,6 +328,97 @@ object PreviewScenes:
             SessionRow(SessionId("disk-2"), "Ascent chat chrome", activityMs = 5, summary = Some("Composer and cards")),
           ),
         )
+      case Scene.Child =>
+        val sub =
+          TaskRow(
+            TaskId("sub-1"),
+            TaskKind.Subagent,
+            TaskStatus.Running,
+            "Research spawn_subagent",
+            "explore · grok-4.6",
+          )
+        ChatModel.empty.copy(
+          inSession = true,
+          attachedChild = Some(SessionId("sub-1")),
+          children = Map(
+            "sub-1" -> List(
+              TurnView(
+                TurnId("child-t"),
+                user = Some(TurnUser("research this")),
+                agent = "Child is working.",
+                stopReason = Some(StopReason.EndTurn),
+              )
+            )
+          ),
+          turns = List(
+            TurnView(
+              TurnId("t-sub"),
+              user = Some(TurnUser("Research the spawn path")),
+              agent = "Delegating research.",
+              subagents = List(sub),
+              stopReason = Some(StopReason.EndTurn),
+            )
+          ),
+          tasks = List(sub),
+        )
+      case Scene.Cancel =>
+        val sub =
+          TaskRow(TaskId("sub-1"), TaskKind.Subagent, TaskStatus.Running, "Research spawn_subagent", "explore")
+        ChatModel.empty.copy(
+          inSession = true,
+          turns = List(
+            TurnView(TurnId("t-run"), user = Some(TurnUser("go")), agent = "Working…", subagents = List(sub))
+          ),
+          tasks = List(sub),
+        )
+      case Scene.Agents =>
+        ChatModel.empty.copy(
+          inSession = true,
+          agents = AgentsCatalog.builtins,
+          personas = List(PersonaDef("concise", "Be concise.")),
+        )
+      case Scene.PlanView =>
+        ChatModel.empty.copy(inSession = true, planView = Some("# Plan\n\nUse Metals for compile."))
+      case Scene.Workflows =>
+        ChatModel.empty.copy(
+          inSession = true,
+          workflows = List(WorkflowRun("review-changes", "verify", "running", "2/4")),
+        )
+      case Scene.Dashboard =>
+        ChatModel.empty.copy(
+          inSession = true,
+          dashboard = List(DashRow(SessionId("disk-1"), "Effect plan", "/repo", "idle", "Continue the plan", 10)),
+        )
+      case Scene.Btw =>
+        ChatModel.empty.copy(inSession = true, btw = Some("Aside: also check errors\n\nNoted."), btwDone = true)
+      case Scene.Theme =>
+        ChatModel.empty.copy(inSession = true, theme = "vscode")
+      case Scene.Compact =>
+        ChatModel.empty.copy(inSession = true, compact = true)
+      case Scene.Doctor =>
+        ChatModel.empty.copy(
+          inSession = true,
+          doctor = Doctor.collect(
+            Some("/usr/bin/grok"),
+            Some("1.0.24"),
+            true,
+            false,
+            true,
+            true,
+            true,
+            "/repo",
+            2,
+            "ready",
+            Some("node"),
+          ),
+        )
+      case Scene.Voice =>
+        ChatModel.empty.copy(inSession = true)
+      case Scene.Images =>
+        ChatModel.empty.copy(
+          inSession = true,
+          images = List(ImageChip("image-0", "image/png", "AAAA", "paste.png")),
+        )
       case _ => ChatModel.empty
 end PreviewScenes
 

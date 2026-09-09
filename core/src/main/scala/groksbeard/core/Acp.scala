@@ -34,16 +34,47 @@ final case class InitializeParams(
     clientCapabilities: ClientCapabilities = ClientCapabilities.fake,
     clientInfo: ClientInfo = ClientInfo("groks-beard", "Grok's Beard", "0.2.0"),
 ) derives JsonCodec
-final case class AgentCapabilities(loadSession: Boolean = false, _meta: Option[Json] = None) derives JsonCodec
+final case class PromptCapabilities(
+    image: Boolean = false,
+    audio: Boolean = false,
+    embeddedContext: Boolean = false,
+) derives JsonCodec
+final case class AgentCapabilities(
+    loadSession: Boolean = false,
+    promptCapabilities: Option[PromptCapabilities] = None,
+    sessionCapabilities: Option[Json] = None,
+    _meta: Option[Json] = None,
+) derives JsonCodec
 final case class InitializeResult(protocolVersion: Int, agentCapabilities: AgentCapabilities) derives JsonCodec
 
-final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil) derives JsonCodec
+object AgentCapabilities:
+  def offersSession(caps: AgentCapabilities, method: String): Boolean =
+    caps.sessionCapabilities match
+      case Some(obj: Json.Obj) =>
+        obj.fields.exists { (k, v) =>
+          k == method && (v match
+            case Json.Bool(false) => false
+            case Json.Null        => false
+            case _                => true)
+        }
+      case _ => false
+
+  def embedded(caps: AgentCapabilities): Boolean =
+    caps.promptCapabilities.exists(_.embeddedContext)
+
+  def image(caps: AgentCapabilities): Boolean =
+    caps.promptCapabilities.exists(_.image)
+end AgentCapabilities
+
+final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil, _meta: Option[Json] = None)
+    derives JsonCodec
 final case class SessionModeState(currentModeId: ModeId, availableModes: List[ModeOption] = Nil) derives JsonCodec
 final case class SessionModelState(currentModelId: ModelId, availableModels: List[ModelOption] = Nil) derives JsonCodec
 final case class SessionNewResult(
     sessionId: SessionId,
     modes: Option[SessionModeState] = None,
     models: Option[SessionModelState] = None,
+    configOptions: List[ConfigOption] = Nil,
     _meta: Option[Json] = None,
 ) derives JsonCodec
 final case class SetModelMeta(reasoningEffort: Option[String] = None) derives JsonCodec
@@ -52,14 +83,25 @@ final case class SessionSetModelParams(
     modelId: ModelId,
     _meta: Option[SetModelMeta] = None,
 ) derives JsonCodec
-final case class SessionLoadParams(sessionId: SessionId, cwd: String = ".", mcpServers: List[Json] = Nil)
-    derives JsonCodec
-final case class SessionLoadResult(sessionId: SessionId) derives JsonCodec
+final case class SessionLoadParams(
+    sessionId: SessionId,
+    cwd: String = ".",
+    mcpServers: List[Json] = Nil,
+    _meta: Option[Json] = None,
+) derives JsonCodec
+final case class SessionLoadResult(sessionId: SessionId, configOptions: List[ConfigOption] = Nil) derives JsonCodec
 final case class SessionSetModeParams(sessionId: SessionId, modeId: ModeId) derives JsonCodec
 final case class SessionCancelParams(sessionId: SessionId) derives JsonCodec
+final case class SessionListParams(cwd: Option[String] = None, cursor: Option[String] = None) derives JsonCodec
+final case class SessionCloseParams(sessionId: SessionId) derives JsonCodec
+final case class SessionResumeParams(
+    sessionId: SessionId,
+    cwd: String = ".",
+    mcpServers: List[Json] = Nil,
+) derives JsonCodec
 
 final case class PromptText(@jsonField("type") tpe: String = "text", text: String) derives JsonCodec
-final case class SessionPromptParams(sessionId: SessionId, prompt: List[PromptText]) derives JsonCodec
+final case class SessionPromptParams(sessionId: SessionId, prompt: List[PromptBlock]) derives JsonCodec
 
 final case class ForkSessionParams(
     sourceSessionId: SessionId,
@@ -133,6 +175,7 @@ enum AcpUpdate derives JsonCodec:
   )
   @jsonHint("usage_update") case Usage(used: Option[Int] = None, size: Option[Int] = None)
   @jsonHint("plan") case Plan(entries: List[TodoEntry] = Nil)
+  @jsonHint("config_option_update") case ConfigOptions(configOptions: List[ConfigOption] = Nil)
 end AcpUpdate
 
 final case class AcpSessionNotify(sessionId: SessionId = SessionId.empty, update: AcpUpdate) derives JsonCodec

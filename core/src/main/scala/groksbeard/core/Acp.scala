@@ -176,6 +176,9 @@ enum AcpUpdate derives JsonCodec:
   @jsonHint("usage_update") case Usage(used: Option[Int] = None, size: Option[Int] = None)
   @jsonHint("plan") case Plan(entries: List[TodoEntry] = Nil)
   @jsonHint("config_option_update") case ConfigOptions(configOptions: List[ConfigOption] = Nil)
+  @jsonHint("turn_completed") case TurnCompleted(
+      @jsonField("stop_reason") stopReason: StopReason = StopReason.EndTurn
+  )
 end AcpUpdate
 
 final case class AcpSessionNotify(sessionId: SessionId = SessionId.empty, update: AcpUpdate) derives JsonCodec

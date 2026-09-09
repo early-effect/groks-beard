@@ -2307,6 +2307,42 @@ object ChatChromeSpec extends ZIOSpecDefault:
           })
         }
       },
+      test("a live tool on a loaded turn shows Stop") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed(
+                bridge.push(
+                  HostMsg.Transcript(
+                    List(
+                      TurnView(
+                        TurnId("t-run"),
+                        user = Some(TurnUser("go")),
+                        stopReason = Some(StopReason.EndTurn),
+                      )
+                    )
+                  )
+                )
+              )
+              idle <- waitText(root, "send", "Send")
+              _    <- ZIO.succeed(
+                bridge.push(
+                  HostMsg.ToolCall(
+                    TurnId("t-run"),
+                    ToolRow("c1", "run", ToolKind.Execute, ToolStatus.InProgress),
+                  )
+                )
+              )
+              live <- waitText(root, "send", "Stop")
+              _    <- ZIO.succeed(bridge.push(HostMsg.TurnEnd(TurnId("t-run"), StopReason.EndTurn)))
+              done <- waitText(root, "send", "Send")
+            yield assertTrue(idle == "Send", live == "Stop", done == "Send")
+          }
+        yield result
+        end for
+      },
       test("Stop on a running turn ends activity") {
         val bridge = PushBridge()
         for

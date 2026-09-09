@@ -1112,7 +1112,12 @@ final class ChatRuntime private (
   private def ingestLoading(p: Json): UIO[Unit] =
     val bump = SessionState.decodeUpdate(p) match
       case Some(_: AcpUpdate.User) => edit(_.noteUserWhileLoading)
-      case _                       => edit(s => if s.loadCleared then s else s.copy(loadCleared = true))
+      case Some(
+            _: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate |
+            _: AcpUpdate.TurnCompleted
+          ) =>
+        edit(_.closeUserPrompt.copy(loadCleared = true))
+      case _ => edit(s => if s.loadCleared then s else s.copy(loadCleared = true))
     bump *> foldTasks(p, loading = true) *> snap.flatMap { s =>
       val msgs = SessionUpdate.hostMsgs(p, s.currentTurn)
       edit { st =>
@@ -1136,7 +1141,13 @@ final class ChatRuntime private (
   private def ingestLive(p: Json): UIO[Unit] =
     val cfg = SessionState.decodeUpdate(p) match
       case Some(AcpUpdate.ConfigOptions(opts)) => edit(_.withConfig(opts))
-      case _                                   => ZIO.unit
+      case Some(_: AcpUpdate.User)             =>
+        edit(_.noteUserPrompt)
+      case Some(_: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate) =>
+        edit(_.copy(running = true, userOpen = false))
+      case Some(_: AcpUpdate.TurnCompleted) =>
+        edit(_.copy(running = false, userOpen = false))
+      case _ => ZIO.unit
     cfg *> foldTasks(p, loading = false).flatMap { folded =>
       snap.flatMap { s =>
         val msgs = SessionUpdate.hostMsgs(p, s.currentTurn)
@@ -1234,7 +1245,21 @@ final class ChatRuntime private (
             SessionLoadParams(id, next.sessionCwd, _meta = meta).asJson,
             loadSessionId = Some(id),
           )
-        case None => rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson))
+        case None =>
+          if !next.settingsState.shareBackend then rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+          else
+            sessions.list.catchAll(_ => ZIO.succeed(Nil)).flatMap { rows =>
+              SessionIndex.shareJoin(rows) match
+                case None     => rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+                case Some(id) =>
+                  val loaded = next.beginResume(id)
+                  put(loaded) *> postMeta *>
+                    rpc(
+                      AcpMethod.SessionLoad,
+                      SessionLoadParams(id, loaded.sessionCwd, _meta = meta).asJson,
+                      loadSessionId = Some(id),
+                    )
+            })
     }
 
   private def ingestSessionNew(result: Option[Json]): UIO[Unit] =

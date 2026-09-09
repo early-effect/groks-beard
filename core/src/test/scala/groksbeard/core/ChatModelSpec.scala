@@ -236,6 +236,9 @@ object ChatModelSpec extends ZIOSpecDefault:
         val modeOnly = ChatModel.applyMsg(withOcc, HostMsg.SessionMeta("", "", "plan"))
         assertTrue(
           withOcc.occupancy.contains(Occupancy(80, 500)),
+          withOcc.inSession,
+          ChatModel.isLoading(withOcc),
+          !ChatModel.isHome(withOcc),
           modeOnly.modeId == "plan",
           modeOnly.occupancy.contains(Occupancy(80, 500)),
           modeOnly.sessionId == "s1",
@@ -321,6 +324,41 @@ object ChatModelSpec extends ZIOSpecDefault:
           next.turns.head.user.exists(_.text == "hello from disk"),
           next.turns.head.agent == "welcome back",
           next.awaitingSession.isEmpty,
+        )
+      },
+      test("a live chunk reopens an ended turn") {
+        val ended = ChatModel.applyMsg(
+          ChatModel.applyMsg(ChatModel.empty, HostMsg.UserMessage("t1", "go")),
+          HostMsg.TurnEnd("t1", StopReason.EndTurn),
+        )
+        val live = ChatModel.applyMsg(
+          ended,
+          HostMsg.ToolCall("t1", ToolRow("c1", "run", ToolKind.Execute, ToolStatus.InProgress)),
+        )
+        val done = ChatModel.applyMsg(live, HostMsg.TurnEnd("t1", StopReason.EndTurn))
+        assertTrue(
+          !ChatModel.turnIsRunning(ended),
+          ChatModel.turnIsRunning(live),
+          live.turns.last.stopReason.isEmpty,
+          !ChatModel.turnIsRunning(done),
+        )
+      },
+      test("snapshotTurns keeps a live last turn running") {
+        val raw = List(
+          TurnView("t0", user = Some(TurnUser("old")), agent = "done"),
+          TurnView(
+            "t1",
+            user = Some(TurnUser("go")),
+            thought = "working",
+            tools = List(ToolRow("c1", "run", ToolKind.Execute, ToolStatus.InProgress)),
+          ),
+        )
+        val snap = ChatModel.snapshotTurns(raw)
+        assertTrue(
+          snap.head.stopReason.contains(StopReason.EndTurn),
+          snap.last.stopReason.isEmpty,
+          ChatModel.stillLive(snap.last),
+          snap.last.thought == "working",
         )
       },
       test("snapshotTurns drops thoughts and tool bodies") {

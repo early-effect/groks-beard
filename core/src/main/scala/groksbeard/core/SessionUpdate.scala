@@ -31,6 +31,8 @@ object SessionUpdate:
         }
       case Some(AcpUpdate.Plan(entries)) =>
         List(HostMsg.Todos(Todos.fromEntries(entries)))
+      case Some(AcpUpdate.TurnCompleted(reason)) =>
+        List(HostMsg.TurnEnd(turnId, reason))
       case None => Nil
 
   private def occupancyMsg(used: Option[Int], size: Option[Int]): Option[Occupancy] =

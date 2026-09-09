@@ -123,6 +123,13 @@ object SessionIndex:
   def isEmpty(row: SessionRow): Boolean =
     row.messages.contains(0)
 
+  /** Hottest session with history. Share-backend ready joins this instead of `session/new`. */
+  def shareJoin(rows: List[SessionRow]): Option[SessionId] =
+    byLastUsed(rows).find(r => r.id.nonEmpty && hasHistory(r)).map(_.id)
+
+  def hasHistory(row: SessionRow): Boolean =
+    row.messages.exists(_ > 0) || row.lastTurn.exists(_.nonEmpty) || row.summary.exists(_.nonEmpty)
+
   def dedupEmpty(rows: List[SessionRow]): List[SessionRow] =
     val (kept, _) =
       rows.foldLeft((Vector.empty[SessionRow], false)) { case ((acc, seenEmpty), row) =>

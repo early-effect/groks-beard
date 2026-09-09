@@ -163,6 +163,20 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           !SessionUpdate.isSessionNotify("session/new"),
         )
       },
+      test("turn_completed becomes TurnEnd") {
+        val msgs = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("turn_completed"),
+              "prompt_id"     -> Json.Str("p1"),
+              "stop_reason"   -> Json.Str("end_turn"),
+            ),
+          ),
+          "t1",
+        )
+        assertTrue(msgs == List(HostMsg.TurnEnd("t1", StopReason.EndTurn)))
+      },
       test("unknown sessionUpdate is ignored") {
         val msgs = SessionUpdate.hostMsgs(
           Json.Obj(

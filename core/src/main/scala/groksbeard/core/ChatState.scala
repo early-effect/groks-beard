@@ -55,6 +55,7 @@ final case class ChatState(
     commands: List[SlashCommand] = Nil,
     workflows: List[WorkflowRun] = Nil,
     slashPass: Set[RpcId] = Set.empty,
+    userOpen: Boolean = false,
 ):
   def sid(fallback: SessionId): SessionId = sessionId.getOrElse(fallback)
 
@@ -86,6 +87,7 @@ final case class ChatState(
     tasks = Nil,
     workflows = Nil,
     slashPass = Set.empty,
+    userOpen = false,
   )
 
   def resetLocal: ChatState =
@@ -110,10 +112,19 @@ final case class ChatState(
     val n = turnSeq + 1
     copy(turnSeq = n, currentTurn = TurnId.mint(n))
 
+  /** Consecutive `user_message_chunk`s (text then image) stay on one turn. A later prompt opens a new one. */
+  def noteUserPrompt: ChatState =
+    if userOpen then copy(running = true)
+    else bumpTurn.copy(running = true, userOpen = true)
+
+  def closeUserPrompt: ChatState =
+    copy(userOpen = false)
+
   def startTurn(text: String, chosen: List[PromptChip], fallback: SessionId): ChatState =
     val n = turnSeq + 1
     copy(
       running = true,
+      userOpen = true,
       liveExecute = None,
       turnSeq = n,
       currentTurn = TurnId.mint(n),
@@ -196,8 +207,7 @@ final case class ChatState(
     copy(imageSeq = n, pendingImages = pendingImages :+ ImageAttach.mint(n, mime, data, name))
 
   def noteUserWhileLoading: ChatState =
-    val cleared = copy(loadCleared = true)
-    if loadCleared then cleared else cleared.bumpTurn
+    noteUserPrompt.copy(loadCleared = true)
 
   def markAgentGone: ((Boolean, Option[SessionId], Boolean, TurnId), ChatState) =
     if agentGone then ((true, None, false, currentTurn), this)

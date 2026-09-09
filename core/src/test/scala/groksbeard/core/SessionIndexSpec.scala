@@ -42,6 +42,19 @@ object SessionIndexSpec extends ZIOSpecDefault:
           pin.map(_.id) == List("c", "a", "b"),
         )
       },
+      test("shareJoin picks the hottest session that is not empty") {
+        val rows = List(
+          SessionRow("empty", "Untitled", activityMs = 9, messages = Some(0)),
+          SessionRow("live", "TUI", activityMs = 8, messages = Some(12)),
+          SessionRow("older", "Old", activityMs = 1, messages = Some(3)),
+        )
+        assertTrue(
+          SessionIndex.shareJoin(rows).contains(SessionId("live")),
+          SessionIndex.shareJoin(List(SessionRow("empty", "Untitled", messages = Some(0)))).isEmpty,
+          SessionIndex.shareJoin(List(SessionRow("bare", "Picker"))).isEmpty,
+          SessionIndex.shareJoin(Nil).isEmpty,
+        )
+      },
       test("touchCurrent promotes the current id unless skipped") {
         val rows = List(
           SessionRow("old", "Earlier", activityMs = 9),

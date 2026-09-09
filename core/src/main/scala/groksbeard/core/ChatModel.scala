@@ -189,14 +189,24 @@ object ChatModel:
     SessionIndex.present(rows, model.sessionOrder)
 
   def snapshotTurns(turns: List[TurnView]): List[TurnView] =
-    turns.map { t =>
+    val last = turns.size - 1
+    turns.zipWithIndex.map { (t, i) =>
+      val keepLive = i == last && stillLive(t)
       t.copy(
-        thought = "",
-        stopReason = t.stopReason.orElse(Some(StopReason.EndTurn)),
+        thought = if keepLive then t.thought else "",
+        stopReason = if keepLive then t.stopReason else t.stopReason.orElse(Some(StopReason.EndTurn)),
         tools = t.tools.map(r => r.copy(input = None, output = None)),
         subagents = t.subagents,
       )
     }
+  end snapshotTurns
+
+  def stillLive(turn: TurnView): Boolean =
+    turn.tools.exists(r => ToolStatus.isLive(r.status)) ||
+      turn.subagents.exists(r => TaskStatus.isLive(r.status)) ||
+      (turn.stopReason.isEmpty && turn.agent.isEmpty &&
+        (turn.user.nonEmpty || turn.thought.nonEmpty) &&
+        turn.tools.forall(r => ToolStatus.isLive(r.status)))
 
   def adopt(model: ChatModel, sessionId: SessionId, title: String): ChatModel =
     val order = if sessionId.nonEmpty then Some(listed(model).map(_.id)) else None
@@ -268,8 +278,10 @@ object ChatModel:
       case HostMsg.Ready =>
         model
       case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort, cwd) =>
+        val sid    = if sessionId.nonEmpty then sessionId else model.sessionId
+        val joined = sessionId.nonEmpty && !model.inSession && model.turns.isEmpty
         model.copy(
-          sessionId = if sessionId.nonEmpty then sessionId else model.sessionId,
+          sessionId = sid,
           title = if title.nonEmpty then title else model.title,
           modeId = if modeId.nonEmpty then modeId else model.modeId,
           modes = if modes.nonEmpty then modes else model.modes,
@@ -278,6 +290,8 @@ object ChatModel:
           models = if models.nonEmpty then models else model.models,
           effort = if modelId.nonEmpty then effort else if effort.nonEmpty then effort else model.effort,
           cwd = if cwd.nonEmpty then cwd else model.cwd,
+          inSession = sid.nonEmpty || model.inSession,
+          awaitingSession = if joined then Some(sid) else model.awaitingSession,
         )
       case HostMsg.SessionList(sessions, currentId, openPicker) =>
         val keepCurrent =
@@ -320,18 +334,23 @@ object ChatModel:
         model.copy(chips = PromptChip.upsert(model.chips, PromptChip(path, absPath, source, startLine, endLine)))
       case HostMsg.UserMessage(turnId, text, chips, steer) =>
         markRunning(
-          upsert(model.copy(chips = Nil, inSession = true), turnId)(_.copy(user = Some(TurnUser(text, chips, steer)))),
+          upsert(model.copy(chips = Nil, inSession = true), turnId)(
+            _.copy(user = Some(TurnUser(text, chips, steer)), stopReason = None)
+          ),
           nowMs,
         )
 
       case HostMsg.AgentChunk(turnId, text, _) =>
-        markRunning(upsert(model, turnId)(t => t.copy(agent = t.agent + text)), nowMs)
+        markRunning(upsert(model, turnId)(t => t.copy(agent = t.agent + text, stopReason = None)), nowMs)
       case HostMsg.ThoughtChunk(turnId, text) =>
-        markRunning(upsert(model, turnId)(t => t.copy(thought = t.thought + text)), nowMs)
+        markRunning(upsert(model, turnId)(t => t.copy(thought = t.thought + text, stopReason = None)), nowMs)
       case HostMsg.ToolCall(turnId, row) =>
-        markRunning(upsert(model, turnId)(t => t.copy(tools = mergeTool(t.tools, row))), nowMs)
+        markRunning(upsert(model, turnId)(t => t.copy(tools = mergeTool(t.tools, row), stopReason = None)), nowMs)
       case HostMsg.ToolChunk(turnId, id, text, snapshot) =>
-        markRunning(upsert(model, turnId)(t => t.copy(tools = pullToolOutput(t.tools, id, text, snapshot))), nowMs)
+        markRunning(
+          upsert(model, turnId)(t => t.copy(tools = pullToolOutput(t.tools, id, text, snapshot), stopReason = None)),
+          nowMs,
+        )
       case HostMsg.Permission(requestId, toolCallId, title, options, hasDiff) =>
         model.copy(permission = Some(PermissionCard(requestId, toolCallId, title, options, hasDiff)))
       case HostMsg.Plan(requestId, markdown) =>

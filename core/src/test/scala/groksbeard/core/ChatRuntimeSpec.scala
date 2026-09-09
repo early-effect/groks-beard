@@ -817,6 +817,106 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("shared-session prompts stay on separate turns") {
+        def notify(update: AcpUpdate): String =
+          Ndjson.encode(
+            Rpc.toLine(Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", update)))
+          )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("say hello"))))
+            _    <- rt.ingestData(notify(AcpUpdate.Agent(AcpContent.Text("Hello."))))
+            _    <- rt.ingestData(notify(AcpUpdate.TurnCompleted(StopReason.EndTurn)))
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("say hi"))))
+            _    <- rt.ingestData(notify(AcpUpdate.Agent(AcpContent.Text("Hi."))))
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            model.turns.size == 2,
+            model.turns.head.user.exists(_.text == "say hello"),
+            model.turns.head.agent == "Hello.",
+            model.turns.last.user.exists(_.text == "say hi"),
+            model.turns.last.agent == "Hi.",
+          )
+        }
+      },
+      test("text then image user chunks stay on one turn") {
+        def notify(update: AcpUpdate): String =
+          Ndjson.encode(
+            Rpc.toLine(Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", update)))
+          )
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("see this"))))
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text(""))))
+            _    <- rt.ingestData(notify(AcpUpdate.Agent(AcpContent.Text("ok"))))
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            model.turns.size == 1,
+            model.turns.head.user.exists(_.text == "see this"),
+            model.turns.head.agent == "ok",
+          )
+        }
+      },
+      test("turn_completed from a shared session ends the turn") {
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify("sess_test", AcpUpdate.User(AcpContent.Text("from tui"))),
+                  )
+                )
+              )
+            )
+            _ <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify("sess_test", AcpUpdate.Thought(AcpContent.Text("thinking"))),
+                  )
+                )
+              )
+            )
+            mid <- posted.get
+            _   <- posted.set(Nil)
+            _   <- rt.ingestData(
+              Ndjson.encode(
+                Rpc.toLine(
+                  Rpc.notifyOf(
+                    "session/update",
+                    AcpSessionNotify("sess_test", AcpUpdate.TurnCompleted(StopReason.EndTurn)),
+                  )
+                )
+              )
+            )
+            done <- posted.get
+          yield assertTrue(
+            mid.exists {
+              case HostMsg.UserMessage(_, "from tui", _, _) => true
+              case _                                        => false
+            },
+            mid.exists {
+              case HostMsg.ThoughtChunk(_, "thinking") => true
+              case _                                   => false
+            },
+            done.exists {
+              case HostMsg.TurnEnd(_, StopReason.EndTurn) => true
+              case _                                      => false
+            },
+          )
+        }
+      },
       test("tool_call locations do not reveal the editor") {
         var followed = List.empty[(String, Option[Int])]
         chat(followFile = (p, l) => followed = followed :+ (p -> l)) { (rt, _) =>
@@ -1547,6 +1647,41 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("ready with Share Grok loads the hottest disk session") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+        ) { (rt, posted) =>
+          rt.ready *> posted.get.map { msgs =>
+            assertTrue(
+              lines.exists(_.contains("session/load")),
+              !lines.exists(_.contains("session/new")),
+              msgs.exists {
+                case HostMsg.Transcript(turns) => turns.exists(_.user.exists(_.text == "hello from disk"))
+                case _                         => false
+              },
+            )
+          }
+        }
+      },
+      test("ready with Share Grok off still opens a new session") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+          settings = () => SettingsState.defaults.copy(shareBackend = false),
+        ) { (rt, posted) =>
+          rt.ready *> posted.get.map { _ =>
+            assertTrue(
+              lines.exists(_.contains("session/new")),
+              !lines.exists(_.contains("session/load")),
+            )
+          }
+        }
+      },
       test("resume with restoreCode sends _meta.restoreCode") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
@@ -2119,12 +2254,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       onReadConfig: () => String = () => "",
       onWriteConfig: String => Unit = _ => (),
       beforeInitialize: UIO[Unit] = ZIO.unit,
+      settings: () => SettingsState = () => SettingsState.defaults,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
     ZIO.scoped {
       for
         posted <- Ref.make(List.empty[HostMsg])
         rt     <- ChatRuntime
-          .make(transport = transport, beforeInitialize = beforeInitialize)
+          .make(transport = transport, beforeInitialize = beforeInitialize, settings = settings)
           .provideSome[Scope](
             ChatEnv.test(
               post = msg => posted.update(_ :+ msg),

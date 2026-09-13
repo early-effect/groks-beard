@@ -11,7 +11,7 @@ object MyVersions extends ZipxVersions:
   val zio        = Lib("dev.zio", "zio", "2.1.26")
   val zioTest    = zio.mod("zio-test")
   val zioTestSbt = zio.mod("zio-test-sbt")
-  val zioJson    = Lib("dev.zio", "zio-json", "0.10.0")
+  val zioJson    = Lib("dev.zio", "zio-json", "1.1.0")
 
   val scalaJavaTime     = Lib("io.github.cquiroz", "scala-java-time", "2.7.0")
   val scalaJavaTimeTzdb = scalaJavaTime.mod("scala-java-time-tzdb")

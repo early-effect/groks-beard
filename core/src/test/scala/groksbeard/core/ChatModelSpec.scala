@@ -7,6 +7,29 @@ import zio.test.*
 object ChatModelSpec extends ZIOSpecDefault:
   def spec =
     suite("ChatModel")(
+      test("ClearCard dismisses plan without ending the turn") {
+        val open = ChatModel.applyMsg(ChatModel.empty, HostMsg.Plan("p1", "# Plan"))
+        val gone = ChatModel.applyMsg(open, HostMsg.ClearCard(CardSlot.Plan))
+        assertTrue(open.plan.isDefined, gone.plan.isEmpty)
+      },
+      test("sessionMeta can populate models after the session is already open") {
+        val later = ChatModel.applyMsg(
+          ChatModel.empty.copy(inSession = true, sessionId = "s1"),
+          HostMsg.SessionMeta(
+            "s1",
+            "Plan",
+            ModeId.Normal,
+            modelId = "grok-4.6",
+            availableModels = List(ModelOption(ModelId("grok-4.6"), "Grok 4.6")),
+            effort = "high",
+          ),
+        )
+        assertTrue(
+          later.modelId == "grok-4.6",
+          later.models.head.name == "Grok 4.6",
+          later.effort == "high",
+        )
+      },
       test("sessionList opens the picker and ClearTranscript closes it") {
         val listed = ChatModel.applyMsg(
           ChatModel.empty,

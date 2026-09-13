@@ -245,10 +245,10 @@ object ChatModel:
               HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers |
               _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands |
               _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit |
-              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
-              _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView | _: HostMsg.Agents |
-              _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw | _: HostMsg.DoctorReport |
-              _: HostMsg.UiPrefs =>
+              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.ClearCard | _: HostMsg.Question | _: HostMsg.Tasks |
+              _: HostMsg.TaskNotice | _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView |
+              _: HostMsg.Agents | _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw |
+              _: HostMsg.DoctorReport | _: HostMsg.UiPrefs =>
             false
           case m: HostMsg.SessionMeta =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
@@ -355,6 +355,13 @@ object ChatModel:
         model.copy(permission = Some(PermissionCard(requestId, toolCallId, title, options, hasDiff)))
       case HostMsg.Plan(requestId, markdown) =>
         model.copy(plan = Some(PlanCard(requestId, markdown)))
+      case HostMsg.ClearCard(slot) =>
+        slot match
+          case CardSlot.Permission => model.copy(permission = None)
+          case CardSlot.Plan       => model.copy(plan = None)
+          case CardSlot.Question   => model.copy(question = None)
+          case CardSlot.Elicit     => model.copy(elicit = None)
+          case CardSlot.Fork       => model.copy(forkAsk = None)
       case HostMsg.Question(requestId, questions) =>
         model.copy(question = Some(QuestionCard(requestId, questions)))
       case HostMsg.Elicit(requestId, serverName, mode, title, url) =>

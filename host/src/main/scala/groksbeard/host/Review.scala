@@ -27,6 +27,12 @@ final class Review(docs: BeardDocs):
     ()
   end follow
 
+  def openText(path: String): Unit =
+    val uri  = vscode.Uri.file(abs(path))
+    val opts = new TextDocumentShowOptions(preserveFocus = false, preview = false)
+    val _    = vscode.window.showTextDocument(uri, opts).`catch`((_: Any) => ())
+    ()
+
   def open(title: String, pairs: List[DiffPair]): Unit =
     if pairs.isEmpty then ()
     else

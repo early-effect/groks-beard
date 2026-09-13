@@ -56,6 +56,8 @@ final case class ChatState(
     workflows: List[WorkflowRun] = Nil,
     slashPass: Set[RpcId] = Set.empty,
     userOpen: Boolean = false,
+    pendingBtw: Option[String] = None,
+    lastPlan: Option[String] = None,
 ):
   def sid(fallback: SessionId): SessionId = sessionId.getOrElse(fallback)
 
@@ -88,6 +90,8 @@ final case class ChatState(
     workflows = Nil,
     slashPass = Set.empty,
     userOpen = false,
+    pendingBtw = None,
+    lastPlan = None,
   )
 
   def resetLocal: ChatState =
@@ -177,9 +181,11 @@ final case class ChatState(
   def withConfig(opts: List[ConfigOption]): ChatState =
     if opts.isEmpty then this
     else
+      val catalog = ConfigOption.models(opts)
       copy(
         configOptions = opts,
         modelId = ConfigOption.modelId(opts).getOrElse(modelId),
+        models = if catalog.nonEmpty then catalog else models,
         effort = ConfigOption.effort(opts).getOrElse(effort),
       )
 

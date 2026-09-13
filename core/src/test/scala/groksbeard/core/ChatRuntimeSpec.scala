@@ -9,6 +9,50 @@ import zio.test.*
 object ChatRuntimeSpec extends ZIOSpecDefault:
   def spec =
     suite("ChatRuntime")(
+      test("second ready replays chrome without initialize or a new session") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- ZIO.succeed(lines.clear())
+            _    <- posted.set(Nil)
+            _    <- rt.ready
+            msgs <- posted.get
+          yield assertTrue(
+            !lines.exists(_.contains("initialize")),
+            !lines.exists(_.contains("session/new")),
+            !lines.exists(_.contains("session/load")),
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.availableModels.nonEmpty
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("session/load timeout unblocks the loading screen") {
+        val wrap = AcpTransport.fake(FakeAgent(hangLoad = true))
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- TestClock.adjust(ChatRuntime.LoadBudget + 1.second)
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Error(ChatRuntime.LoadTimeout, _) => true
+              case _                                         => false
+            },
+            msgs.exists {
+              case _: HostMsg.Transcript => true
+              case _                     => false
+            },
+          )
+        }
+      },
       test("ready posts sessionMeta and available commands") {
         chat() { (rt, posted) =>
           rt.ready *> posted.get.map { msgs =>
@@ -979,6 +1023,53 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(followed == List("/tmp/Main.scala" -> Some(4)))
         }
       },
+      test("openPlan writes .grok/plan.md and opens it") {
+        var written = Option.empty[String]
+        var opened  = List.empty[String]
+        chat(
+          planMarkdownOnDisk = _ => "# Plan\n\nUse Metals.",
+          writeWorkspacePlan = md =>
+            written = Some(md)
+            "/repo/.grok/plan.md"
+          ,
+          openText = p => opened = opened :+ p,
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.openPlan
+            msgs <- posted.get
+          yield assertTrue(
+            written.contains("# Plan\n\nUse Metals."),
+            opened == List("/repo/.grok/plan.md"),
+            !msgs.exists {
+              case HostMsg.Error(_, _) => true
+              case _                   => false
+            },
+          )
+        }
+      },
+      test("openPlan of a session plan.md path rewrites to the workspace") {
+        var opened  = List.empty[String]
+        val session =
+          "/Users/russ/.grok/sessions/%2FUsers%2Fruss%2Fprojects%2Ffun%2Fheddle/01a091ee/plan.md"
+        chat(openText = p => opened = opened :+ p) { (rt, _) =>
+          rt.ready *> rt.openFile(session, None).as(assertTrue(opened == List("./.grok/plan.md")))
+        }
+      },
+      test("openPlan with no plan posts the empty copy") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.openPlan
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Error(WorkspacePlan.Missing, _) => true
+            case _                                       => false
+          })
+        }
+      },
       test("openDiff posts a sidebar preview of the pending file") {
         chat() { (rt, posted) =>
           for
@@ -1662,8 +1753,51 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 case HostMsg.Transcript(turns) => turns.exists(_.user.exists(_.text == "hello from disk"))
                 case _                         => false
               },
+              msgs.exists {
+                case m: HostMsg.SessionMeta => m.availableModels.nonEmpty && m.modelId == "grok-4.6"
+                case _                      => false
+              },
             )
           }
+        }
+      },
+      test("config_option_update posts SessionMeta so the model chip can appear") {
+        def notify(opts: List[ConfigOption]): String =
+          Ndjson.encode(
+            Rpc.toLine(
+              Rpc.notifyOf(
+                "session/update",
+                AcpSessionNotify("sess_test", AcpUpdate.ConfigOptions(opts)),
+              )
+            )
+          )
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              notify(
+                List(
+                  ConfigOption(
+                    id = "model",
+                    name = "Model",
+                    currentValue = Some("grok-4.6"),
+                    options = List(
+                      ConfigSelect("grok-4.6", Some("Grok 4.6")),
+                      ConfigSelect("vertigo-qwen", Some("Qwen 3.8 27B")),
+                    ),
+                  )
+                )
+              )
+            )
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case m: HostMsg.SessionMeta =>
+                m.modelId == "grok-4.6" && m.availableModels.exists(_.modelId == "vertigo-qwen")
+              case _ => false
+            }
+          )
         }
       },
       test("ready with Share Grok off still opens a new session") {
@@ -2053,9 +2187,123 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(
             lines.exists(l => l.contains("interject") && l.contains("also check errors")),
             msgs.exists {
+              case HostMsg.Btw(text, true) =>
+                text.contains("also check errors") && text.contains("Noted.")
+              case _ => false
+            },
+          )
+        }
+      },
+      test("btw during a running turn does not cancel or enqueue") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(hangPrompt = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.btw("also check errors")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("interject") && l.contains("also check errors")),
+            !lines.exists(_.contains("session/cancel")),
+            !lines.exists(_.contains("session/prompt")),
+            msgs.exists {
               case HostMsg.Btw(text, _) => text.contains("also check errors")
               case _                    => false
             },
+            !msgs.exists {
+              case HostMsg.Queued(_)      => true
+              case _: HostMsg.TurnEnd     => true
+              case _: HostMsg.UserMessage => true
+              case _                      => false
+            },
+          )
+        }
+      },
+      test("btw without interject does not cancel the turn") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(hangPrompt = true, omitInterject = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.btw("also check errors")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(_.contains("interject")),
+            !lines.exists(_.contains("session/cancel")),
+            msgs.exists {
+              case HostMsg.Error(BtwReply.Missing, _) => true
+              case _                                  => false
+            },
+            msgs.exists {
+              case HostMsg.Btw(text, true) => text.contains("also check errors")
+              case _                       => false
+            },
+          )
+        }
+      },
+      test("send after an idle session/load starts a turn") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.resumeSession("sess_disk")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.send("follow up")
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(l => l.contains("session/prompt") && l.contains("follow up")),
+            msgs.exists {
+              case HostMsg.UserMessage(_, "follow up", _, _) => true
+              case _                                         => false
+            },
+            !msgs.exists {
+              case HostMsg.Queued(items) => items.exists(_.text == "follow up")
+              case _                     => false
+            },
+          )
+        }
+      },
+      test("cancel after loading a live turn writes session/cancel") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(liveLoad = true)), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.resumeSession("sess_live")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.cancel
+            msgs <- posted.get
+          yield assertTrue(
+            lines.exists(_.contains("session/cancel")),
+            msgs.exists {
+              case HostMsg.TurnEnd(_, StopReason.Cancelled) => true
+              case _                                        => false
+            },
+          )
+        }
+      },
+      test("generic session/load error is not the TUI lock copy") {
+        chat(transport = AcpTransport.fake(FakeAgent(failLoad = true))) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_disk")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.SessionLocked("sess_disk", msg) =>
+                msg == SessionLoad.copy(SessionLoadKind.Failed) && !msg.contains("TUI")
+              case _ => false
+            }
           )
         }
       },
@@ -2250,7 +2498,10 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       persistChanges: List[ChangeSet] => UIO[Unit] = _ => ZIO.unit,
       readDisk: String => Option[String] = _ => None,
       followFile: (String, Option[Int]) => Unit = (_, _) => (),
+      openText: String => Unit = _ => (),
       planOnDisk: SessionId => List[TodoEntry] = _ => Nil,
+      planMarkdownOnDisk: SessionId => String = _ => "",
+      writeWorkspacePlan: String => String = _ => SessionIndex.workspacePlanPath("."),
       onReadConfig: () => String = () => "",
       onWriteConfig: String => Unit = _ => (),
       beforeInitialize: UIO[Unit] = ZIO.unit,
@@ -2272,7 +2523,10 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               persistChanges = persistChanges,
               readDisk = readDisk,
               followFile = followFile,
+              openText = openText,
               planOnDisk = planOnDisk,
+              planMarkdownOnDisk = planMarkdownOnDisk,
+              writeWorkspacePlan = writeWorkspacePlan,
               onReadConfig = onReadConfig,
               onWriteConfig = onWriteConfig,
             )

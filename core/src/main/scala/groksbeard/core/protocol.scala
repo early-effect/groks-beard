@@ -96,6 +96,7 @@ enum HostMsg derives JsonCodec:
       hasDiff: Boolean = false,
   )
   @jsonHint("planCard") case Plan(requestId: RequestId, planMarkdown: String)
+  @jsonHint("clearCard") case ClearCard(slot: CardSlot)
   @jsonHint("questionCard") case Question(requestId: RequestId, questions: List[AgentQuestion])
   @jsonHint("elicitCard") case Elicit(
       requestId: RequestId,
@@ -238,6 +239,7 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("detachChild") case DetachChild
   @jsonHint("steerChild") case SteerChild(id: TaskId, text: String, queue: Boolean = false)
   @jsonHint("viewPlan") case ViewPlan
+  @jsonHint("openPlan") case OpenPlan
   @jsonHint("openAgents") case OpenAgents
   @jsonHint("openDashboard") case OpenDashboard
   @jsonHint("openWorkflows") case OpenWorkflows

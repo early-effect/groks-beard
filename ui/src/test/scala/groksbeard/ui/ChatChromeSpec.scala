@@ -401,6 +401,63 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("a long plan keeps Send and Approve") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _    <- waitPresent(root, "plan")
+              send <- waitPresent(root, "send")
+              ok   <- waitPresent(root, "plan-approved")
+              body <- root.getByTestId("plan-md").innerText
+            yield assertTrue(send, ok, body.contains("Heddle"), body.contains("Port transcript"))
+          }
+        yield result
+        end for
+      },
+      test("plan Open in editor stays on the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- waitPresent(root, "plan-open")
+              _     <- root.button("plan-open").click
+              still <- waitPresent(root, "plan")
+            yield assertTrue(still)
+          }
+        yield result
+        end for
+      },
+      test("plan Close dismisses the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Plan)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "plan-close")
+              _ <- root.button("plan-close").click
+              _ <- waitGone(root, "plan")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
+      test("permission Close parks the card") {
+        val bridge = PreviewBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Permission)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "permission-close")
+              _ <- root.button("permission-close").click
+              _ <- waitGone(root, "permission")
+            yield assertTrue(true)
+          }
+        yield result
+        end for
+      },
       test("plan Approve dismisses the card") {
         val bridge = PreviewBridge()
         for
@@ -2339,6 +2396,25 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _    <- ZIO.succeed(bridge.push(HostMsg.TurnEnd(TurnId("t-run"), StopReason.EndTurn)))
               done <- waitText(root, "send", "Send")
             yield assertTrue(idle == "Send", live == "Stop", done == "Send")
+          }
+        yield result
+        end for
+      },
+      test("btw panel does not end a running turn") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _     <- ZIO.succeed(bridge.push(HostMsg.UserMessage(TurnId("t-run"), "go")))
+              _     <- waitPresent(root, "activity")
+              _     <- ZIO.succeed(bridge.push(HostMsg.Btw("also check errors\n\nNoted.", done = true)))
+              _     <- waitPresent(root, "btw")
+              label <- waitText(root, "send", "Stop")
+              _     <- root.textarea("draft").press("Escape")
+              _     <- waitGone(root, "btw")
+              still <- waitPresent(root, "activity")
+            yield assertTrue(label == "Stop", still)
           }
         yield result
         end for

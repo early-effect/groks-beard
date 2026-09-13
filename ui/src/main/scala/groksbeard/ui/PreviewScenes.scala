@@ -21,6 +21,65 @@ object PreviewScenes:
     ),
   )
 
+  val longPlan: String =
+    """# Plan
+      |
+      |1. Port transcript
+      |   - keep the card readable
+      |2. Wire cards
+      |
+      |+ Keep the list nested
+      |
+      |> first beat
+      |>
+      |> second beat
+      |
+      |Step | Status
+      |--- | ---
+      |cards | yes
+      |
+      |## Heddle
+      |
+      |A ZIO-first HTTP library. Routes, middleware, endpoints, and OpenAPI ship together.
+      |
+      |```
+      |heddle/
+      |json/
+      |example/
+      |```
+      |
+      |Keep these small and inspectable:
+      |
+      |- Method, Status, Header
+      |- Path, QueryParams, URL
+      |- Body empty or Chunk[Byte]
+      |- Request, Response
+      |
+      |```
+      |val routes = Routes(
+      |  Method.GET / "health"              -> Handler.text("ok"),
+      |  Method.GET / "users" / int("id")   -> handler { (id: Int, _: Request) =>
+      |    ZIO.succeed(Response.text(id.toString))
+      |  },
+      |)
+      |```
+      |
+      |## More layers so the card must scroll
+      |
+      |- Layer 1: HTTP model
+      |- Layer 2: routing DSL
+      |- Layer 3: middleware
+      |- Layer 4: OpenAPI
+      |- Layer 5: Loom server
+      |- Layer 6: tests as docs
+      |- Layer 7: publish
+      |- Layer 8: examples
+      |- Layer 9: migration notes
+      |- Layer 10: non-goals
+      |
+      |Do not grow this card past the composer. Approve stays on the bottom edge of the card.
+      |""".stripMargin
+
   val transcriptMarkdown: String =
     """Here is a **short** look at `Main.scala`.
       |
@@ -128,27 +187,13 @@ object PreviewScenes:
         )
       case Scene.Plan =>
         ChatModel.empty.copy(
+          inSession = true,
           plan = Some(
             PlanCard(
               RequestId("plan-1"),
-              """# Plan
-                |
-                |1. Port transcript
-                |   - keep the card readable
-                |2. Wire cards
-                |
-                |+ Keep the list nested
-                |
-                |> first beat
-                |>
-                |> second beat
-                |
-                |Step | Status
-                |--- | ---
-                |cards | yes
-                |""".stripMargin,
+              PreviewScenes.longPlan,
             )
-          )
+          ),
         )
       case Scene.Question =>
         ChatModel.empty.copy(
@@ -378,7 +423,7 @@ object PreviewScenes:
           personas = List(PersonaDef("concise", "Be concise.")),
         )
       case Scene.PlanView =>
-        ChatModel.empty.copy(inSession = true, planView = Some("# Plan\n\nUse Metals for compile."))
+        ChatModel.empty.copy(inSession = true, planView = Some(PreviewScenes.longPlan))
       case Scene.Workflows =>
         ChatModel.empty.copy(
           inSession = true,

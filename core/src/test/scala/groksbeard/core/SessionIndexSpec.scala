@@ -6,6 +6,20 @@ import zio.test.*
 object SessionIndexSpec extends ZIOSpecDefault:
   def spec =
     suite("SessionIndex")(
+      test("workspace plan lives under .grok/plan.md") {
+        val session =
+          "/Users/russ/.grok/sessions/%2FUsers%2Fruss%2Fprojects%2Ffun%2Fheddle/01a091ee-3ea1-7f41-8a65-831e2d948c9c/plan.md"
+        assertTrue(
+          SessionIndex.workspacePlanPath("/Users/russ/projects/fun/heddle") ==
+            "/Users/russ/projects/fun/heddle/.grok/plan.md",
+          WorkspacePlan.isSessionPlan(session),
+          !WorkspacePlan.isSessionPlan("/Users/russ/projects/fun/heddle/.grok/plan.md"),
+          WorkspacePlan.rewrite(session, "/Users/russ/projects/fun/heddle") ==
+            "/Users/russ/projects/fun/heddle/.grok/plan.md",
+          WorkspacePlan.encodeUriPath(session).contains("%252F"),
+          !WorkspacePlan.encodeUriPath(session).contains("sessions/%2F"),
+        )
+      },
       test("encodes cwd the way Grok groups sessions") {
         assertTrue(
           SessionIndex.encodeCwd("/Users/russ/projects/fun/groks-beard") ==
@@ -131,6 +145,14 @@ object SessionIndexSpec extends ZIOSpecDefault:
           SessionLoad.classify("in use by TUI") == SessionLoadKind.Locked,
           SessionLoad.classify("no such session") == SessionLoadKind.Failed,
           SessionLoad.copy(SessionLoadKind.Locked) == "This session is open in the TUI",
+        )
+      },
+      test("BtwReply folds an answer under the aside") {
+        import zio.json.ast.Json
+        assertTrue(
+          BtwReply.panel("also check errors", "Noted.") == "also check errors\n\nNoted.",
+          BtwReply.answer(Some(Json.Obj("text" -> Json.Str("Noted.")))) == "Noted.",
+          BtwReply.answer(Some(Json.Obj())) == "",
         )
       },
       test("SessionLoad classifies lock from error data when the message is generic") {

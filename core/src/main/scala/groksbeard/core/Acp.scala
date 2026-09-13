@@ -45,7 +45,11 @@ final case class AgentCapabilities(
     sessionCapabilities: Option[Json] = None,
     _meta: Option[Json] = None,
 ) derives JsonCodec
-final case class InitializeResult(protocolVersion: Int, agentCapabilities: AgentCapabilities) derives JsonCodec
+final case class InitializeResult(
+    protocolVersion: Int,
+    agentCapabilities: AgentCapabilities,
+    _meta: Option[Json] = None,
+) derives JsonCodec
 
 object AgentCapabilities:
   def offersSession(caps: AgentCapabilities, method: String): Boolean =
@@ -70,6 +74,30 @@ final case class SessionNewParams(cwd: String, mcpServers: List[Json] = Nil, _me
     derives JsonCodec
 final case class SessionModeState(currentModeId: ModeId, availableModes: List[ModeOption] = Nil) derives JsonCodec
 final case class SessionModelState(currentModelId: ModelId, availableModels: List[ModelOption] = Nil) derives JsonCodec
+
+object SessionModelState:
+  def ofInitialize(json: Json): Option[SessionModelState] =
+    json match
+      case obj: Json.Obj =>
+        meta(obj).flatMap(ofJson).orElse {
+          field(obj, "agentCapabilities").collect { case caps: Json.Obj => caps }.flatMap(meta).flatMap(ofJson)
+        }
+      case _ => None
+
+  def ofJson(json: Json): Option[SessionModelState] =
+    json.as[SessionModelState].toOption.filter(s => s.currentModelId.nonEmpty || s.availableModels.nonEmpty)
+
+  private def meta(obj: Json.Obj): Option[Json] =
+    field(obj, "modelState").orElse {
+      field(obj, "_meta").flatMap {
+        case inner: Json.Obj => field(inner, "modelState")
+        case _               => None
+      }
+    }
+
+  private def field(obj: Json.Obj, key: String): Option[Json] =
+    obj.fields.collectFirst { case (k, v) if k == key => v }
+end SessionModelState
 final case class SessionNewResult(
     sessionId: SessionId,
     modes: Option[SessionModeState] = None,

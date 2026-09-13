@@ -11,6 +11,7 @@ enum PaletteKind:
   case Agents
   case Dashboard
   case PlanView
+  case OpenPlan
   case Workflows
   case Doctor
   case Theme
@@ -73,6 +74,9 @@ object Palette:
   val PlanViewRow: PaletteRow =
     PaletteRow("view-plan", "View plan", "/view-plan", "Open the saved plan", PaletteKind.PlanView)
 
+  val OpenPlanRow: PaletteRow =
+    PaletteRow("open-plan", "Open plan", "/open-plan", "Open .grok/plan.md in the editor", PaletteKind.OpenPlan)
+
   val WorkflowsRow: PaletteRow =
     PaletteRow("workflow-runs", "Workflow runs", "/workflow runs", "Live workflow runs", PaletteKind.Workflows)
 
@@ -96,6 +100,7 @@ object Palette:
         AgentsRow,
         DashboardRow,
         PlanViewRow,
+        OpenPlanRow,
         WorkflowsRow,
         DoctorRow,
         ThemeRow,
@@ -139,6 +144,7 @@ object Palette:
       else if SessionCommands.isConfigAgents(cmd.name) || SessionCommands.isPersonas(cmd.name) then PaletteKind.Agents
       else if SessionCommands.isDashboard(cmd.name) then PaletteKind.Dashboard
       else if SessionCommands.isViewPlan(cmd.name) then PaletteKind.PlanView
+      else if SessionCommands.isOpenPlan(cmd.name) then PaletteKind.OpenPlan
       else if SessionCommands.isDoctor(cmd.name) then PaletteKind.Doctor
       else if SessionCommands.isTheme(cmd.name) then PaletteKind.Theme
       else if SessionCommands.isVoice(cmd.name) then PaletteKind.Voice

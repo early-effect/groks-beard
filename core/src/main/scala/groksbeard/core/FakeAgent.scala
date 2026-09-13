@@ -14,6 +14,10 @@ final class FakeAgent(
     omitConfigOptions: Boolean = false,
     omitResume: Boolean = false,
     omitWorkflow: Boolean = false,
+    failLoad: Boolean = false,
+    liveLoad: Boolean = false,
+    omitInterject: Boolean = false,
+    hangLoad: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -41,7 +45,20 @@ final class FakeAgent(
                 else Json.Obj("list"               -> Json.Obj(), "resume" -> Json.Obj(), "close" -> Json.Obj())
               ),
             )
-        List(Rpc.ok(id, InitializeResult(1, caps).asJson))
+        val modelState =
+          SessionModelState(
+            ModelId("grok-4.6"),
+            List(
+              ModelOption(ModelId("grok-4.6"), "Grok 4.6", _meta = Some(Effort.grokMeta())),
+              ModelOption(ModelId("grok-code-fast-1"), "Grok Code Fast"),
+            ),
+          )
+        List(
+          Rpc.ok(
+            id,
+            InitializeResult(1, caps, _meta = Some(Json.Obj("modelState" -> modelState.asJson))).asJson,
+          )
+        )
       case "session/new" =>
         List(
           Rpc.notifyOf(
@@ -110,24 +127,43 @@ final class FakeAgent(
             ).asJson,
           ),
         )
+      case "session/load" if hangLoad =>
+        Nil
       case "session/load" =>
         if lockLoad then List(Rpc.fail(id, Rpc.MethodNotFound, "session locked"))
+        else if failLoad then List(Rpc.fail(id, Rpc.InvalidParams, "could not load session"))
         else
           val sid = params.as[SessionLoadParams].toOption.map(_.sessionId).filter(_.nonEmpty).getOrElse(sessionId)
-          List(
-            chunk(AcpUpdate.User(AcpContent.Text("hello from disk")), sid),
-            chunk(AcpUpdate.Agent(AcpContent.Text("welcome back")), sid),
-            chunk(
-              AcpUpdate.Plan(
-                List(
-                  TodoEntry("Replay the disk snapshot", Todos.Completed, TodoPriority.Medium),
-                  TodoEntry("Continue the work", Todos.InProgress, TodoPriority.High),
-                )
+          if liveLoad then
+            List(
+              chunk(AcpUpdate.User(AcpContent.Text("from tui")), sid),
+              chunk(
+                AcpUpdate.ToolCall(
+                  toolCallId = ToolCallId("call_live"),
+                  title = "run",
+                  kind = ToolKind.Execute,
+                  status = ToolStatus.InProgress,
+                ),
+                sid,
               ),
-              sid,
-            ),
-            Rpc.ok(id, SessionLoadResult(sid).asJson),
-          )
+              Rpc.ok(id, SessionLoadResult(sid).asJson),
+            )
+          else
+            List(
+              chunk(AcpUpdate.User(AcpContent.Text("hello from disk")), sid),
+              chunk(AcpUpdate.Agent(AcpContent.Text("welcome back")), sid),
+              chunk(
+                AcpUpdate.Plan(
+                  List(
+                    TodoEntry("Replay the disk snapshot", Todos.Completed, TodoPriority.Medium),
+                    TodoEntry("Continue the work", Todos.InProgress, TodoPriority.High),
+                  )
+                ),
+                sid,
+              ),
+              Rpc.ok(id, SessionLoadResult(sid).asJson),
+            )
+          end if
       case "session/set_model" =>
         List(Rpc.ok(id, EmptyObject().asJson))
       case "session/set_config_option" =>
@@ -147,8 +183,12 @@ final class FakeAgent(
             ),
           )
         )
-      case "session/close" | "session/resume" | "x.ai/interject" | "_x.ai/interject" =>
+      case "session/close" | "session/resume" =>
         List(Rpc.ok(id, EmptyObject().asJson))
+      case "x.ai/interject" | "_x.ai/interject" if omitInterject =>
+        List(Rpc.fail(id, Rpc.MethodNotFound, s"Method not found: $method"))
+      case "x.ai/interject" | "_x.ai/interject" =>
+        List(Rpc.ok(id, Json.Obj("text" -> Json.Str("Noted."))))
       case "session/set_mode" =>
         val result = Rpc.ok(id, EmptyObject().asJson)
         if !pairSetModeWithTerminal then List(result)

@@ -71,14 +71,16 @@ final class ChatRuntime private (
   def ready: UIO[Unit] =
     exclusive {
       snap.flatMap { s =>
-        val startInit = !s.initializeSent
+        val first = !s.initializeSent
         put(s.copy(live = true, initializeSent = true)) *>
           post(HostMsg.Ready) *>
           prefs.hydrate.flatMap(c => post(c.host)) *>
-          (if store.list.nonEmpty then emitChanges else ZIO.unit).as(startInit)
+          (if store.list.nonEmpty then emitChanges else ZIO.unit) *>
+          (if first then ZIO.log("ready: initialize") else ZIO.log("ready: replay chrome") *> replayChrome)
+            .as(first)
       }
-    }.flatMap { startInit =>
-      if !startInit then ZIO.unit
+    }.flatMap { first =>
+      if !first then ZIO.unit
       else
         beforeInitialize.forkIn(scope) *> exclusive {
           rpc(
@@ -140,10 +142,13 @@ final class ChatRuntime private (
         .planMarkdown(id)
         .foldZIO(
           e => post(HostMsg.Error(e.message)),
-          md => post(HostMsg.PlanView(if md.trim.isEmpty then "No plan written yet" else md)),
+          md =>
+            persistWorkspacePlan(md) *> post(HostMsg.PlanView(if md.trim.isEmpty then WorkspacePlan.Missing else md)),
         )
     }
   }
+
+  def openPlan: UIO[Unit] = exclusive(doOpenPlan)
 
   def openAgents: UIO[Unit] = exclusive {
     sessions.agents
@@ -242,27 +247,33 @@ final class ChatRuntime private (
       Json.Obj(
         "outcome" -> Json.Obj("outcome" -> Json.Str("selected"), "optionId" -> Json.Str(optionId))
       ),
-    )
+    ) *> post(HostMsg.ClearCard(CardSlot.Permission))
+  }
+
+  def permissionPark(requestId: RequestId): UIO[Unit] = exclusive {
+    val _ = requestId
+    post(HostMsg.ClearCard(CardSlot.Permission))
   }
 
   def planVerdict(requestId: RequestId, verdict: PlanOutcome): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("outcome" -> Json.Str(PlanOutcome.wire(verdict))))
+    respond(requestId, Json.Obj("outcome" -> Json.Str(PlanOutcome.wire(verdict)))) *>
+      post(HostMsg.ClearCard(CardSlot.Plan))
   }
 
   def questionSubmit(requestId: RequestId, answers: List[QuestionAnswer]): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> answers.asJson))
+    respond(requestId, Json.Obj("answers" -> answers.asJson)) *> post(HostMsg.ClearCard(CardSlot.Question))
   }
 
   def questionDismiss(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> Json.Arr()))
+    respond(requestId, Json.Obj("answers" -> Json.Arr())) *> post(HostMsg.ClearCard(CardSlot.Question))
   }
 
   def elicitAccept(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("action" -> Json.Str("accept")))
+    respond(requestId, Json.Obj("action" -> Json.Str("accept"))) *> post(HostMsg.ClearCard(CardSlot.Elicit))
   }
 
   def elicitDecline(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("action" -> Json.Str("decline")))
+    respond(requestId, Json.Obj("action" -> Json.Str("decline"))) *> post(HostMsg.ClearCard(CardSlot.Elicit))
   }
 
   def setMode(id: ModeId): UIO[Unit] = exclusive(doSetMode(id))
@@ -293,7 +304,11 @@ final class ChatRuntime private (
 
   def openFile(path: String, line: Option[Int]): UIO[Unit] = exclusive {
     val trimmed = path.trim
-    if trimmed.isEmpty then ZIO.unit else review.follow(trimmed, line)
+    if trimmed.isEmpty then ZIO.unit
+    else
+      val rewritten = WorkspacePlan.rewrite(trimmed, cwd)
+      if rewritten == WorkspacePlan.path(cwd) then review.openText(rewritten)
+      else review.follow(rewritten, line)
   }
 
   def openChanges: UIO[Unit] = exclusive(openChangesUnlocked)
@@ -345,6 +360,7 @@ final class ChatRuntime private (
     else if SessionCommands.isLoop(name) then post(HostMsg.Error(Tasks.LoopUsage))
     else if SessionCommands.isFork(name) then doFork(ForkArgs(None, None))
     else if SessionCommands.isViewPlan(name) then viewPlan
+    else if SessionCommands.isOpenPlan(name) then doOpenPlan
     else if SessionCommands.isConfigAgents(name) || SessionCommands.isPersonas(name) then openAgents
     else if SessionCommands.isDashboard(name) then doDashboard
     else if SessionCommands.isDoctor(name) then doDoctor
@@ -445,6 +461,8 @@ final class ChatRuntime private (
             case Right(args) => doFork(args)
         case Some(cmd) if SessionCommands.isViewPlan(cmd.name) =>
           viewPlan
+        case Some(cmd) if SessionCommands.isOpenPlan(cmd.name) =>
+          doOpenPlan
         case Some(cmd) if SessionCommands.isBtw(cmd.name) =>
           doBtw(cmd.args)
         case Some(cmd) if SessionCommands.isConfigAgents(cmd.name) || SessionCommands.isPersonas(cmd.name) =>
@@ -704,9 +722,8 @@ final class ChatRuntime private (
     edit(st => st.bumpEpoch.cancelPendingResume) *> leaveCurrent *> stopLoops *>
       edit(_.beginResume(id)) *>
       post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *>
-      (if initialized then
-         rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id))
-       else ZIO.unit)
+      (if initialized then requestLoad(id, cwd, meta)
+       else ZIO.log(s"resume ${id.value} waits for initialize"))
   end loadResume
 
   private def openChangesUnlocked: UIO[Unit] =
@@ -1080,7 +1097,9 @@ final class ChatRuntime private (
             case Some(AcpMethod.ExitPlanMode) =>
               val md =
                 jsonStr(params, "planContent").orElse(jsonStr(params, "planMarkdown")).getOrElse("")
-              post(HostMsg.plan(PlanCard(reqId, md)))
+              edit(_.copy(lastPlan = Option(md).filter(_.trim.nonEmpty))) *>
+                persistWorkspacePlan(md) *>
+                post(HostMsg.plan(PlanCard(reqId, md)))
             case Some(AcpMethod.AskUserQuestion) =>
               val questions =
                 params.as[AskUserQuestionParams].toOption.map(_.questions).getOrElse(Nil)
@@ -1112,11 +1131,10 @@ final class ChatRuntime private (
   private def ingestLoading(p: Json): UIO[Unit] =
     val bump = SessionState.decodeUpdate(p) match
       case Some(_: AcpUpdate.User) => edit(_.noteUserWhileLoading)
-      case Some(
-            _: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate |
-            _: AcpUpdate.TurnCompleted
-          ) =>
-        edit(_.closeUserPrompt.copy(loadCleared = true))
+      case Some(_: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate) =>
+        edit(_.closeUserPrompt.copy(loadCleared = true, running = true))
+      case Some(_: AcpUpdate.TurnCompleted) =>
+        edit(_.closeUserPrompt.copy(loadCleared = true, running = false))
       case _ => edit(s => if s.loadCleared then s else s.copy(loadCleared = true))
     bump *> foldTasks(p, loading = true) *> snap.flatMap { s =>
       val msgs = SessionUpdate.hostMsgs(p, s.currentTurn)
@@ -1140,8 +1158,15 @@ final class ChatRuntime private (
 
   private def ingestLive(p: Json): UIO[Unit] =
     val cfg = SessionState.decodeUpdate(p) match
-      case Some(AcpUpdate.ConfigOptions(opts)) => edit(_.withConfig(opts))
-      case Some(_: AcpUpdate.User)             =>
+      case Some(AcpUpdate.ConfigOptions(opts)) =>
+        snap.flatMap { before =>
+          edit(_.withConfig(opts)) *> snap.flatMap { after =>
+            if after.models != before.models || after.modelId != before.modelId || after.effort != before.effort
+            then postMeta
+            else ZIO.unit
+          }
+        }
+      case Some(_: AcpUpdate.User) =>
         edit(_.noteUserPrompt)
       case Some(_: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate) =>
         edit(_.copy(running = true, userOpen = false))
@@ -1184,7 +1209,7 @@ final class ChatRuntime private (
       val quiet =
         method.exists(m =>
           m == AcpMethod.SessionLoad || m == AcpMethod.SessionResume || m == AcpMethod.RewindPoints ||
-            m == AcpMethod.SessionFork
+            m == AcpMethod.SessionFork || m == AcpMethod.Interject
         )
       val errPost =
         if quiet then ZIO.unit
@@ -1224,43 +1249,69 @@ final class ChatRuntime private (
             .flatMap { quiet =>
               if quiet then ZIO.unit else ingestPromptDone(result)
             }
+        case Some(AcpMethod.Interject) =>
+          ingestInterject(result, error)
         case _ => ZIO.unit)
     }
 
   private def ingestInitialize(result: Option[Json]): UIO[Unit] =
-    snap.flatMap { s =>
-      val caps = result.flatMap(_.as[InitializeResult].toOption).map(_.agentCapabilities).getOrElse(s.agentCaps)
-      val next = s.copy(
-        initialized = true,
-        canWorktree = result.exists(Fork.offersWorktree),
-        agentCaps = caps,
-        restoreCodeNext = false,
-      )
-      val meta =
-        if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
-      put(next) *> (next.pendingResume match
-        case Some(id) =>
-          rpc(
-            AcpMethod.SessionLoad,
-            SessionLoadParams(id, next.sessionCwd, _meta = meta).asJson,
-            loadSessionId = Some(id),
+    snap.flatMap: s =>
+      val caps   = result.flatMap(_.as[InitializeResult].toOption).map(_.agentCapabilities).getOrElse(s.agentCaps)
+      val seeded = result.flatMap(SessionModelState.ofInitialize)
+      val next   = seeded match
+        case Some(st) =>
+          val catalog = if st.availableModels.nonEmpty then st.availableModels else s.models
+          val id      = if st.currentModelId.nonEmpty then st.currentModelId else s.modelId
+          val effort  =
+            val active = Effort.activeOf(catalog.find(_.modelId == id))
+            if active.nonEmpty then active else s.effort
+          s.copy(
+            initialized = true,
+            canWorktree = result.exists(Fork.offersWorktree),
+            agentCaps = caps,
+            restoreCodeNext = false,
+            modelId = id,
+            models = catalog,
+            effort = effort,
           )
         case None =>
-          if !next.settingsState.shareBackend then rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+          s.copy(
+            initialized = true,
+            canWorktree = result.exists(Fork.offersWorktree),
+            agentCaps = caps,
+            restoreCodeNext = false,
+          )
+      val meta = if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
+      ZIO.log(
+        s"initialize models=${next.models.size} model=${next.modelId.value} share=${next.settingsState.shareBackend}"
+      ) *> put(next) *> startAfterInitialize(next, meta)
+
+  private def startAfterInitialize(next: ChatState, meta: Option[Json]): UIO[Unit] =
+    val inSession = next.sessionId.exists(_.nonEmpty)
+    if next.pendingLoad.nonEmpty then ZIO.log("initialize: session/load already in flight") *> postMeta
+    else if inSession && next.pendingResume.isEmpty && !next.loading then
+      ZIO.log("initialize: session already open") *> postMeta *> post(HostMsg.settings(next.settingsState))
+    else
+      next.pendingResume match
+        case Some(id) =>
+          ZIO.log(s"initialize: resume pending ${id.value}") *> requestLoad(id, next.sessionCwd, meta)
+        case None =>
+          if !next.settingsState.shareBackend then
+            ZIO.log("session/new") *> rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
           else
-            sessions.list.catchAll(_ => ZIO.succeed(Nil)).flatMap { rows =>
-              SessionIndex.shareJoin(rows) match
-                case None     => rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
-                case Some(id) =>
-                  val loaded = next.beginResume(id)
-                  put(loaded) *> postMeta *>
-                    rpc(
-                      AcpMethod.SessionLoad,
-                      SessionLoadParams(id, loaded.sessionCwd, _meta = meta).asJson,
-                      loadSessionId = Some(id),
-                    )
-            })
-    }
+            sessions.list
+              .catchAll(_ => ZIO.succeed(Nil))
+              .flatMap: rows =>
+                SessionIndex.shareJoin(rows) match
+                  case None =>
+                    ZIO.log("session/new (no live session)") *>
+                      rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+                  case Some(id) =>
+                    val loaded = next.beginResume(id)
+                    ZIO.log(s"share-join session/load ${id.value}") *>
+                      put(loaded) *> postMeta *> requestLoad(id, loaded.sessionCwd, meta)
+    end if
+  end startAfterInitialize
 
   private def ingestSessionNew(result: Option[Json]): UIO[Unit] =
     result match
@@ -1323,7 +1374,7 @@ final class ChatRuntime private (
         loadSid.exists(popped.cancelledLoads.contains) ||
           popped.pendingResume.exists(want => loadSid.exists(_ != want)) ||
           popped.pendingResume.isEmpty
-      if stale then put(popped)
+      if stale then ZIO.log(s"session/load stale sid=${loadSid.map(_.value).getOrElse("-")}") *> put(popped)
       else
         val wanted = popped.pendingResume
         val base   = popped.copy(loading = false, pendingResume = None)
@@ -1331,12 +1382,14 @@ final class ChatRuntime private (
           case Some(err) =>
             val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
             val sid  = wanted.getOrElse(SessionId.empty)
-            put(base.copy(pendingForkPrompt = None)) *>
+            ZIO.log(s"session/load error ${sid.value} $kind ${err.message}") *>
+              put(base.copy(pendingForkPrompt = None, running = false, userOpen = false)) *>
               post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
               (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
           case None =>
             val clear       = if !base.loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
             val snapTurns   = ChatModel.snapshotTurns(base.loadModel.turns)
+            val live        = snapTurns.lastOption.exists(_.stopReason.isEmpty)
             val todos       = base.loadModel.todos
             val loadedTasks = base.loadModel.tasks
             val sid         = wanted.getOrElse(SessionId.empty)
@@ -1357,13 +1410,17 @@ final class ChatRuntime private (
                   empty.markHasHistory(sid2.sessionId.getOrElse(loadId))
                   sid2
                 case None => applied
-            put(withId) *>
+            ZIO.log(
+              s"session/load ok ${withId.sessionId.map(_.value).getOrElse("-")} turns=${snapTurns.size} live=$live"
+            ) *>
+              put(withId.copy(running = live, userOpen = false)) *>
               clear *>
               post(HostMsg.Transcript(snapTurns)) *>
               postLoadedTodos(sid, todos) *>
               (if loadedTasks.isEmpty then ZIO.unit else post(HostMsg.Tasks(loadedTasks))) *>
               postMeta *> post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
-              (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *> sendForkPrompt
+              (if live then ZIO.unit else if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
+              sendForkPrompt
         end match
       end if
     }
@@ -1378,15 +1435,18 @@ final class ChatRuntime private (
     reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
       if diffs.isEmpty then ZIO.unit
       else
-        snap.flatMap { s =>
-          store.ingest(
-            s.sid(fallbackSessionId),
-            s.currentTurn,
-            s.currentTitle,
-            diffs.map(DiffContent.fileChangeFrom),
-          )
-          postChanges
-        }
+        ZIO.foreachDiscard(diffs) { d =>
+          if d.path == WorkspacePlan.path(cwd) then persistWorkspacePlan(d.newText) else ZIO.unit
+        } *>
+          snap.flatMap { s =>
+            store.ingest(
+              s.sid(fallbackSessionId),
+              s.currentTurn,
+              s.currentTitle,
+              diffs.map(DiffContent.fileChangeFrom),
+            )
+            postChanges
+          }
     }
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
@@ -1459,7 +1519,10 @@ final class ChatRuntime private (
       .foreach(paths)(p => review.readDisk(p).map(p -> _))
       .map { pairs =>
         val snaps = pairs.toMap
-        DiffContent.reconstruct(toolCall, p => snaps.getOrElse(p, None), diskIsBefore)
+        DiffContent.reconstruct(toolCall, p => snaps.getOrElse(p, None), diskIsBefore).map { d =>
+          val next = WorkspacePlan.rewrite(d.path, cwd)
+          if next == d.path then d else d.copy(path = next)
+        }
       }
       .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
   end reconstruct
@@ -1489,6 +1552,43 @@ final class ChatRuntime private (
         .flatMap { disk =>
           if disk.isEmpty then ZIO.unit else post(HostMsg.Todos(disk))
         }
+
+  private def requestLoad(id: SessionId, cwd: String, meta: Option[Json]): UIO[Unit] =
+    ZIO.log(s"session/load ${id.value}") *>
+      rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id)) *>
+      watchLoad(id)
+
+  private def watchLoad(id: SessionId): UIO[Unit] =
+    (ZIO.sleep(ChatRuntime.LoadBudget) *> exclusive(timeoutLoad(id))).forkIn(scope).unit
+
+  private def timeoutLoad(id: SessionId): UIO[Unit] =
+    snap.flatMap { s =>
+      val waiting = s.pendingResume.contains(id) || (s.loading && s.sessionId.contains(id))
+      if !waiting then ZIO.unit
+      else
+        val turns = ChatModel.snapshotTurns(s.loadModel.turns)
+        ZIO.log(s"session/load timeout ${id.value} turns=${turns.size}") *>
+          put(
+            s.copy(
+              loading = false,
+              pendingResume = None,
+              loadModel = ChatModel.empty,
+              running = false,
+              userOpen = false,
+            )
+          ) *>
+          post(HostMsg.Error(ChatRuntime.LoadTimeout)) *>
+          post(HostMsg.Transcript(turns))
+      end if
+    }
+
+  private def replayChrome: UIO[Unit] =
+    snap.flatMap { s =>
+      postMeta *>
+        post(HostMsg.settings(s.settingsState)) *>
+        (if s.commands.nonEmpty then post(HostMsg.AvailableCommands(s.commands)) else ZIO.unit) *>
+        doPostList(open = false)
+    }
 
   private def postMeta: UIO[Unit] =
     snap.flatMap { s =>
@@ -1630,7 +1730,8 @@ final class ChatRuntime private (
     else
       snap.flatMap { s =>
         val sid = s.sid(fallbackSessionId)
-        post(HostMsg.Btw(body, done = false)) *>
+        put(s.copy(pendingBtw = Some(body))) *>
+          post(HostMsg.Btw(body, done = false)) *>
           rpc(
             AcpMethod.Interject,
             Json.Obj("sessionId" -> Json.Str(sid.value), "text" -> Json.Str(body)),
@@ -1639,10 +1740,70 @@ final class ChatRuntime private (
     end if
   end doBtw
 
+  private def persistWorkspacePlan(md: String): UIO[Unit] =
+    if md.trim.isEmpty then ZIO.unit
+    else
+      sessions.writeWorkspacePlan(md).foldZIO(e => post(HostMsg.Error(e.message)), _ => ZIO.unit) *>
+        edit(_.copy(lastPlan = Some(md)))
+
+  private def doOpenPlan: UIO[Unit] =
+    snap.flatMap { s =>
+      val id     = s.sessionId.getOrElse(SessionId.empty)
+      val cached = s.lastPlan.filter(_.trim.nonEmpty)
+      cached match
+        case Some(md) => publishAndOpen(md)
+        case None     =>
+          sessions
+            .planMarkdown(id)
+            .foldZIO(
+              e => post(HostMsg.Error(e.message)),
+              md =>
+                if md.trim.nonEmpty then publishAndOpen(md)
+                else
+                  val path = WorkspacePlan.path(cwd)
+                  review
+                    .readDisk(path)
+                    .foldZIO(
+                      e => post(HostMsg.Error(e.message)),
+                      {
+                        case Some(ws) if ws.trim.nonEmpty => review.openText(path)
+                        case _                            => post(HostMsg.Error(WorkspacePlan.Missing))
+                      },
+                    ),
+            )
+      end match
+    }
+
+  private def publishAndOpen(md: String): UIO[Unit] =
+    sessions
+      .writeWorkspacePlan(md)
+      .foldZIO(
+        e => post(HostMsg.Error(e.message)),
+        path => edit(_.copy(lastPlan = Some(md))) *> review.openText(path),
+      )
+
+  private def ingestInterject(result: Option[Json], error: Option[RpcError]): UIO[Unit] =
+    bag
+      .modify { s =>
+        val aside = s.pendingBtw.getOrElse("")
+        (aside, s.copy(pendingBtw = None))
+      }
+      .flatMap { aside =>
+        error match
+          case Some(err) if err.code == Rpc.MethodNotFound =>
+            post(HostMsg.Btw(aside, done = true)) *> post(HostMsg.Error(BtwReply.Missing))
+          case Some(err) =>
+            post(HostMsg.Btw(aside, done = true)) *> post(HostMsg.Error(err.message))
+          case None =>
+            post(HostMsg.Btw(BtwReply.panel(aside, BtwReply.answer(result)), done = true))
+      }
+
 end ChatRuntime
 
 object ChatRuntime:
-  val ProductTitle: String = "Grok's Beard"
+  val ProductTitle: String     = "Grok's Beard"
+  val LoadBudget: zio.Duration = 20.seconds
+  val LoadTimeout: String      = "Timed out loading session"
 
   def canAttach(s: ChatState, id: SessionId, hasHistory: Boolean): Boolean =
     hasHistory &&

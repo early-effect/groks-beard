@@ -66,6 +66,9 @@ object SessionIndex:
   def sessionPath(home: String, cwd: String, sessionId: SessionId): String =
     join(join(sessionsRoot(home), encodeCwd(cwd)), sessionId.value)
 
+  def workspacePlanPath(cwd: String): String =
+    join(join(cwd, ".grok"), "plan.md")
+
   def readPlan(fs: SessionFs, home: String, cwd: String, sessionId: SessionId): BeardError.Result[List[TodoEntry]] =
     if sessionId.isEmpty then ZIO.succeed(Nil)
     else

@@ -20,10 +20,10 @@ final class BeardDocs extends TextDocumentContentProvider:
     emitter.fire(proposedUri(path))
 
   def originalUri(path: String): Uri =
-    vscode.Uri.parse(s"${BeardDocs.Original}:${BeardDocs.normalize(path)}")
+    BeardDocs.uri(BeardDocs.Original, path)
 
   def proposedUri(path: String): Uri =
-    vscode.Uri.parse(s"${BeardDocs.Proposed}:${BeardDocs.normalize(path)}")
+    BeardDocs.uri(BeardDocs.Proposed, path)
 end BeardDocs
 
 object BeardDocs:
@@ -33,6 +33,9 @@ object BeardDocs:
   def normalize(path: String): String =
     val posix = path.replace('\\', '/')
     if posix.startsWith("/") then posix else s"/$posix"
+
+  def uri(scheme: String, path: String): Uri =
+    vscode.Uri.parse(s"$scheme:${groksbeard.core.WorkspacePlan.encodeUriPath(normalize(path))}")
 
   def key(scheme: String, path: String): String =
     s"$scheme:${normalize(path)}"

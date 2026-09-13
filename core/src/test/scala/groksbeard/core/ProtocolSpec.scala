@@ -164,11 +164,13 @@ object ProtocolSpec extends ZIOSpecDefault:
         val choice: WebviewMsg  = WebviewMsg.PermissionChoice("r1", "allow")
         val plan: HostMsg       = HostMsg.plan(PlanCard("p1", "# Plan\n\nDo it."))
         val verdict: WebviewMsg = WebviewMsg.PlanVerdict("p1", "approved")
+        val clear: HostMsg      = HostMsg.ClearCard(CardSlot.Plan)
         assertTrue(
           perm.toJson.fromJson[HostMsg] == Right(perm),
           choice.toJson.fromJson[WebviewMsg] == Right(choice),
           plan.toJson.fromJson[HostMsg] == Right(plan),
           verdict.toJson.fromJson[WebviewMsg] == Right(verdict),
+          clear.toJson.fromJson[HostMsg] == Right(clear),
         )
       },
       test("transcript snapshot round-trips") {
@@ -190,6 +192,10 @@ object ProtocolSpec extends ZIOSpecDefault:
       },
       test("openFile round-trips") {
         val msg: WebviewMsg = WebviewMsg.OpenFile("/tmp/Main.scala", Some(4))
+        assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
+      },
+      test("openPlan round-trips") {
+        val msg: WebviewMsg = WebviewMsg.OpenPlan
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
       },
       test("webview log round-trips") {

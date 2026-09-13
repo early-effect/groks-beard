@@ -836,9 +836,9 @@ object ChatApp:
           backgroundColor(inputBg),
           border(Border.solid(1.px, widgetBorder)),
           borderRadius.px(6),
-          whiteSpace.pre,
-          overflowX.auto,
-          overflowWrap.normal,
+          whiteSpace.preWrap,
+          overflowX.hidden,
+          overflowWrap.anywhere,
           fontSize.px(12),
           alignSelf.start,
           maxWidth.pct(100),
@@ -866,14 +866,14 @@ object ChatApp:
           borderLeft(Border.solid(2.px, widgetBorder)),
           color(muted),
         ),
-        Selector(" table", borderCollapse.collapse, fontSize.px(12)),
+        Selector(" table", borderCollapse.collapse, fontSize.px(12), maxWidth.pct(100)),
         Selector(
           " th",
           textAlign.left,
           padding(4.px, 8.px),
           borderBottom(Border.solid(1.px, widgetBorder)),
           fontWeight(600),
-          whiteSpace.nowrap,
+          whiteSpace.normal,
         ),
         Selector(
           " td",
@@ -938,7 +938,10 @@ object ChatApp:
         flexDirection.column,
         alignItems.center,
         width.pct(100),
-        flexShrink(0),
+        minHeight.px(0),
+        minWidth.px(0),
+        flexShrink(1),
+        overflow.hidden,
       )
 
   object Card
@@ -950,12 +953,47 @@ object ChatApp:
         padding.px(10),
         display.flex,
         flexDirection.column,
-        flexShrink(0),
+        flexShrink(1),
+        minHeight.px(0),
+        minWidth.px(0),
+        overflow.hidden,
         gap.px(8),
         maxWidth.px(440),
         width.pct(100),
         alignSelf.center,
         boxSizing.borderBox,
+      )
+
+  object CardHead
+      extends CssClass(
+        display.flex,
+        justifyContent.flexEnd,
+        flexShrink(0),
+      )
+
+  object PlanBody
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(10),
+        minHeight.px(0),
+        minWidth.px(0),
+        flexGrow(1.0),
+        overflowY.auto,
+        overflowX.hidden,
+      )
+
+  object OverlayBody
+      extends CssClass(
+        display.flex,
+        flexDirection.column,
+        gap.px(10),
+        minHeight.px(0),
+        minWidth.px(0),
+        flexGrow(1.0),
+        overflowY.auto,
+        overflowX.hidden,
+        padding.px(10),
       )
 
   object CardBtn
@@ -1498,6 +1536,8 @@ object ChatApp:
                 draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send(trimmed)))
               case Some(cmd) if SessionCommands.isViewPlan(cmd.name) =>
                 draft.set("") *> planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+              case Some(cmd) if SessionCommands.isOpenPlan(cmd.name) =>
+                draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.OpenPlan))
               case Some(cmd) if SessionCommands.isBtw(cmd.name) =>
                 draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Btw(cmd.args)))
               case Some(cmd) if SessionCommands.isPersonas(cmd.name) =>
@@ -1590,6 +1630,7 @@ object ChatApp:
           if q.exists(_.allowMultiple) then questionDraft.set(d)
           else if last then
             questionDraft.set(d) *>
+              chat.update(_.copy(question = None)) *>
               ZIO.succeed(bridge.post(WebviewMsg.QuestionSubmit(card.requestId, QuestionDraft.answers(card, d))))
           else questionDraft.set(QuestionDraft.next(card, d))
         }
@@ -1794,20 +1835,26 @@ object ChatApp:
               ZIO
                 .succeed(c.question.isDefined)
                 .flatMap: on =>
-                  if on then ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(c.question.get.requestId))).as(true)
+                  if on then
+                    val id = c.question.get.requestId
+                    chat.update(_.copy(question = None)) *>
+                      ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(id))).as(true)
                   else ZIO.succeed(false),
               ZIO
                 .succeed(c.plan.isDefined)
                 .flatMap: on =>
                   if on then
-                    ZIO
-                      .succeed(bridge.post(WebviewMsg.PlanVerdict(c.plan.get.requestId, PlanOutcome.Abandoned)))
-                      .as(true)
+                    val id = c.plan.get.requestId
+                    chat.update(_.copy(plan = None)) *>
+                      ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(id, PlanOutcome.Abandoned))).as(true)
                   else ZIO.succeed(false),
               ZIO
                 .succeed(c.elicit.isDefined)
                 .flatMap: on =>
-                  if on then ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(c.elicit.get.requestId))).as(true)
+                  if on then
+                    val id = c.elicit.get.requestId
+                    chat.update(_.copy(elicit = None)) *>
+                      ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(id))).as(true)
                   else ZIO.succeed(false),
               takeFlag(queueOpen, queueOpen.set(false)),
               takeFlag(todosOpen, todosOpen.set(false)),
@@ -2289,6 +2336,7 @@ object ChatApp:
             case PaletteKind.Agents      => agentsOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenAgents))
             case PaletteKind.Dashboard => dashboardOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDashboard))
             case PaletteKind.PlanView  => planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+            case PaletteKind.OpenPlan  => ZIO.succeed(bridge.post(WebviewMsg.OpenPlan))
             case PaletteKind.Workflows => workflowsOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenWorkflows))
             case PaletteKind.Doctor    => doctorOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.OpenDoctor))
             case PaletteKind.Theme     => themeOpen.set(true)
@@ -2318,6 +2366,7 @@ object ChatApp:
         else if SessionCommands.isFork(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.Send("/fork")))
         else if SessionCommands.isViewPlan(name) then
           draft.set("") *> planViewOpen.set(true) *> ZIO.succeed(bridge.post(WebviewMsg.ViewPlan))
+        else if SessionCommands.isOpenPlan(name) then draft.set("") *> ZIO.succeed(bridge.post(WebviewMsg.OpenPlan))
         else if SessionCommands.isBtw(name) then draft.set("/btw ")
         else if SessionCommands.isPersonas(name) then
           draft.set("") *> agentsTab.set("personas") *> agentsOpen.set(true) *>
@@ -2701,7 +2750,7 @@ object ChatApp:
         renderTasks(chat, tasksOpen, toggleTasks, stopTask),
         renderQueue(chat, queueOpen, queueIdx, toggleQueue, sendQueuedNow, dropQueued, editQueued),
         renderChanges(bridge, chat, changesOpen, changesOpen.update(!_)),
-        renderCancelTurn(cancelOpen, chat, applyCancelChoice),
+        renderCancelTurn(cancelOpen, chat, applyCancelChoice, cancelOpen.set(false)),
         renderChildFrame(
           chat,
           childDraft,
@@ -2722,7 +2771,12 @@ object ChatApp:
           childQueue.update(!_),
         ),
         renderAgents(agentsOpen, agentsTab, chat, agentsOpen.set(false), tab => agentsTab.set(tab)),
-        renderPlanView(planViewOpen, chat, planViewOpen.set(false) *> chat.update(_.copy(planView = None))),
+        renderPlanView(
+          bridge,
+          planViewOpen,
+          chat,
+          planViewOpen.set(false) *> chat.update(_.copy(planView = None)),
+        ),
         renderWorkflows(workflowsOpen, chat, workflowSel, workflowsOpen.set(false), n => workflowSel.set(Some(n))),
         renderDashboard(dashboardOpen, chat, dashboardOpen.set(false), openSession),
         renderDoctor(doctorOpen, doctorFix, chat, doctorOpen.set(false)),
@@ -2969,7 +3023,7 @@ object ChatApp:
         Ev.onClick(_ => toggleMenu(OpenMenu.Mode)),
         chat.map(c => ModeLabel.modeLabel(c.modeId, c.modes)),
       ),
-      when(chat.map(_.models.nonEmpty))(
+      when(chat.map(c => c.models.nonEmpty || c.modelId.nonEmpty))(
         E.div(
           ChipGroup,
           TestId("model-group"),
@@ -3675,6 +3729,26 @@ object ChatApp:
     )
   end renderTool
 
+  private def cardFrame(testId: String, onClose: UIO[Unit], body: Seq[ascent.ast.UI[Any]]): ascent.ast.UI[Any] =
+    E.div(
+      Card,
+      TestId(testId),
+      E.div(
+        CardHead,
+        E.button(Chip, TestId(s"$testId-close"), Ev.onClick(_ => onClose), "Close"),
+      ),
+      Arg.ArgsArg(body.map(Arg.ChildArg(_))),
+    )
+
+  private def closePlan(
+      bridge: HostBridge,
+      chat: ascent.Source[ChatModel],
+      requestId: RequestId,
+      verdict: PlanOutcome,
+  ): UIO[Unit] =
+    chat.update(_.copy(plan = None)) *>
+      ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(requestId, verdict)))
+
   private def renderCards(
       bridge: HostBridge,
       chat: ascent.Source[ChatModel],
@@ -3691,7 +3765,10 @@ object ChatApp:
             skin,
             TestId(s"perm-${opt.optionId}"),
             A.title(ToolView.permissionTip(opt.name, opt.kind)),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(card.requestId, opt.optionId)))),
+            Ev.onClick(_ =>
+              chat.update(_.copy(permission = None)) *>
+                ZIO.succeed(bridge.post(WebviewMsg.PermissionChoice(card.requestId, opt.optionId)))
+            ),
             s"${idx + 1} ${opt.name}",
           )
         }
@@ -3706,57 +3783,74 @@ object ChatApp:
               )
             )
           else Nil
-        E.div(
-          Card,
-          TestId("permission"),
-          E.h3(card.title),
-          Arg.ArgsArg((choices ++ diff).map(Arg.ChildArg(_))),
+        cardFrame(
+          "permission",
+          chat.update(_.copy(permission = None)) *>
+            ZIO.succeed(bridge.post(WebviewMsg.PermissionPark(card.requestId))),
+          E.h3(card.title) +: (choices ++ diff),
         )
       },
       forEach(chat.map(_.plan.toList))(_.requestId.value) { card =>
-        E.div(
-          Card,
-          TestId("plan"),
-          E.div(AgentMsg, TestId("plan-md"), ChatMarkdown.render(card.planMarkdown)),
-          E.button(
-            Send,
-            TestId("plan-approved"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Approved)))),
-            "Approve",
-          ),
-          E.button(
-            MenuItem,
-            TestId("plan-cancelled"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Cancelled)))),
-            "Request changes",
-          ),
-          E.button(
-            MenuItem,
-            TestId("plan-abandoned"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.PlanVerdict(card.requestId, PlanOutcome.Abandoned)))),
-            "Abandon",
+        cardFrame(
+          "plan",
+          closePlan(bridge, chat, card.requestId, PlanOutcome.Abandoned),
+          Seq(
+            E.div(AgentMsg, PlanBody, TestId("plan-md"), ChatMarkdown.render(card.planMarkdown)),
+            E.button(
+              Send,
+              TestId("plan-approved"),
+              Ev.onClick(_ => closePlan(bridge, chat, card.requestId, PlanOutcome.Approved)),
+              "Approve",
+            ),
+            E.button(
+              CardBtn,
+              TestId("plan-open"),
+              Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenPlan))),
+              "Open in editor",
+            ),
+            E.button(
+              MenuItem,
+              TestId("plan-cancelled"),
+              Ev.onClick(_ => closePlan(bridge, chat, card.requestId, PlanOutcome.Cancelled)),
+              "Request changes",
+            ),
+            E.button(
+              MenuItem,
+              TestId("plan-abandoned"),
+              Ev.onClick(_ => closePlan(bridge, chat, card.requestId, PlanOutcome.Abandoned)),
+              "Abandon",
+            ),
           ),
         )
       },
       forEachSignal(chat.map(_.question.toList))(_.requestId.value) { (_, card, _) =>
-        renderQuestionCard(bridge, card, questionDraft, onQuestionPick)
+        renderQuestionCard(bridge, chat, card, questionDraft, onQuestionPick)
       },
       forEach(chat.map(_.elicit.toList))(_.requestId.value) { card =>
-        E.div(
-          Card,
-          TestId("elicit"),
-          E.h3(card.title),
-          E.button(
-            Send,
-            TestId("elicit-accept"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.ElicitAccept(card.requestId)))),
-            "Accept",
-          ),
-          E.button(
-            MenuItem,
-            TestId("elicit-decline"),
-            Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(card.requestId)))),
-            "Decline",
+        cardFrame(
+          "elicit",
+          chat.update(_.copy(elicit = None)) *>
+            ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(card.requestId))),
+          Seq(
+            E.h3(card.title),
+            E.button(
+              Send,
+              TestId("elicit-accept"),
+              Ev.onClick(_ =>
+                chat.update(_.copy(elicit = None)) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.ElicitAccept(card.requestId)))
+              ),
+              "Accept",
+            ),
+            E.button(
+              MenuItem,
+              TestId("elicit-decline"),
+              Ev.onClick(_ =>
+                chat.update(_.copy(elicit = None)) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.ElicitDecline(card.requestId)))
+              ),
+              "Decline",
+            ),
           ),
         )
       },
@@ -3764,40 +3858,43 @@ object ChatApp:
 
   private def renderForkAsk(bridge: HostBridge, chat: ascent.Source[ChatModel]): ascent.ast.UI[Any] =
     when(chat.map(_.forkAsk.nonEmpty))(
-      E.div(
-        Card,
-        TestId("fork-ask"),
-        E.h3("Fork this session"),
-        E.p(Copy, "Same workspace or a new git worktree?"),
-        E.button(
-          Send,
-          TestId("fork-same"),
-          Ev.onClick { _ =>
-            chat.get.flatMap { c =>
-              val d = c.forkAsk.getOrElse("")
-              chat.update(_.copy(forkAsk = None)) *>
-                ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = false, d)))
-            }
-          },
-          "Same workspace",
-        ),
-        E.button(
-          MenuItem,
-          TestId("fork-worktree"),
-          Ev.onClick { _ =>
-            chat.get.flatMap { c =>
-              val d = c.forkAsk.getOrElse("")
-              chat.update(_.copy(forkAsk = None)) *>
-                ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = true, d)))
-            }
-          },
-          "New worktree",
+      cardFrame(
+        "fork-ask",
+        chat.update(_.copy(forkAsk = None)),
+        Seq(
+          E.h3("Fork this session"),
+          E.p(Copy, "Same workspace or a new git worktree?"),
+          E.button(
+            Send,
+            TestId("fork-same"),
+            Ev.onClick { _ =>
+              chat.get.flatMap { c =>
+                val d = c.forkAsk.getOrElse("")
+                chat.update(_.copy(forkAsk = None)) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = false, d)))
+              }
+            },
+            "Same workspace",
+          ),
+          E.button(
+            MenuItem,
+            TestId("fork-worktree"),
+            Ev.onClick { _ =>
+              chat.get.flatMap { c =>
+                val d = c.forkAsk.getOrElse("")
+                chat.update(_.copy(forkAsk = None)) *>
+                  ZIO.succeed(bridge.post(WebviewMsg.Fork(worktree = true, d)))
+              }
+            },
+            "New worktree",
+          ),
         ),
       )
     )
 
   private def renderQuestionCard(
       bridge: HostBridge,
+      chat: ascent.Source[ChatModel],
       card: QuestionCard,
       questionDraft: ascent.Source[QuestionDraft],
       onQuestionPick: (QuestionCard, String) => UIO[Unit],
@@ -3815,68 +3912,75 @@ object ChatApp:
         }
       }
     }
-    E.div(
-      Card,
-      TestId("question"),
-      E.p(SessionMetaLine, TestId("question-pos"), pos),
-      E.p(q.map(_.map(_.prompt).getOrElse(""))),
-      forEach(opts)(t => s"${t._1}-${t._2.id}-${t._4}") { t =>
-        val (qid, opt, idx, on) = t
+    cardFrame(
+      "question",
+      chat.update(_.copy(question = None)) *>
+        ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId))),
+      Seq(
+        E.p(SessionMetaLine, TestId("question-pos"), pos),
+        E.p(q.map(_.map(_.prompt).getOrElse(""))),
+        forEach(opts)(t => s"${t._1}-${t._2.id}-${t._4}") { t =>
+          val (qid, opt, idx, on) = t
+          E.button(
+            if on then Send else MenuItem,
+            TestId(s"question-$qid-${opt.id}"),
+            Ev.onClick(_ => onQuestionPick(card, opt.id)),
+            s"${idx + 1} ${opt.label}",
+          )
+        },
+        when(q.map(_.exists(_.allowFreeText)))(
+          E.textarea(
+            TestId("question-freetext"),
+            A.placeholder("Or type an answer"),
+            A.value(
+              d.map { held =>
+                QuestionDraft.current(card, held).flatMap(qq => held.freeText.get(qq.id)).getOrElse("")
+              }
+            ),
+            Events.onInput(e => questionDraft.update(QuestionDraft.setFreeText(card, _, e.targetValue.getOrElse("")))),
+          )
+        ),
+        when(d.map(_.index > 0))(
+          E.button(
+            CardBtn,
+            TestId("question-prev"),
+            Ev.onClick(_ => questionDraft.update(QuestionDraft.prev(card, _))),
+            "Back",
+          )
+        ),
+        when(last.map(isLast => !isLast))(
+          E.button(
+            CardBtn,
+            TestId("question-next"),
+            Ev.onClick(_ => questionDraft.update(QuestionDraft.next(card, _))),
+            "Next",
+          )
+        ),
+        when(last)(
+          E.button(
+            Send,
+            TestId("question-submit"),
+            Ev.onClick(_ =>
+              questionDraft.get.flatMap { held =>
+                val now = QuestionDraft.align(card, held)
+                chat.update(_.copy(question = None)) *>
+                  ZIO.succeed(
+                    bridge.post(WebviewMsg.QuestionSubmit(card.requestId, QuestionDraft.answers(card, now)))
+                  )
+              }
+            ),
+            "Send answers",
+          )
+        ),
         E.button(
-          if on then Send else MenuItem,
-          TestId(s"question-$qid-${opt.id}"),
-          Ev.onClick(_ => onQuestionPick(card, opt.id)),
-          s"${idx + 1} ${opt.label}",
-        )
-      },
-      when(q.map(_.exists(_.allowFreeText)))(
-        E.textarea(
-          TestId("question-freetext"),
-          A.placeholder("Or type an answer"),
-          A.value(
-            d.map { held =>
-              QuestionDraft.current(card, held).flatMap(qq => held.freeText.get(qq.id)).getOrElse("")
-            }
-          ),
-          Events.onInput(e => questionDraft.update(QuestionDraft.setFreeText(card, _, e.targetValue.getOrElse("")))),
-        )
-      ),
-      when(d.map(_.index > 0))(
-        E.button(
-          CardBtn,
-          TestId("question-prev"),
-          Ev.onClick(_ => questionDraft.update(QuestionDraft.prev(card, _))),
-          "Back",
-        )
-      ),
-      when(last.map(isLast => !isLast))(
-        E.button(
-          CardBtn,
-          TestId("question-next"),
-          Ev.onClick(_ => questionDraft.update(QuestionDraft.next(card, _))),
-          "Next",
-        )
-      ),
-      when(last)(
-        E.button(
-          Send,
-          TestId("question-submit"),
+          MenuItem,
+          TestId("question-dismiss"),
           Ev.onClick(_ =>
-            questionDraft.get.flatMap { held =>
-              val now = QuestionDraft.align(card, held)
-              ZIO.succeed(
-                bridge.post(WebviewMsg.QuestionSubmit(card.requestId, QuestionDraft.answers(card, now)))
-              )
-            }
+            chat.update(_.copy(question = None)) *>
+              ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId)))
           ),
-          "Send answers",
-        )
-      ),
-      E.button(
-        MenuItem,
-        TestId("question-dismiss"),
-        Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId)))),
-        "Dismiss",
+          "Dismiss",
+        ),
       ),
     )
   end renderQuestionCard
@@ -4277,7 +4381,7 @@ object ChatApp:
         PalettePanel,
         Ev.onClick(e => ZIO.succeed(e.stopPropagation())),
         E.div(ChangesHead, E.strong(title), E.button(Chip, TestId(s"$id-close"), Ev.onClick(_ => close), "Close")),
-        Arg.ArgsArg(body.toList.map(Arg.ChildArg(_))),
+        E.div(OverlayBody, Arg.ArgsArg(body.toList.map(Arg.ChildArg(_)))),
       ),
     )
 
@@ -4285,27 +4389,25 @@ object ChatApp:
       open: ascent.Source[Boolean],
       chat: ascent.Source[ChatModel],
       pick: CancelChoice => UIO[Unit],
+      close: UIO[Unit],
   ): ascent.ast.UI[Any] =
     when(open)(
       E.div(
         Cards,
         TestId("cancel-turn"),
-        E.div(
-          Card,
-          E.h3(CancelTurn.Title),
-          E.p(Copy, chat.map(c => CancelTurn.heading(CancelTurn.liveSubagents(c.tasks).size))),
-          Arg.ArgsArg(
+        cardFrame(
+          "cancel-card",
+          close,
+          E.h3(CancelTurn.Title) +:
+            E.p(Copy, chat.map(c => CancelTurn.heading(CancelTurn.liveSubagents(c.tasks).size))) +:
             CancelTurn.rows.map { (n, choice, label) =>
-              Arg.ChildArg(
-                E.button(
-                  CardBtn,
-                  TestId(s"cancel-$n"),
-                  Ev.onClick(_ => pick(choice)),
-                  s"$n. $label",
-                )
+              E.button(
+                CardBtn,
+                TestId(s"cancel-$n"),
+                Ev.onClick(_ => pick(choice)),
+                s"$n. $label",
               )
-            }
-          ),
+            },
         ),
       )
     )
@@ -4407,6 +4509,7 @@ object ChatApp:
     )
 
   private def renderPlanView(
+      bridge: HostBridge,
       open: ascent.Source[Boolean],
       chat: ascent.Source[ChatModel],
       close: UIO[Unit],
@@ -4416,7 +4519,19 @@ object ChatApp:
         "plan-view",
         "Plan",
         close,
-        E.div(AgentMsg, TestId("plan-view-md"), chat.map(c => c.planView.getOrElse("No plan written yet"))),
+        E.div(
+          AgentMsg,
+          TestId("plan-view-md"),
+          forEach(chat.map(c => Vector(c.planView.getOrElse("No plan written yet"))))(identity) { md =>
+            ChatMarkdown.render(md)
+          },
+        ),
+        E.button(
+          CardBtn,
+          TestId("plan-open"),
+          Ev.onClick(_ => ZIO.succeed(bridge.post(WebviewMsg.OpenPlan))),
+          "Open in editor",
+        ),
       )
     )
 

@@ -178,11 +178,12 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.RewindTo(index) =>
         emit(HostMsg.Rewound(index))
       case WebviewMsg.NewSession =>
-        currentId = SessionId.empty
+        currentId = SessionId("new")
         pickerOpen = false
         emit(HostMsg.ClearTranscript)
-        emitMeta(SessionId.empty, "Grok's Beard")
-        emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
+        emitMeta(currentId, "Grok's Beard")
+        emit(HostMsg.Transcript(Nil))
+        emit(HostMsg.SessionList(sessions, currentId, openPicker = false))
       case WebviewMsg.ResumeSession(id, _, hasHistory) =>
         currentId = id
         pickerOpen = false
@@ -264,9 +265,6 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.Copied(TranscriptCopy.toast(path, conversation)))
       case WebviewMsg.Log(message, _) =>
         emit(HostMsg.Error(message, Some(Wire.Decode)))
-      case WebviewMsg.Cancel =>
-        emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
-        emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))
       case WebviewMsg.CancelTurnChoice(_, keep) =>
         emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
         emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))

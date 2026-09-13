@@ -1292,7 +1292,31 @@ object ChatChromeSpec extends ZIOSpecDefault:
               _ <- waitPresent(root, "transcript")
               _ <- root.button("new-session").click
               _ <- waitGone(root, "transcript")
-            yield assertTrue(true)
+              _ <- waitPresent(root, "session-empty")
+              _ <- waitGone(root, "session-loading")
+              copy <- root.getByTestId("session-empty").innerText
+            yield assertTrue(copy.contains("Ask Grok anything"))
+          }
+        yield result
+        end for
+      },
+      test("New during a resume wait is empty, not loading") {
+        val bridge = GatedResumeBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "welcome-sessions")
+              _ <- root.button("session-disk-1").click
+              _ <- waitPresent(root, "session-loading")
+              _ <- root.button("new-session").click
+              _ <- waitPresent(root, "session-empty")
+              _ <- waitGone(root, "session-loading")
+              _ <- ZIO.succeed(bridge.completeResume())
+              _ <- waitGone(root, "session-loading")
+              copy <- root.getByTestId("session-empty").innerText
+              user = Option(root.element.querySelector("""[data-testid="user-resume-turn"]"""))
+            yield assertTrue(copy.contains("Ask Grok anything"), user.isEmpty)
           }
         yield result
         end for
@@ -2834,10 +2858,12 @@ final class GatedResumeBridge extends HostBridge:
         pending = Some(id)
         val title = sessions.find(_.id == id).map(_.title).getOrElse(id.value)
         emit(HostMsg.ClearTranscript)
-        emit(HostMsg.SessionMeta(id, title, ModeId.Normal))
+        emit(HostMsg.SessionMeta(id, title, ModeId.Normal, loading = true))
       case WebviewMsg.NewSession =>
         emit(HostMsg.ClearTranscript)
-        emit(HostMsg.SessionList(sessions, "", openPicker = false))
+        emit(HostMsg.SessionMeta(SessionId("new"), "Grok's Beard", ModeId.Normal))
+        emit(HostMsg.Transcript(Nil))
+        emit(HostMsg.SessionList(sessions, SessionId("new"), openPicker = false))
       case _ => ()
 
   def completeResume(turns: List[TurnView]): Unit =

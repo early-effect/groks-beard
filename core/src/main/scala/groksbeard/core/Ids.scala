@@ -73,6 +73,7 @@ object ModeId:
     def value: String     = id
     def isEmpty: Boolean  = id.length == 0
     def nonEmpty: Boolean = id.length > 0
+    def isPlan: Boolean   = id == Plan
   given JsonCodec[ModeId] = JsonExt.stringCodec(_.value, apply)
 end ModeId
 

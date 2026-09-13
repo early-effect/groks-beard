@@ -15,6 +15,7 @@ trait SessionRepo:
   def rename(id: SessionId, op: RenameOp): BeardError.Result[Option[SessionRow]]
   def delete(id: SessionId): BeardError.Result[Boolean]
   def scheduleEmptyDelete(id: SessionId): UIO[Unit]
+  def transcript(id: SessionId): BeardError.Result[SessionSnapshot]
   def plan(id: SessionId): BeardError.Result[List[TodoEntry]]
   def planMarkdown(id: SessionId): BeardError.Result[String]
   def writeWorkspacePlan(markdown: String): BeardError.Result[String]
@@ -40,6 +41,9 @@ object SessionRepo:
         val path = SessionIndex.sessionPath(home, cwd, id)
         (ZIO.sleep(SessionIndex.EmptyGraceMs.millis) *>
           fs.deleteTree(path).tapError(e => ZIO.logWarning(e.message)).ignore).forkDaemon.unit
+
+      def transcript(id: SessionId): BeardError.Result[SessionSnapshot] =
+        SessionIndex.readTranscript(fs, home, cwd, id)
 
       def plan(id: SessionId): BeardError.Result[List[TodoEntry]] =
         SessionIndex.readPlan(fs, home, cwd, id)
@@ -83,6 +87,7 @@ object SessionRepo:
       onPersonas: () => List[PersonaDef] = () => Nil,
       onReadConfig: () => String = () => "",
       onWriteConfig: String => Unit = _ => (),
+      onTranscript: SessionId => SessionSnapshot = _ => SessionSnapshot(),
   ): ULayer[SessionRepo] =
     ZLayer.succeed(new SessionRepo:
       def list: BeardError.Result[List[SessionRow]]                                  = ZIO.succeed(listRows())
@@ -90,6 +95,7 @@ object SessionRepo:
         ZIO.succeed(onRename(id, op))
       def delete(id: SessionId): BeardError.Result[Boolean]               = ZIO.succeed(onDelete(id))
       def scheduleEmptyDelete(id: SessionId): UIO[Unit]                   = ZIO.succeed(onEmptyDelete(id))
+      def transcript(id: SessionId): BeardError.Result[SessionSnapshot]   = ZIO.succeed(onTranscript(id))
       def plan(id: SessionId): BeardError.Result[List[TodoEntry]]         = ZIO.succeed(onPlan(id))
       def planMarkdown(id: SessionId): BeardError.Result[String]          = ZIO.succeed(onPlanMarkdown(id))
       def writeWorkspacePlan(markdown: String): BeardError.Result[String] =
@@ -204,7 +210,9 @@ object TranscriptOut:
 end TranscriptOut
 
 object ChatEnv:
-  type Env = HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals & Mcps & UiPrefs
+  type Env =
+    HostOut & SessionRepo & Mentions & ChangesPersist & ReviewOps & TranscriptOut & Terminals & Mcps & UiPrefs &
+      EmptySessions
 
   def test(
       post: HostMsg => UIO[Unit] = _ => ZIO.unit,
@@ -228,6 +236,7 @@ object ChatEnv:
         CopyResult(TranscriptCopy.toast(path, conversation), if path.isEmpty then Some(text) else None),
       onReadConfig: () => String = () => "",
       onWriteConfig: String => Unit = _ => (),
+      onTranscript: SessionId => SessionSnapshot = _ => SessionSnapshot(),
       terminals: ULayer[Terminals] = Terminals.test(),
       mcps: ULayer[Mcps] = Mcps.none,
   ): ULayer[Env] =
@@ -243,6 +252,7 @@ object ChatEnv:
           writeWorkspacePlan,
           onReadConfig = onReadConfig,
           onWriteConfig = onWriteConfig,
+          onTranscript = onTranscript,
         ) ++
         Mentions.layer(q => ZIO.succeed(searchFiles(q))) ++
         ChangesPersist.layer(sets => persistChanges(sets)) ++
@@ -257,7 +267,8 @@ object ChatEnv:
         ) ++
         TranscriptOut.test(onCopy) ++
         terminals ++
-        mcps
+        mcps ++
+        EmptySessions.layer
     base >+> UiPrefs.layer
   end test
 end ChatEnv

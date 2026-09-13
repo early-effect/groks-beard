@@ -18,6 +18,7 @@ final class FakeAgent(
     liveLoad: Boolean = false,
     omitInterject: Boolean = false,
     hangLoad: Boolean = false,
+    hangResume: Boolean = false,
 ):
   def replies(msg: Rpc): List[Rpc] =
     msg match
@@ -183,6 +184,8 @@ final class FakeAgent(
             ),
           )
         )
+      case "session/resume" if hangResume =>
+        Nil
       case "session/close" | "session/resume" =>
         List(Rpc.ok(id, EmptyObject().asJson))
       case "x.ai/interject" | "_x.ai/interject" if omitInterject =>

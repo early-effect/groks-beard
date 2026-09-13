@@ -259,7 +259,8 @@ final class ChatView(
           args => NodeCapture.run(bin, args, cwd),
           ZIO.attempt(nodeFs.readFileSync(s"$home/config.toml", "utf8")).orElseSucceed(""),
         )
-      )) >+> UiPrefs.layer
+      ) ++
+      EmptySessions.layer) >+> UiPrefs.layer
 
   private def flushReady(rt: ChatRuntime): UIO[Unit] =
     if !pendingReady then ZIO.unit

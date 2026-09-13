@@ -39,5 +39,66 @@ object ChatStateSpec extends ZIOSpecDefault:
         val next = ChatState.seed(".", SettingsState.defaults, Nil).withConfig(opts)
         assertTrue(next.modelId.value == "grok-4.6", next.effort == "high", next.configOptions == opts)
       },
+      test("withConfig keeps model capability meta from the live catalog") {
+        val seeded =
+          ChatState
+            .seed(".", SettingsState.defaults, Nil)
+            .copy(
+              modelId = ModelId("grok-4.6"),
+              models = List(ModelOption(ModelId("grok-4.6"), "Grok 4.6", _meta = Some(Effort.grokMeta()))),
+            )
+        val opts = List(
+          ConfigOption(
+            ConfigOption.ModelKey,
+            currentValue = Some("grok-4.6"),
+            options = List(ConfigSelect("grok-4.6", Some("Grok 4.6"))),
+          )
+        )
+        val next = seeded.withConfig(opts)
+        assertTrue(
+          next.models.headOption.flatMap(_._meta).isDefined,
+          Effort.of(next.currentModel).nonEmpty,
+        )
+      },
+      test("beginResume then onDisk(true) paints without loading chrome") {
+        val s0 = ChatState.seed(".", SettingsState.defaults, Nil).beginResume(SessionId("sess"))
+        val s1 = s0.onDisk(true)
+        assertTrue(
+          s0.phase == SessionPhase.ResumeDisk(SessionId("sess")),
+          s0.loading,
+          s1.phase == SessionPhase.ResumePainted(SessionId("sess")),
+          s1.diskPainted,
+          !s1.loading,
+          s1.metaLoading,
+        )
+      },
+      test("resetLocal and beginNew are Empty, not a resume wait") {
+        val s =
+          ChatState.seed(".", SettingsState.defaults, Nil).beginResume(SessionId("sess")).resetLocal.readyEmpty
+        assertTrue(s.phase == SessionPhase.Empty, !s.loading, s.pendingResume.isEmpty)
+      },
+      test("finishAttach is Live") {
+        val s =
+          ChatState.seed(".", SettingsState.defaults, Nil).beginResume(SessionId("sess")).onDisk(true).finishAttach
+        assertTrue(
+          s.phase == SessionPhase.Live(SessionId("sess")),
+          s.pendingResume.isEmpty,
+          !s.metaLoading,
+        )
+      },
+      test("staleResume ignores a cancelled or switched attach") {
+        val seed      = ChatState.seed(".", SettingsState.defaults, Nil)
+        val waiting   = seed.beginResume(SessionId("disk"))
+        val cancelled = waiting.cancelPendingResume.readyEmpty.copy(sessionId = Some(SessionId("neu")))
+        val switched  = waiting.cancelPendingResume.beginResume(SessionId("live"))
+        val live      = seed.readyEmpty.copy(sessionId = Some(SessionId("sess")))
+        assertTrue(
+          cancelled.staleResume(Some(SessionId("disk"))),
+          switched.staleResume(Some(SessionId("disk"))),
+          !switched.staleResume(Some(SessionId("live"))),
+          !live.staleResume(Some(SessionId("sess"))),
+          live.staleResume(Some(SessionId("other"))),
+        )
+      },
     )
 end ChatStateSpec

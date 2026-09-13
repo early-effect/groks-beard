@@ -35,6 +35,16 @@ object NioSessionFs extends SessionFs:
       else Some(Files.readString(p))
     }.orSystem
 
+  override def foldLines[S](path: String, z: S)(f: (S, String) => S): BeardError.Result[S] =
+    ZIO.attemptBlocking {
+      val p = Path.of(path)
+      if !Files.isRegularFile(p) then z
+      else
+        val stream = Files.lines(p)
+        try stream.iterator.asScala.foldLeft(z)(f)
+        finally stream.close()
+    }.orSystem
+
   override def writeText(path: String, text: String): BeardError.Result[Unit] =
     ZIO.attemptBlocking {
       val p = Path.of(path)

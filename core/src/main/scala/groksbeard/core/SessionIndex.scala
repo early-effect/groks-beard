@@ -33,6 +33,15 @@ trait SessionFs:
   def writeText(@unused path: String, @unused text: String): BeardError.Result[Unit] = ZIO.unit
   def deleteTree(@unused path: String): BeardError.Result[Unit]                      = ZIO.unit
 
+  /** Line-at-a-time fold. Default materializes `readText`; Node/Nio override with a stream. */
+  def foldLines[S](path: String, z: S)(f: (S, String) => S): BeardError.Result[S] =
+    readText(path).map {
+      case None       => z
+      case Some(text) =>
+        if text.isEmpty then z
+        else text.linesIterator.foldLeft(z)(f)
+    }
+
 object SessionIndex:
   val PageSize: Int              = 100
   val WelcomeLimit: Int          = 8
@@ -68,6 +77,29 @@ object SessionIndex:
 
   def workspacePlanPath(cwd: String): String =
     join(join(cwd, ".grok"), "plan.md")
+
+  def readTranscript(
+      fs: SessionFs,
+      home: String,
+      cwd: String,
+      sessionId: SessionId,
+  ): BeardError.Result[SessionSnapshot] =
+    if sessionId.isEmpty then ZIO.succeed(SessionSnapshot())
+    else
+      val dir     = sessionPath(home, cwd, sessionId)
+      val updates = join(dir, "updates.jsonl")
+      val events  = join(dir, "events.jsonl")
+      fs.mtimeMs(updates).flatMap {
+        case Some(_) => foldTranscript(fs, updates)
+        case None    =>
+          fs.mtimeMs(events).flatMap {
+            case Some(_) => foldTranscript(fs, events)
+            case None    => ZIO.succeed(SessionSnapshot())
+          }
+      }
+
+  def foldTranscript(fs: SessionFs, path: String): BeardError.Result[SessionSnapshot] =
+    fs.foldLines(path, SessionLog.empty)(SessionLog.foldLine).map(SessionLog.finish)
 
   def readPlan(fs: SessionFs, home: String, cwd: String, sessionId: SessionId): BeardError.Result[List[TodoEntry]] =
     if sessionId.isEmpty then ZIO.succeed(Nil)

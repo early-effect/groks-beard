@@ -31,7 +31,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         }
       },
       test("session/load timeout unblocks the loading screen") {
-        val wrap = AcpTransport.fake(FakeAgent(hangLoad = true))
+        val wrap = AcpTransport.fake(FakeAgent(hangLoad = true, omitResume = true))
         chat(
           transport = wrap,
           listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
@@ -1088,8 +1088,129 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         chat() { (rt, _) =>
           for
             _ <- rt.ready
-            _ <- rt.setMode("plan")
-          yield assertTrue(rt.state.modeId.contains("plan"), rt.state.planActive)
+            _    <- rt.setMode("plan")
+            mode <- rt.framedMode
+            plan <- rt.planActive
+          yield assertTrue(mode.contains(ModeId.Plan), plan)
+        }
+      },
+      test("a completed tool_call from the TUI dismisses the permission card") {
+        def line(msg: Rpc): String = Ndjson.encode(Rpc.toLine(msg))
+        val perm                   =
+          Rpc.request(
+            RpcId.Str("perm-1"),
+            "session/request_permission",
+            PermissionRequestParams(
+              toolCall = AcpToolCall(toolCallId = ToolCallId("call_1"), title = "Read SKILL.md", kind = ToolKind.Read)
+            ),
+          )
+        val pending =
+          Rpc.notifyOf(
+            "session/update",
+            AcpSessionNotify(
+              "sess_test",
+              AcpUpdate.ToolCall(toolCallId = ToolCallId("call_1"), title = "Read SKILL.md", status = ToolStatus.Pending),
+            ),
+          )
+        val done =
+          Rpc.notifyOf(
+            "session/update",
+            AcpSessionNotify(
+              "sess_test",
+              AcpUpdate.ToolCallUpdate(toolCallId = ToolCallId("call_1"), status = ToolStatus.Completed),
+            ),
+          )
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(transport = wrap) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(line(perm))
+            _ <- rt.ingestData(line(pending))
+            mid <- posted.get
+            _ <- ZIO.succeed(lines.clear())
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(line(done))
+            _ <- rt.permissionChoice("perm-1", "allow-once")
+            after <- posted.get
+          yield assertTrue(
+            mid.exists {
+              case p: HostMsg.Permission => p.toolCallId == "call_1"
+              case _                     => false
+            },
+            after.exists {
+              case HostMsg.ClearCard(CardSlot.Permission) => true
+              case _                                      => false
+            },
+            !lines.exists(_.contains("allow-once")),
+          )
+        }
+      },
+      test("leaving plan mode dismisses a plan card the TUI already answered") {
+        def line(msg: Rpc): String = Ndjson.encode(Rpc.toLine(msg))
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              line(Rpc.request(RpcId.Str("plan-1"), "_x.ai/exit_plan_mode", Json.Obj("planMarkdown" -> Json.Str("# Go"))))
+            )
+            _ <- rt.ingestData(
+              line(
+                Rpc.notifyOf(
+                  "session/update",
+                  AcpSessionNotify("sess_test", AcpUpdate.CurrentMode(currentModeId = Some(ModeId.Normal))),
+                )
+              )
+            )
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case p: HostMsg.Plan => p.requestId == "plan-1"
+              case _               => false
+            },
+            msgs.exists {
+              case HostMsg.ClearCard(CardSlot.Plan) => true
+              case _                                => false
+            },
+          )
+        }
+      },
+      test("a later agent chunk dismisses a question the TUI already answered") {
+        def line(msg: Rpc): String = Ndjson.encode(Rpc.toLine(msg))
+        val written                = scala.collection.mutable.ListBuffer.empty[String]
+        chat(transport = AcpTransport.tap(AcpTransport.fake(), written += _)) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              line(
+                Rpc.request(
+                  RpcId.Str("q-1"),
+                  "_x.ai/ask_user_question",
+                  AskUserQuestionParams(List(AgentQuestion("style", "How?", List(QuestionOption("dense", "Dense"))))),
+                )
+              )
+            )
+            _ <- rt.ingestData(
+              line(
+                Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", AcpUpdate.Agent(AcpContent.Text("ok"))))
+              )
+            )
+            msgs <- posted.get
+            _    <- rt.questionSubmit("q-1", List(QuestionAnswer("style", List("dense"), None)))
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Question("q-1", _) => true
+              case _                          => false
+            },
+            msgs.exists {
+              case HostMsg.ClearCard(CardSlot.Question) => true
+              case _                                    => false
+            },
+            !written.mkString.contains("dense"),
+          )
         }
       },
       test("permissionChoice answers the inbound request") {
@@ -1242,11 +1363,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- rt.ready
             _ <- posted.set(Nil)
             _ <- ZIO.succeed(lines.clear())
-            _ <- rt.setMode("plan")
+            _    <- rt.setMode("plan")
+            plan <- rt.planActive
+            mode <- rt.framedMode
             blob = lines.mkString
           yield assertTrue(
-            rt.state.planActive,
-            rt.state.modeId.contains("plan"),
+            plan,
+            mode.contains(ModeId.Plan),
             blob.contains(PlanTerminals.Reject),
             !blob.contains("\"terminalId\":\"term-1\""),
           )
@@ -1268,10 +1391,11 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- rt.ready
             _ <- posted.set(Nil)
             _ <- ZIO.succeed(lines.clear())
-            _ <- rt.setMode("plan")
+            _    <- rt.setMode("plan")
+            plan <- rt.planActive
             blob = lines.mkString
           yield assertTrue(
-            rt.state.planActive,
+            plan,
             blob.contains("\"terminalId\":\"term-1\""),
             !blob.contains(PlanTerminals.Reject),
           )
@@ -1289,10 +1413,11 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           for
             _ <- rt.ready
             _ <- ZIO.succeed(lines.clear())
-            _ <- rt.ingestData(Ndjson.encode(Rpc.toLine(req)))
+            _    <- rt.ingestData(Ndjson.encode(Rpc.toLine(req)))
+            plan <- rt.planActive
             blob = lines.mkString
           yield assertTrue(
-            !rt.state.planActive,
+            !plan,
             blob.contains("\"terminalId\":\"term-1\""),
             !blob.contains(PlanTerminals.Reject),
           )
@@ -1375,9 +1500,11 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- posted.set(Nil)
             _    <- rt.cycleMode
             msgs <- posted.get
+            mode <- rt.framedMode
+            plan <- rt.planActive
           yield assertTrue(
-            rt.state.modeId.contains("plan"),
-            rt.state.planActive,
+            mode.contains(ModeId.Plan),
+            plan,
             msgs.exists {
               case m: HostMsg.SessionMeta => m.modeId == "plan"
               case _                      => false
@@ -1424,16 +1551,20 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       test("resume before ready loads instead of opening a new session") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
-        chat(transport = wrap) { (rt, posted) =>
+        chat(
+          transport = wrap,
+          onTranscript = _ => ChatRuntimeSpec.diskSnap("hello from disk", "welcome back"),
+        ) { (rt, posted) =>
           for
             _    <- rt.resumeSession("sess_disk")
             _    <- rt.ready
             msgs <- posted.get
             blob = lines.mkString
           yield assertTrue(
-            blob.contains("session/load"),
+            blob.contains("session/resume"),
             blob.contains("sess_disk"),
             !blob.contains("\"method\":\"session/new\""),
+            !blob.contains("session/load"),
             msgs.exists {
               case HostMsg.Transcript(turns) => turns.nonEmpty
               case _                         => false
@@ -1451,6 +1582,127 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- rt.ready
             blob = lines.mkString
           yield assertTrue(!blob.contains("initialize"), !blob.contains("session/new"))
+        }
+      },
+      test("resume of an empty disk session posts an empty transcript") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_empty")
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.adopt(ChatModel.empty, "sess_empty", "Empty"))(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Transcript(_) => true
+              case _                     => false
+            },
+            !ChatModel.isLoading(model),
+            ChatModel.isEmptySession(model) || model.inSession,
+            model.turns.isEmpty,
+          )
+        }
+      },
+      test("session/new leaves an empty session, not loading") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Transcript(Nil) => true
+              case _                       => false
+            },
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.sessionId.nonEmpty && !m.loading
+              case _                      => false
+            },
+            model.inSession,
+            !ChatModel.isLoading(model),
+            ChatModel.isEmptySession(model),
+          )
+        }
+      },
+      test("newSession after a prompt is an empty session, not loading") {
+        chat() { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.send("hello")
+            _    <- posted.set(Nil)
+            _    <- rt.newSession
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.beginNew(ChatModel.empty, "Grok's Beard"))(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Transcript(Nil) => true
+              case _                       => false
+            },
+            msgs.exists {
+              case m: HostMsg.SessionMeta => m.sessionId.nonEmpty && !m.loading
+              case _                      => false
+            },
+            !ChatModel.isLoading(model),
+            ChatModel.isEmptySession(model),
+            model.turns.isEmpty,
+          )
+        }
+      },
+      test("newSession after Share Grok join does not session/close the TUI session") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+          onTranscript = id =>
+            if id == "disk-live" then ChatRuntimeSpec.diskSnap("hello from disk", "welcome back")
+            else SessionSnapshot(),
+        ) { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- ZIO.succeed(lines.clear())
+            _ <- posted.set(Nil)
+            _ <- rt.newSession
+            blob = lines.mkString
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.beginNew(ChatModel.empty, "Grok's Beard"))(ChatModel.applyMsg)
+          yield assertTrue(
+            blob.contains("session/new"),
+            !blob.contains("session/close"),
+            !ChatModel.isLoading(model),
+            ChatModel.isEmptySession(model),
+          )
+        }
+      },
+      test("newSession unblocks the empty session before session/new returns") {
+        ChatRuntimeSpec.delayedNew().flatMap { case (transport, heldNew) =>
+          chat(
+            transport = transport,
+            listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+            onTranscript = id =>
+              if id == "disk-live" then ChatRuntimeSpec.diskSnap("hello from disk", "welcome back")
+              else SessionSnapshot(),
+          ) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.newSession
+              msgs <- posted.get
+              model = msgs.foldLeft(ChatModel.beginNew(ChatModel.empty, "Grok's Beard"))(ChatModel.applyMsg)
+            yield assertTrue(
+              heldNew.get.nonEmpty,
+              msgs.exists {
+                case HostMsg.Transcript(Nil) => true
+                case _                       => false
+              },
+              msgs.exists {
+                case m: HostMsg.SessionMeta => !m.loading
+                case _                      => false
+              },
+              !ChatModel.isLoading(model),
+              ChatModel.isEmptySession(model),
+            )
+          }
         }
       },
       test("ready posts a sessionList after session/new") {
@@ -1489,6 +1741,114 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               after.isEmpty,
               users == List("hello from live"),
               lastId.contains("sess_live"),
+            )
+          }
+        }
+      },
+      test("newSession drops a cancelled session/resume lock") {
+        ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _ <- rt.ready
+              _ <- posted.set(Nil)
+              _ <- rt.resumeSession("sess_disk")
+              _ <- rt.newSession
+              afterNew <- posted.get.map(msgs =>
+                msgs.reverse.collectFirst {
+                  case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
+                }
+              )
+              _    <- posted.set(Nil)
+              _    <- rt.ingestData(held.diskFail)
+              msgs <- posted.get
+            yield assertTrue(
+              afterNew.exists(_.nonEmpty),
+              !msgs.exists {
+                case _: HostMsg.SessionLocked => true
+                case _                        => false
+              },
+            )
+          }
+        }
+      },
+      test("newSession drops a cancelled session/resume attach") {
+        ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _ <- rt.ready
+              _ <- posted.set(Nil)
+              _ <- rt.resumeSession("sess_disk")
+              _ <- rt.newSession
+              afterNew <- posted.get.map(msgs =>
+                msgs.reverse.collectFirst {
+                  case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
+                }
+              )
+              _    <- posted.set(Nil)
+              _    <- rt.ingestData(held.disk)
+              msgs <- posted.get
+              stolen = msgs.collect {
+                case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
+              }
+            yield assertTrue(
+              afterNew.exists(_.nonEmpty),
+              stolen.forall(_ == afterNew.get),
+              !msgs.exists {
+                case _: HostMsg.SessionLocked => true
+                case _                        => false
+              },
+            )
+          }
+        }
+      },
+      test("switching resume drops a cancelled session/resume lock") {
+        ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.resumeSession("sess_disk")
+              _    <- rt.resumeSession("sess_live")
+              _    <- posted.set(Nil)
+              _    <- rt.ingestData(held.diskFail)
+              msgs <- posted.get
+            yield assertTrue(
+              !msgs.exists {
+                case _: HostMsg.SessionLocked => true
+                case _                        => false
+              },
+              msgs.reverse
+                .collectFirst {
+                  case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
+                }
+                .forall(_ == "sess_live"),
+            )
+          }
+        }
+      },
+      test("switching resume drops a cancelled session/resume attach") {
+        ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
+          chat(transport = transport) { (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- rt.resumeSession("sess_disk")
+              _    <- rt.resumeSession("sess_live")
+              _    <- posted.set(Nil)
+              _    <- rt.ingestData(held.disk)
+              stale <- posted.get
+              _     <- posted.set(Nil)
+              _     <- rt.ingestData(held.live)
+              live  <- posted.get
+              last = (stale ++ live).reverse.collectFirst {
+                case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
+              }
+            yield assertTrue(
+              !stale.exists {
+                case _: HostMsg.SessionLocked => true
+                case _                        => false
+              },
+              last.contains("sess_live"),
             )
           }
         }
@@ -1543,7 +1903,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         }
       },
       test("resumeSession replays disk history into the transcript") {
-        chat() { (rt, posted) =>
+        chat(transport = AcpTransport.fake(FakeAgent(omitResume = true))) { (rt, posted) =>
           for
             _    <- rt.ready
             _    <- posted.set(Nil)
@@ -1624,7 +1984,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         }
       },
       test("locked session/load posts SessionLocked and leaves the current session") {
-        chat(transport = AcpTransport.fake(FakeAgent(lockLoad = true))) { (rt, posted) =>
+        chat(transport = AcpTransport.fake(FakeAgent(lockLoad = true, omitResume = true))) { (rt, posted) =>
           for
             _    <- rt.ready
             _    <- posted.set(Nil)
@@ -1744,10 +2104,14 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         chat(
           transport = wrap,
           listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+          onTranscript = id =>
+            if id == "disk-live" then ChatRuntimeSpec.diskSnap("hello from disk", "welcome back")
+            else SessionSnapshot(),
         ) { (rt, posted) =>
           rt.ready *> posted.get.map { msgs =>
             assertTrue(
-              lines.exists(_.contains("session/load")),
+              lines.exists(_.contains("session/resume")),
+              !lines.exists(_.contains("session/load")),
               !lines.exists(_.contains("session/new")),
               msgs.exists {
                 case HostMsg.Transcript(turns) => turns.exists(_.user.exists(_.text == "hello from disk"))
@@ -2273,7 +2637,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       },
       test("cancel after loading a live turn writes session/cancel") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
-        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(liveLoad = true)), lines += _)
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(liveLoad = true, omitResume = true)), lines += _)
         chat(transport = wrap) { (rt, posted) =>
           for
             _    <- rt.ready
@@ -2292,7 +2656,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         }
       },
       test("generic session/load error is not the TUI lock copy") {
-        chat(transport = AcpTransport.fake(FakeAgent(failLoad = true))) { (rt, posted) =>
+        chat(transport = AcpTransport.fake(FakeAgent(failLoad = true, omitResume = true))) { (rt, posted) =>
           for
             _    <- rt.ready
             _    <- posted.set(Nil)
@@ -2328,7 +2692,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
-      test("resumeSession of another id still writes session/load") {
+      test("resumeSession of another id writes session/resume when advertised") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
         chat(transport = wrap) { (rt, _) =>
@@ -2337,9 +2701,160 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- ZIO.succeed(lines.clear())
             _ <- rt.resumeSession("sess_disk")
           yield assertTrue(
-            lines.exists(_.contains("session/load")),
-            !lines.exists(_.contains("session/resume")),
+            lines.exists(_.contains("session/resume")),
+            !lines.exists(_.contains("session/load")),
           )
+        }
+      },
+      test("resumeSession paints disk history then writes session/resume") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        val snap  = ChatRuntimeSpec.diskSnap("from cache", "cached agent")
+        chat(transport = wrap, onTranscript = id => if id == "sess_disk" then snap else SessionSnapshot()) {
+          (rt, posted) =>
+            for
+              _    <- rt.ready
+              _    <- posted.set(Nil)
+              _    <- ZIO.succeed(lines.clear())
+              _    <- rt.resumeSession("sess_disk")
+              msgs <- posted.get
+              turns = msgs.collect { case HostMsg.Transcript(ts) => ts }.flatten
+            yield assertTrue(
+              lines.exists(_.contains("session/resume")),
+              !lines.exists(_.contains("session/load")),
+              turns.exists(t => t.user.exists(_.text == "from cache") && t.agent.contains("cached agent")),
+              !msgs.exists {
+                case _: HostMsg.UserMessage => true
+                case _: HostMsg.AgentChunk  => true
+                case _                      => false
+              },
+            )
+        }
+      },
+      test("disk snapshot survives an attach timeout") {
+        val wrap = AcpTransport.fake(FakeAgent(hangResume = true))
+        val snap = ChatRuntimeSpec.diskSnap("kept", "still here")
+        chat(transport = wrap, onTranscript = _ => snap) { (rt, posted) =>
+          for
+            _     <- rt.ready
+            _     <- rt.resumeSession("sess_disk")
+            early <- posted.get
+            _     <- posted.set(Nil)
+            _     <- TestClock.adjust(ChatRuntime.LoadBudget + 1.second)
+            msgs  <- posted.get
+          yield assertTrue(
+            early.exists {
+              case HostMsg.Transcript(turns) => turns.exists(_.user.exists(_.text == "kept"))
+              case _                         => false
+            },
+            !msgs.exists {
+              case HostMsg.Error(ChatRuntime.LoadTimeout, _) => true
+              case _                                         => false
+            },
+            !msgs.exists {
+              case _: HostMsg.Transcript => true
+              case _                     => false
+            },
+          )
+        }
+      },
+      test("task_completed is applied while session/resume is still attaching") {
+        val wrap = AcpTransport.fake(FakeAgent(hangResume = true))
+        val snap = ChatRuntimeSpec.diskSnap("kept", "still here").copy(
+          tasks = List(TaskRow("t1", TaskKind.Command, TaskStatus.Running, "sbt preview", "sbt --no-server ~uiJS/ascentPreview"))
+        )
+        val done = Ndjson.encode(
+          Rpc.toLine(
+            Rpc.notifyOf(
+              "_x.ai/session/update",
+              Json.Obj(
+                "sessionId" -> Json.Str("sess_disk"),
+                "update"    -> Json.Obj(
+                  "sessionUpdate" -> Json.Str("task_completed"),
+                  "task_id"       -> Json.Str("t1"),
+                  "task_snapshot" -> Json.Obj(
+                    "task_id" -> Json.Str("t1"),
+                    "command" -> Json.Str("sbt --no-server ~uiJS/ascentPreview"),
+                  ),
+                ),
+              ),
+            )
+          )
+        )
+        chat(transport = wrap, onTranscript = _ => snap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.resumeSession("sess_disk")
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(done)
+            msgs <- posted.get
+          yield assertTrue(msgs.exists {
+            case HostMsg.Tasks(rows) => rows.exists(r => r.id.value == "t1" && r.status == TaskStatus.Completed)
+            case _                   => false
+          })
+        }
+      },
+      test("send while attaching queues until session/resume returns") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(hangResume = true)), lines += _)
+        chat(transport = wrap, onTranscript = _ => ChatRuntimeSpec.diskSnap("old", "reply")) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.resumeSession("sess_disk")
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
+            _    <- rt.send("later")
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Queued(items) => items.exists(_.text == "later")
+              case _                     => false
+            },
+            !lines.exists(_.contains("session/prompt")),
+            !msgs.exists {
+              case HostMsg.UserMessage(_, "later", _, _) => true
+              case _                                     => false
+            },
+          )
+        }
+      },
+      test("disk snapshot ignores a session/load replay when resume is not advertised") {
+        val wrap = AcpTransport.fake(FakeAgent(omitResume = true))
+        val snap = ChatRuntimeSpec.diskSnap("from cache", "cached agent")
+        chat(transport = wrap, onTranscript = _ => snap) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.resumeSession("sess_disk")
+            msgs <- posted.get
+            turns = msgs.collect { case HostMsg.Transcript(ts) => ts }.flatten
+          yield assertTrue(
+            turns.exists(_.user.exists(_.text == "from cache")),
+            !turns.exists(_.user.exists(_.text == "hello from disk")),
+          )
+        }
+      },
+      test("ready with Share Grok paints disk then session/resume") {
+        val lines = scala.collection.mutable.ListBuffer.empty[String]
+        val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+          onTranscript = id =>
+            if id == "disk-live" then ChatRuntimeSpec.diskSnap("hello from disk", "welcome back")
+            else SessionSnapshot(),
+        ) { (rt, posted) =>
+          rt.ready *> posted.get.map { msgs =>
+            assertTrue(
+              lines.exists(_.contains("session/resume")),
+              !lines.exists(_.contains("session/load")),
+              !lines.exists(_.contains("session/new")),
+              msgs.exists {
+                case HostMsg.Transcript(turns) => turns.exists(_.user.exists(_.text == "hello from disk"))
+                case _                         => false
+              },
+            )
+          }
         }
       },
       test("resumeSession with history falls back when resume is not advertised") {
@@ -2438,13 +2953,14 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
     )
 
   final class HeldLoad(var disk: String = "", var live: String = "")
+  final class HeldResume(var disk: String = "", var live: String = "", var diskFail: String = "", var liveFail: String = "")
   final class HeldNew(var get: String = "")
 
   def delayedLoad(): UIO[(AcpTransport, HeldLoad)] =
     ZIO.succeed {
       val held                        = HeldLoad()
       var ingest: String => UIO[Unit] = _ => ZIO.unit
-      val agent                       = FakeAgent()
+      val agent                       = FakeAgent(omitResume = true)
       val transport                   = new AcpTransport:
         def attach(next: String => UIO[Unit]): UIO[Unit] = ZIO.succeed { ingest = next }
         def write(data: String): BeardError.Result[Unit] =
@@ -2459,6 +2975,37 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                       ChatRuntimeSpec.loadReplay(id, sid, "hello from disk", "welcome back")
                     else ChatRuntimeSpec.loadReplay(id, sid, "hello from live", "live agent")
                   if sid == SessionId("sess_disk") then held.disk = ndjson else held.live = ndjson
+                }
+              case Right(msg) => ingest(agent.encodeReplies(msg))
+              case Left(_)    => ZIO.unit
+          }
+        end write
+        def close: UIO[Unit] = ZIO.unit
+      (transport, held)
+    }
+
+  def delayedResume(): UIO[(AcpTransport, HeldResume)] =
+    ZIO.succeed {
+      val held                        = HeldResume()
+      var ingest: String => UIO[Unit] = _ => ZIO.unit
+      val agent                       = FakeAgent()
+      val transport                   = new AcpTransport:
+        def attach(next: String => UIO[Unit]): UIO[Unit] = ZIO.succeed { ingest = next }
+        def write(data: String): BeardError.Result[Unit] =
+          val (lines, _) = Ndjson.split("", data)
+          ZIO.foreachDiscard(lines) { line =>
+            Rpc.parse(line) match
+              case Right(msg @ Rpc.Request(id, "session/resume", params)) =>
+                ZIO.succeed {
+                  val sid  = params.as[SessionResumeParams].toOption.map(_.sessionId).getOrElse(SessionId.empty)
+                  val ok   = agent.encodeReplies(msg)
+                  val fail = Ndjson.encode(Rpc.toLine(Rpc.fail(id, Rpc.MethodNotFound, "session locked")))
+                  if sid == SessionId("sess_disk") then
+                    held.disk = ok
+                    held.diskFail = fail
+                  else
+                    held.live = ok
+                    held.liveFail = fail
                 }
               case Right(msg) => ingest(agent.encodeReplies(msg))
               case Left(_)    => ZIO.unit
@@ -2504,6 +3051,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       writeWorkspacePlan: String => String = _ => SessionIndex.workspacePlanPath("."),
       onReadConfig: () => String = () => "",
       onWriteConfig: String => Unit = _ => (),
+      onTranscript: SessionId => SessionSnapshot = _ => SessionSnapshot(),
       beforeInitialize: UIO[Unit] = ZIO.unit,
       settings: () => SettingsState = () => SettingsState.defaults,
   )(body: (ChatRuntime, Ref[List[HostMsg]]) => UIO[TestResult]): UIO[TestResult] =
@@ -2529,6 +3077,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               writeWorkspacePlan = writeWorkspacePlan,
               onReadConfig = onReadConfig,
               onWriteConfig = onWriteConfig,
+              onTranscript = onTranscript,
             )
           )
         result <- body(rt, posted)
@@ -2546,6 +3095,19 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         ),
         Rpc.toLine(Rpc.ok(id, SessionLoadResult(sessionId).asJson)),
       )
+    )
+
+  def diskSnap(user: String, agent: String, todos: List[TodoEntry] = Nil): SessionSnapshot =
+    SessionSnapshot(
+      turns = List(
+        TurnView(
+          TurnId("turn_1"),
+          user = Some(TurnUser(user)),
+          agent = agent,
+          stopReason = Some(StopReason.EndTurn),
+        )
+      ),
+      todos = todos,
     )
 
   def snapshotUsers(posted: List[HostMsg]): List[String] =

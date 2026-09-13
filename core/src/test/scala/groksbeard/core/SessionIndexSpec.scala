@@ -131,13 +131,20 @@ object SessionIndexSpec extends ZIOSpecDefault:
         val got = SessionSummary.decode(json)
         assertTrue(got.exists(s => SessionSummary.title(s) == "Hello" && s.info.id == "id1"))
       },
-      test("EmptySessionTracker deletes only unused sessions this process created") {
-        val t = EmptySessionTracker()
-        t.markCreated("a")
-        t.markCreated("b")
-        t.markHasHistory("b")
-        assertTrue(t.shouldDelete("a"), !t.shouldDelete("b"), !t.shouldDelete("tui-made"))
-      },
+      test("EmptySessions deletes only unused sessions this process created") {
+        for
+          t     <- ZIO.service[EmptySessions]
+          _     <- t.markCreated("a")
+          _     <- t.markCreated("b")
+          _     <- t.markHasHistory("b")
+          oursA <- t.createdByUs("a")
+          oursB <- t.createdByUs("b")
+          oursT <- t.createdByUs("tui-made")
+          delA  <- t.shouldDelete("a")
+          delB  <- t.shouldDelete("b")
+          delT  <- t.shouldDelete("tui-made")
+        yield assertTrue(oursA, oursB, !oursT, delA, !delB, !delT)
+      }.provide(EmptySessions.layer),
       test("SessionLoad classifies lock copy from the error text") {
         assertTrue(
           SessionLoad.classify("session locked") == SessionLoadKind.Locked,

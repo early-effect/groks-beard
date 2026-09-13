@@ -1196,6 +1196,10 @@ object ChatApp:
     waiting.set(Some(id))
     ChatModel.adopt(c, id, title)
 
+  private def beginNewView(c: ChatModel, waiting: AtomicReference[Option[SessionId]]): ChatModel =
+    waiting.set(Some(SessionId.empty))
+    ChatModel.beginNew(c, "Grok's Beard")
+
   private def commit(
       hist: History,
       lastHref: Ref[String],
@@ -1402,7 +1406,7 @@ object ChatApp:
                     ZIO.succeed(bridge.post(WebviewMsg.ResumeSession(id)))
                 case None =>
                   leaving.set(None) *>
-                    chat.update(adoptView(_, SessionId.empty, waiting)) *>
+                    chat.update(beginNewView(_, waiting)) *>
                     ZIO.succeed(bridge.post(WebviewMsg.NewSession))
             )
         }
@@ -1485,10 +1489,7 @@ object ChatApp:
               case Some(cmd) if SessionCommands.isCopy(cmd.name) || SessionCommands.isExport(cmd.name) =>
                 runCopyExport(cmd)
               case Some(cmd) if SessionCommands.isNew(cmd.name) =>
-                draft.set("") *>
-                  leaving.set(None) *>
-                  chat.update(adoptView(_, SessionId.empty, waiting)) *>
-                  commit(hist, lastHref, BeardPath.Welcome, WebviewMsg.NewSession, bridge)
+                draft.set("") *> startNew
               case Some(cmd) if SessionCommands.isResume(cmd.name) || SessionCommands.isHome(cmd.name) =>
                 draft.set("") *> openPicker
               case Some(cmd) if SessionCommands.isModel(cmd.name) && cmd.args.isEmpty =>
@@ -2012,7 +2013,7 @@ object ChatApp:
         leaving.set(None) *>
           historyBrowse.set(None) *>
           historyPickIdx.set(None) *>
-          chat.update(adoptView(_, SessionId.empty, waiting)) *>
+          chat.update(beginNewView(_, waiting)) *>
           commit(hist, lastHref, BeardPath.Welcome, WebviewMsg.NewSession, bridge)
 
       def openSession(id: SessionId): UIO[Unit] =
@@ -2457,11 +2458,11 @@ object ChatApp:
                     chat.update(_.copy(chips = Nil, images = Nil, error = Some(DraftStash.SavedToast)))
                 else lastIdleEsc.set(Some(now)) *> chat.update(_.copy(error = Some(CancelTurn.ClearHint)))
               }
-            else idleRewindEsc(c, text)
+            else idleRewindEsc(c)
           }
         }
 
-      def idleRewindEsc(c: ChatModel, text: String): UIO[Unit] =
+      def idleRewindEsc(c: ChatModel): UIO[Unit] =
         if Rewind.fromTurns(c.turns).isEmpty then lastIdleEsc.set(None)
         else
           wallMs.flatMap { now =>
@@ -3142,7 +3143,7 @@ object ChatApp:
         onSessionPaneKey,
         onQueueKey,
       ),
-      renderComposerBar(bridge, chat, sendDraft, openContext, requestCancel),
+      renderComposerBar(chat, sendDraft, openContext, requestCancel),
     )
 
   private def renderActivityStrip(
@@ -3246,7 +3247,6 @@ object ChatApp:
     )
 
   private def renderComposerBar(
-      bridge: HostBridge,
       chat: ascent.Source[ChatModel],
       sendDraft: UIO[Unit],
       openContext: UIO[Unit],
@@ -3556,7 +3556,7 @@ object ChatApp:
       outputs: Squawk[Map[ToolCallId, String]],
       selected: Squawk[Boolean],
       onSelect: UIO[Unit],
-      attach: String => UIO[Unit] = _ => ZIO.unit,
+      attach: String => UIO[Unit],
   ): ascent.ast.UI[Any] =
     val parts = turn.map(ChatMarkdown.parts)
     val tail  = parts.map(_._2)

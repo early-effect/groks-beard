@@ -27,6 +27,36 @@ object NodeSessionFs extends SessionFs:
       if nodeFs.existsSync(path) then Some(nodeFs.readFileSync(path, "utf8")) else None
     }.orSystem
 
+  override def foldLines[S](path: String, z: S)(f: (S, String) => S): BeardError.Result[S] =
+    ZIO.async { cb =>
+      if !nodeFs.existsSync(path) then cb(ZIO.succeed(z))
+      else
+        try
+          val stream = nodeFs.createReadStream(path, ReadStreamOptions(encoding = "utf8"))
+          val rl     = nodeReadline.createInterface(ReadlineOptions(input = stream))
+          var acc    = z
+          var done   = false
+          def finish(io: BeardError.Result[S]): Unit =
+            if !done then
+              done = true
+              try rl.close()
+              catch case _: Throwable => ()
+              try stream.destroy()
+              catch case _: Throwable => ()
+              cb(io)
+          rl.on(
+            "line",
+            line =>
+              if !done then acc = f(acc, line.asInstanceOf[String]),
+          )
+          rl.on("close", _ => finish(ZIO.succeed(acc)))
+          stream.on(
+            "error",
+            err => finish(ZIO.fail(BeardError.system(new RuntimeException(String.valueOf(err))))),
+          )
+        catch case t: Throwable => cb(ZIO.fail(BeardError.system(t)))
+    }
+
   override def writeText(path: String, text: String): BeardError.Result[Unit] =
     ZIO.attempt {
       nodeFs.mkdirSync(nodePath.dirname(path), MkdirSyncOptions(recursive = true))

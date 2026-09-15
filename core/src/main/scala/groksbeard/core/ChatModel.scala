@@ -176,6 +176,10 @@ object ChatModel:
   def isHome(model: ChatModel): Boolean =
     !model.inSession && !isLoading(model) && model.turns.isEmpty
 
+  def nextTurnId(model: ChatModel): TurnId =
+    val n = model.turns.iterator.flatMap(t => TurnId.seq(t.id)).maxOption.getOrElse(model.turns.size) + 1
+    TurnId.mint(n)
+
   def isEmptySession(model: ChatModel): Boolean =
     model.inSession && !isLoading(model) && model.turns.isEmpty
 
@@ -251,7 +255,7 @@ object ChatModel:
               _: HostMsg.ClearCard | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
               _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView | _: HostMsg.Agents |
               _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw | _: HostMsg.DoctorReport |
-              _: HostMsg.UiPrefs =>
+              _: HostMsg.UiPrefs | _: HostMsg.Queued =>
             false
           case HostMsg.Transcript(turns) =>
             want.isEmpty && turns.nonEmpty
@@ -288,10 +292,12 @@ object ChatModel:
       case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort, cwd, loading) =>
         if loading && isEmptySession(model) then model
         else
-          val sid    = if sessionId.nonEmpty then sessionId else model.sessionId
-          val joined = sessionId.nonEmpty && !model.inSession && model.turns.isEmpty
-          val await  =
-            if loading && sid.nonEmpty then Some(sid)
+          val sid     = if sessionId.nonEmpty then sessionId else model.sessionId
+          val joined  = sessionId.nonEmpty && !model.inSession && model.turns.isEmpty
+          val same    = sessionId.isEmpty || model.sessionId.isEmpty || sessionId == model.sessionId
+          val painted = model.turns.nonEmpty && same
+          val await   =
+            if loading && sid.nonEmpty then if painted then None else Some(sid)
             else if joined then None
             else model.awaitingSession
           model.copy(
@@ -351,8 +357,12 @@ object ChatModel:
       case HostMsg.ComposerChip(path, absPath, source, startLine, endLine) =>
         model.copy(chips = PromptChip.upsert(model.chips, PromptChip(path, absPath, source, startLine, endLine)))
       case HostMsg.UserMessage(turnId, text, chips, steer) =>
+        val taken = model.turns.find(_.id == turnId).exists { t =>
+          t.stopReason.nonEmpty || t.agent.nonEmpty || t.tools.nonEmpty
+        }
+        val id = if taken then ChatModel.nextTurnId(model) else turnId
         markRunning(
-          upsert(model.copy(chips = Nil, inSession = true), turnId)(
+          upsert(model.copy(chips = Nil, inSession = true), id)(
             _.copy(user = Some(TurnUser(text, chips, steer)), stopReason = None)
           ),
           nowMs,

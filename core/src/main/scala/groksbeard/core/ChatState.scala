@@ -132,6 +132,17 @@ final case class ChatState(
       loadModel = if hasTurns then ChatModel.empty else loadModel,
     )
 
+  /** After a disk/ACP snapshot, new prompts must not reuse `turn_1`. */
+  def adoptTurns(turns: List[TurnView]): ChatState =
+    val last = turns.lastOption
+    val seq  = turns.iterator.flatMap(t => TurnId.seq(t.id)).maxOption.getOrElse(turns.size)
+    copy(
+      turnSeq = seq,
+      currentTurn = last.map(_.id).filter(_.nonEmpty).getOrElse(TurnId.mint(seq)),
+      userOpen = false,
+      running = last.exists(_.stopReason.isEmpty),
+    )
+
   def startAttach(useLoad: Boolean): ChatState =
     copy(phase = SessionPhase.startAttach(phase, useLoad), restoreCodeNext = false)
 

@@ -350,6 +350,30 @@ object ChatModelSpec extends ZIOSpecDefault:
           next.awaitingSession.isEmpty,
         )
       },
+      test("user message on an ended snapshot turn opens a new turn at the tail") {
+        val snap = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.Transcript(
+            List(
+              TurnView(
+                "turn_1",
+                user = Some(TurnUser("from disk")),
+                agent = "welcome back",
+                stopReason = Some(StopReason.EndTurn),
+              )
+            )
+          ),
+        )
+        val sent = ChatModel.applyMsg(snap, HostMsg.UserMessage("turn_1", "hello"))
+        assertTrue(
+          snap.turns.size == 1,
+          sent.turns.size == 2,
+          sent.turns.head.user.exists(_.text == "from disk"),
+          sent.turns.head.agent == "welcome back",
+          sent.turns.last.user.exists(_.text == "hello"),
+          sent.turns.last.id == TurnId("turn_2"),
+        )
+      },
       test("a live chunk reopens an ended turn") {
         val ended = ChatModel.applyMsg(
           ChatModel.applyMsg(ChatModel.empty, HostMsg.UserMessage("t1", "go")),
@@ -545,6 +569,37 @@ object ChatModelSpec extends ZIOSpecDefault:
           ChatModel.catchesUp(Some(SessionId("b")), HostMsg.Transcript(Nil)),
         )
       },
+      test("loading sessionMeta after a painted transcript does not drop the next turn") {
+        val painted = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.Transcript(
+            List(
+              TurnView(
+                "t1",
+                user = Some(TurnUser("hello from disk")),
+                stopReason = Some(StopReason.EndTurn),
+              )
+            )
+          ),
+        )
+        val named   = ChatModel.applyMsg(painted, HostMsg.SessionMeta("s1", "TUI", "normal", loading = true))
+        val loading = ChatModel.applyMsg(named, HostMsg.SessionMeta("s1", "TUI", "normal", loading = true))
+        val queued  = ChatModel.applyMsg(
+          loading,
+          HostMsg.Queued(List(QueuedPrompt(QueueId("q1"), "follow up"))),
+        )
+        val sent = ChatModel.applyMsg(loading, HostMsg.UserMessage("t2", "follow up"))
+        val live = ChatModel.applyMsg(sent, HostMsg.AgentChunk("t2", "ok"))
+        assertTrue(
+          named.sessionId == "s1",
+          loading.awaitingSession.isEmpty,
+          !ChatModel.isLoading(loading),
+          queued.queue.exists(_.text == "follow up"),
+          sent.turns.exists(_.user.exists(_.text == "follow up")),
+          live.turns.lastOption.exists(_.agent.contains("ok")),
+        )
+      },
+
       test("adopt of a session id leaves home before any host message") {
         val home = ChatModel.empty.copy(sessions = List(SessionRow("b", "B")))
         val next = ChatModel.adopt(home, "b", "B")

@@ -766,8 +766,11 @@ final class ChatRuntime private (
       if !s.pendingResume.contains(id) then ZIO.unit
       else
         val painted = snap.turns.nonEmpty
-        val next    = s.onDisk(painted).copy(tasks = if snap.tasks.nonEmpty then snap.tasks else s.tasks)
-        val show    =
+        val next    =
+          s.onDisk(painted)
+            .copy(tasks = if snap.tasks.nonEmpty then snap.tasks else s.tasks)
+            .adoptTurns(if painted then snap.turns else Nil)
+        val show =
           put(next) *>
             (if !painted then ZIO.unit
              else
@@ -1551,7 +1554,7 @@ final class ChatRuntime private (
               s"session/load ok ${withId.sessionId.map(_.value).getOrElse("-")} turns=${snapTurns.size} live=$live"
             ) *>
               noteHistory(withId) *>
-              put(withId.copy(running = live, userOpen = false)) *>
+              put(withId.adoptTurns(snapTurns).copy(running = live, userOpen = false)) *>
               clear *>
               post(HostMsg.Transcript(snapTurns)) *>
               postLoadedTodos(sid, todos) *>
@@ -1702,13 +1705,16 @@ final class ChatRuntime private (
   private def timeoutAttach(id: SessionId): UIO[Unit] =
     snap.flatMap { s =>
       val waiting = s.attachWaiting(id)
-      if !waiting || s.diskPainted then
-        if waiting && s.diskPainted then ZIO.log(s"session attach still in flight ${id.value}")
-        else ZIO.unit
+      if !waiting then ZIO.unit
+      else if s.diskPainted then
+        ZIO.log(s"session attach timeout ${id.value} disk-painted") *>
+          put(s.finishAttach.copy(running = false, userOpen = false)) *>
+          postMeta *>
+          (if s.pendingQueue.nonEmpty then drainQueue else ZIO.unit)
       else
         val turns = ChatModel.snapshotTurns(s.loadModel.turns)
         ZIO.log(s"session/load timeout ${id.value} turns=${turns.size}") *>
-          put(s.failAttach) *>
+          put(s.failAttach.adoptTurns(turns)) *>
           post(HostMsg.Error(ChatRuntime.LoadTimeout)) *>
           post(HostMsg.Transcript(turns))
       end if
@@ -1805,9 +1811,10 @@ final class ChatRuntime private (
             val snapTurns   = ChatModel.snapshotTurns(popped.loadModel.turns)
             val replayEmpty = popped.loading && !popped.diskPainted
             val applied     = applyLoadResult(popped.finishAttach, result)
+            val stamped     = if replayEmpty then applied.adoptTurns(snapTurns) else applied
             val show        =
               if replayEmpty then post(HostMsg.Transcript(snapTurns)) else ZIO.unit
-            put(applied) *> show *> postMeta *> post(HostMsg.settings(applied.settingsState)) *>
+            put(stamped) *> show *> postMeta *> post(HostMsg.settings(stamped.settingsState)) *>
               doPostList(open = false) *>
               (if applied.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
               sendForkPrompt

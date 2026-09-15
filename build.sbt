@@ -14,7 +14,7 @@ lazy val beardVersion =
 lazy val stampVsixVersion =
   taskKey[File]("Write beardVersion into package.json")
 
-ThisBuild / beardVersion := "0.2.1"
+ThisBuild / beardVersion := "0.2.2"
 ThisBuild / scalaVersion := (MyVersions.scala: String)
 
 organization         := "rocks.earlyeffect"
@@ -221,10 +221,10 @@ lazy val ui = (projectMatrix in file("ui"))
   )
 
 lazy val stageExtension =
-  taskKey[File]("Copy host fastLinkJS, mcp-proxy, and ui spliceFull into dist")
+  taskKey[File]("Copy host/mcp fastLinkJS and ui spliceFull into dist")
 
 lazy val packageVsix =
-  taskKey[File]("Stage the extension and pack groks-beard.vsix with vsce")
+  taskKey[File]("fullLinkJS host and mcp, spliceFull ui, then pack groks-beard.vsix")
 
 lazy val host = (project in file("host"))
   .disablePlugins(chekhov.sbt.ChekhovPlugin)
@@ -245,21 +245,23 @@ lazy val host = (project in file("host"))
     stageExtension := Def.uncached {
       val dest = (ThisBuild / baseDirectory).value / "dist"
       BeardPack.stampPackageJson((ThisBuild / baseDirectory).value, (ThisBuild / beardVersion).value)
-      val webview = dest / "webview"
-      IO.createDirectory(webview)
       val hostOut = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
       val _       = (Compile / fastLinkJS).value
-      IO.copyFile(hostOut / "main.js", dest / "extension.js")
-      val chat = (LocalProject("uiJS") / spliceFull).value
-      IO.copyFile(chat, webview / "chat.js")
-      val mcpOut = (LocalProject("mcp") / Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
-      val _mcp   = (LocalProject("mcp") / Compile / fastLinkJS).value
-      IO.copyFile(mcpOut / "main.js", dest / "mcp-proxy.js")
-      dest
+      val chat    = (LocalProject("uiJS") / spliceFull).value
+      val mcpOut  = (LocalProject("mcp") / Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+      val _mcp    = (LocalProject("mcp") / Compile / fastLinkJS).value
+      BeardPack.stageDist(dest, hostOut / "main.js", chat, mcpOut / "main.js")
     },
     packageVsix := Def.uncached {
-      val dest = stageExtension.value
+      val dest = (ThisBuild / baseDirectory).value / "dist"
       val base = (ThisBuild / baseDirectory).value
+      BeardPack.stampPackageJson(base, (ThisBuild / beardVersion).value)
+      val hostOut = (Compile / fullLinkJS / scalaJSLinkerOutputDirectory).value
+      val _       = (Compile / fullLinkJS).value
+      val chat    = (LocalProject("uiJS") / spliceFull).value
+      val mcpOut  = (LocalProject("mcp") / Compile / fullLinkJS / scalaJSLinkerOutputDirectory).value
+      val _mcp    = (LocalProject("mcp") / Compile / fullLinkJS).value
+      BeardPack.stageDist(dest, hostOut / "main.js", chat, mcpOut / "main.js")
       val vsix = base / "groks-beard.vsix"
       import scala.sys.process.*
       val code = Process(
@@ -267,7 +269,6 @@ lazy val host = (project in file("host"))
         base,
       ).!
       if code != 0 then sys.error(s"vsce package failed with $code")
-      val _ = dest
       vsix
     },
   )

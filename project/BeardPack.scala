@@ -21,3 +21,11 @@ object BeardPack:
          |""".stripMargin,
     )
     file
+
+  def stageDist(dest: File, hostJs: File, chatJs: File, mcpJs: File): File =
+    val webview = dest / "webview"
+    IO.createDirectory(webview)
+    IO.copyFile(hostJs, dest / "extension.js")
+    IO.copyFile(chatJs, webview / "chat.js")
+    IO.copyFile(mcpJs, dest / "mcp-proxy.js")
+    dest

@@ -2533,7 +2533,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 qs.headOption.exists(q => q.allowMultiple && q.allowFreeText)
               case _ => false
             },
-            blob.contains("\"answers\""),
+            blob.contains("\"outcome\""),
+            blob.contains("accepted"),
             blob.contains("dense"),
             blob.contains("notes"),
           )
@@ -2563,7 +2564,53 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- rt.ingestData(ask)
             _ <- rt.questionDismiss("q-2")
             blob = written.mkString
-          yield assertTrue(blob.contains("q-2"), blob.contains("\"answers\""), blob.contains("[]"))
+          yield assertTrue(blob.contains("q-2"), blob.contains("cancelled"))
+        }
+      },
+      test("ask_user_question decodes Grok question/label/multiSelect params") {
+        chat() { (rt, posted) =>
+          val live = Json.Obj(
+            "sessionId"  -> Json.Str("sess_test"),
+            "toolCallId" -> Json.Str("call_q"),
+            "mode"       -> Json.Str("default"),
+            "questions"  -> Json.Arr(
+              Json.Obj(
+                "question" -> Json.Str("Which color?"),
+                "options"  -> Json.Arr(
+                  Json.Obj("label" -> Json.Str("Red"), "description" -> Json.Str("warm")),
+                  Json.Obj("label" -> Json.Str("Blue")),
+                ),
+              ),
+              Json.Obj(
+                "question"    -> Json.Str("Which snacks?"),
+                "multiSelect" -> Json.Bool(true),
+                "options"     -> Json.Arr(
+                  Json.Obj("label" -> Json.Str("Chips")),
+                  Json.Obj("label" -> Json.Str("Fruit")),
+                ),
+              ),
+            ),
+          )
+          val ask = Ndjson.encode(
+            Rpc.toLine(Rpc.request(RpcId.Str("q-live"), "_x.ai/ask_user_question", live))
+          )
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- rt.ingestData(ask)
+            msgs <- posted.get
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.Question("q-live", qs) =>
+                qs.size == 2 &&
+                qs.headOption.exists(q =>
+                  q.prompt == "Which color?" && q.options.map(_.label) == List("Red", "Blue")
+                ) &&
+                qs.lift(1).exists(q => q.allowMultiple && q.options.map(_.id).contains("Chips"))
+              case _ => false
+            }
+          )
+          end for
         }
       },
       test("setModel falls back to session/set_model when configOptions are empty") {

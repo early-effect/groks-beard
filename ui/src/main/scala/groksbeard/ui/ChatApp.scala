@@ -1019,6 +1019,8 @@ object ChatApp:
         cursor.pointer,
         textAlign.left,
         fontSize.px(13),
+        width.pct(100),
+        boxSizing.borderBox,
       )
 
   object Toast
@@ -3946,14 +3948,15 @@ object ChatApp:
         ZIO.succeed(bridge.post(WebviewMsg.QuestionDismiss(card.requestId))),
       Seq(
         E.p(SessionMetaLine, TestId("question-pos"), pos),
-        E.p(q.map(_.map(_.prompt).getOrElse(""))),
+        E.h3(q.map(_.map(_.prompt).getOrElse(""))),
         forEach(opts)(t => s"${t._1}-${t._2.id}-${t._4}") { t =>
           val (qid, opt, idx, on) = t
           E.button(
-            if on then Send else MenuItem,
+            if on then Send else CardBtn,
             TestId(s"question-$qid-${opt.id}"),
+            A.title(if opt.description.nonEmpty then opt.description else opt.label),
             Ev.onClick(_ => onQuestionPick(card, opt.id)),
-            s"${idx + 1} ${opt.label}",
+            QuestionDraft.optionCaption(idx, opt),
           )
         },
         when(q.map(_.exists(_.allowFreeText)))(

@@ -220,6 +220,15 @@ final case class PermissionRequestParams(
 
 final case class AskUserQuestionParams(questions: List[AgentQuestion] = Nil) derives JsonCodec
 
+object AskUserQuestionParams:
+  def questionsOf(params: Json): List[AgentQuestion] =
+    params match
+      case obj: Json.Obj =>
+        val wired = JsonObj.arr(obj, "questions").flatMap(AgentQuestion.fromAcp)
+        if wired.nonEmpty then wired
+        else params.as[AskUserQuestionParams].toOption.toList.flatMap(_.questions)
+      case _ => params.as[AskUserQuestionParams].toOption.toList.flatMap(_.questions)
+
 final case class RawEditInput(
     path: Option[String] = None,
     old_string: Option[String] = None,

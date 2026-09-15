@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.json.ast.Json
 import zio.test.*
 
 object QuestionDraftSpec extends ZIOSpecDefault:
@@ -73,6 +74,44 @@ object QuestionDraftSpec extends ZIOSpecDefault:
           QuestionDraft.optionKey("9", big).contains("o9"),
           QuestionDraft.optionKey("a", big).contains("o10"),
           QuestionDraft.optionKey("f", big).contains("o15"),
+        )
+      },
+      test("fromAcp reads Grok's question/label/multiSelect wire") {
+        val raw = Json.Obj(
+          "question"    -> Json.Str("Which color?"),
+          "multiSelect" -> Json.Bool(false),
+          "options"     -> Json.Arr(
+            Json.Obj("label" -> Json.Str("Red"), "description" -> Json.Str("warm")),
+            Json.Obj("label" -> Json.Str("Blue")),
+          ),
+        )
+        val q = AgentQuestion.fromAcp(raw)
+        assertTrue(
+          q.exists(_.prompt == "Which color?"),
+          q.exists(_.id == "Which color?"),
+          q.exists(_.options.map(_.label) == List("Red", "Blue")),
+          q.exists(_.options.headOption.exists(_.description == "warm")),
+          q.exists(!_.allowMultiple),
+          q.exists(_.allowFreeText),
+        )
+      },
+      test("optionCaption skips a description that repeats the label") {
+        assertTrue(
+          QuestionDraft.optionCaption(0, QuestionOption("Red", "Red", "Red")) == "1 Red",
+          QuestionDraft.optionCaption(1, QuestionOption("Blue", "Blue", "cool")) == "2 Blue  cool",
+        )
+      },
+      test("acceptedJson keys answers by question id and tags outcome") {
+        val json = QuestionDraft.acceptedJson(
+          List(QuestionAnswer("Which color?", List("Red"), None), QuestionAnswer("note", Nil, Some("hi")))
+        )
+        val blob = json.toString
+        assertTrue(
+          blob.contains("accepted"),
+          blob.contains("Which color?"),
+          blob.contains("Red"),
+          blob.contains("Other"),
+          blob.contains("hi"),
         )
       },
     )

@@ -39,19 +39,39 @@ class SpawnOptions(
     val stdio: js.UndefOr[js.Array[String]] = js.undefined,
 ) extends js.Object
 
+class ReadStreamOptions(val encoding: String = "utf8") extends js.Object
+
+class ReadlineOptions(val input: NodeReadStream) extends js.Object
+
+@js.native
+trait NodeReadStream extends js.Object:
+  def on(event: String, listener: js.Function1[js.Any, Any]): NodeReadStream = js.native
+  def destroy(): Unit                                                        = js.native
+
+@js.native
+trait ReadlineHandle extends js.Object:
+  def on(event: String, listener: js.Function1[js.Any, Any]): ReadlineHandle = js.native
+  def close(): Unit                                                          = js.native
+
 @js.native
 @JSImport("fs", JSImport.Namespace)
 object nodeFs extends js.Object:
-  def mkdirSync(path: String, options: MkdirSyncOptions): Unit     = js.native
-  def unlinkSync(path: String): Unit                               = js.native
-  def chmodSync(path: String, mode: Int): Unit                     = js.native
-  def existsSync(path: String): Boolean                            = js.native
-  def readFileSync(path: String, enc: String): String              = js.native
-  def writeFileSync(path: String, data: String, enc: String): Unit = js.native
-  def readdirSync(path: String): js.Array[String]                  = js.native
-  def statSync(path: String): NodeFsStats                          = js.native
-  def rmSync(path: String, options: RmSyncOptions): Unit           = js.native
+  def mkdirSync(path: String, options: MkdirSyncOptions): Unit                   = js.native
+  def unlinkSync(path: String): Unit                                             = js.native
+  def chmodSync(path: String, mode: Int): Unit                                   = js.native
+  def existsSync(path: String): Boolean                                          = js.native
+  def readFileSync(path: String, enc: String): String                            = js.native
+  def writeFileSync(path: String, data: String, enc: String): Unit               = js.native
+  def readdirSync(path: String): js.Array[String]                                = js.native
+  def statSync(path: String): NodeFsStats                                        = js.native
+  def rmSync(path: String, options: RmSyncOptions): Unit                         = js.native
+  def createReadStream(path: String, options: ReadStreamOptions): NodeReadStream = js.native
 end nodeFs
+
+@js.native
+@JSImport("readline", JSImport.Namespace)
+object nodeReadline extends js.Object:
+  def createInterface(options: ReadlineOptions): ReadlineHandle = js.native
 
 @js.native
 trait NodeFsStats extends js.Object:

@@ -28,15 +28,31 @@ final class ChatRuntime private (
     beforeInitialize: UIO[Unit],
     bag: Ref[ChatState],
     prefs: UiPrefs,
+    pendingWork: Ref[Chunk[UIO[Unit]]],
+    empty: EmptySessions,
+    frame: Ref[FrameState],
 ):
-  private val framed = Framed(SessionState())
-  private val store  = ChangeStore()
-  private val empty  = EmptySessionTracker()
+  private val store = ChangeStore()
 
   private def exclusive[A](body: UIO[A]): UIO[A] =
     reentrant.get.flatMap { held =>
       if held then body
-      else gate.withPermit(reentrant.locally(true)(body))
+      else
+        gate.withPermit(reentrant.locally(true)(body)).flatMap { a =>
+          drainLater.as(a)
+        }
+    }
+
+  private def later(io: UIO[Unit]): UIO[Unit] =
+    reentrant.get.flatMap {
+      case true  => pendingWork.update(_ :+ io)
+      case false => io
+    }
+
+  private def drainLater: UIO[Unit] =
+    pendingWork.getAndSet(Chunk.empty).flatMap { jobs =>
+      ZIO.foreachDiscard(jobs)(identity) *>
+        pendingWork.get.flatMap(more => if more.isEmpty then ZIO.unit else drainLater)
     }
 
   private def snap: UIO[ChatState]                       = bag.get
@@ -54,7 +70,10 @@ final class ChatRuntime private (
       c => post(c.host),
     )
 
-  def state: SessionState = framed.state
+  def planActive: UIO[Boolean]               = frame.get.map(_.planActive)
+  def framedMode: UIO[Option[ModeId]]        = frame.get.map(_.modeId)
+  def commitFrameMode(id: ModeId): UIO[Unit] =
+    frame.update(_.commitMode(id))
 
   def close: UIO[Unit] = transport.close
 
@@ -71,19 +90,25 @@ final class ChatRuntime private (
   def ready: UIO[Unit] =
     exclusive {
       snap.flatMap { s =>
-        val startInit = !s.initializeSent
+        val first = !s.initializeSent
         put(s.copy(live = true, initializeSent = true)) *>
           post(HostMsg.Ready) *>
           prefs.hydrate.flatMap(c => post(c.host)) *>
-          (if store.list.nonEmpty then emitChanges else ZIO.unit).as(startInit)
+          (if store.list.nonEmpty then emitChanges else ZIO.unit) *>
+          (if first then ZIO.log("ready: initialize") else ZIO.log("ready: replay chrome") *> replayChrome)
+            .as(first)
       }
-    }.flatMap { startInit =>
-      if !startInit then ZIO.unit
+    }.flatMap { first =>
+      if !first then ZIO.unit
       else
         beforeInitialize.forkIn(scope) *> exclusive {
           rpc(
             AcpMethod.Initialize,
-            InitializeParams(1, capabilities, ClientInfo("groks-beard", ChatRuntime.ProductTitle, "0.2.0")).asJson,
+            InitializeParams(
+              1,
+              capabilities,
+              ClientInfo("groks-beard", ChatRuntime.ProductTitle, ProductVersion.current),
+            ).asJson,
           )
         }
     }
@@ -140,10 +165,13 @@ final class ChatRuntime private (
         .planMarkdown(id)
         .foldZIO(
           e => post(HostMsg.Error(e.message)),
-          md => post(HostMsg.PlanView(if md.trim.isEmpty then "No plan written yet" else md)),
+          md =>
+            persistWorkspacePlan(md) *> post(HostMsg.PlanView(if md.trim.isEmpty then WorkspacePlan.Missing else md)),
         )
     }
   }
+
+  def openPlan: UIO[Unit] = exclusive(doOpenPlan)
 
   def openAgents: UIO[Unit] = exclusive {
     sessions.agents
@@ -242,27 +270,33 @@ final class ChatRuntime private (
       Json.Obj(
         "outcome" -> Json.Obj("outcome" -> Json.Str("selected"), "optionId" -> Json.Str(optionId))
       ),
-    )
+    ) *> finishCard(CardSlot.Permission)
+  }
+
+  def permissionPark(requestId: RequestId): UIO[Unit] = exclusive {
+    val _ = requestId
+    post(HostMsg.ClearCard(CardSlot.Permission))
   }
 
   def planVerdict(requestId: RequestId, verdict: PlanOutcome): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("outcome" -> Json.Str(PlanOutcome.wire(verdict))))
+    respond(requestId, Json.Obj("outcome" -> Json.Str(PlanOutcome.wire(verdict)))) *>
+      finishCard(CardSlot.Plan)
   }
 
   def questionSubmit(requestId: RequestId, answers: List[QuestionAnswer]): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> answers.asJson))
+    respond(requestId, Json.Obj("answers" -> answers.asJson)) *> finishCard(CardSlot.Question)
   }
 
   def questionDismiss(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> Json.Arr()))
+    respond(requestId, Json.Obj("answers" -> Json.Arr())) *> finishCard(CardSlot.Question)
   }
 
   def elicitAccept(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("action" -> Json.Str("accept")))
+    respond(requestId, Json.Obj("action" -> Json.Str("accept"))) *> finishCard(CardSlot.Elicit)
   }
 
   def elicitDecline(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("action" -> Json.Str("decline")))
+    respond(requestId, Json.Obj("action" -> Json.Str("decline"))) *> finishCard(CardSlot.Elicit)
   }
 
   def setMode(id: ModeId): UIO[Unit] = exclusive(doSetMode(id))
@@ -293,7 +327,11 @@ final class ChatRuntime private (
 
   def openFile(path: String, line: Option[Int]): UIO[Unit] = exclusive {
     val trimmed = path.trim
-    if trimmed.isEmpty then ZIO.unit else review.follow(trimmed, line)
+    if trimmed.isEmpty then ZIO.unit
+    else
+      val rewritten = WorkspacePlan.rewrite(trimmed, cwd)
+      if rewritten == WorkspacePlan.path(cwd) then review.openText(rewritten)
+      else review.follow(rewritten, line)
   }
 
   def openChanges: UIO[Unit] = exclusive(openChangesUnlocked)
@@ -345,6 +383,7 @@ final class ChatRuntime private (
     else if SessionCommands.isLoop(name) then post(HostMsg.Error(Tasks.LoopUsage))
     else if SessionCommands.isFork(name) then doFork(ForkArgs(None, None))
     else if SessionCommands.isViewPlan(name) then viewPlan
+    else if SessionCommands.isOpenPlan(name) then doOpenPlan
     else if SessionCommands.isConfigAgents(name) || SessionCommands.isPersonas(name) then openAgents
     else if SessionCommands.isDashboard(name) then doDashboard
     else if SessionCommands.isDoctor(name) then doDoctor
@@ -398,7 +437,7 @@ final class ChatRuntime private (
       }
     }
 
-  private def doSend(text: String, images: List[ImageChip] = Nil): UIO[Unit] =
+  private def doSend(text: String, images: List[ImageChip]): UIO[Unit] =
     snap.flatMap { s =>
       val trimmed = text.trim
       SessionCommands.intercept(trimmed) match
@@ -445,6 +484,8 @@ final class ChatRuntime private (
             case Right(args) => doFork(args)
         case Some(cmd) if SessionCommands.isViewPlan(cmd.name) =>
           viewPlan
+        case Some(cmd) if SessionCommands.isOpenPlan(cmd.name) =>
+          doOpenPlan
         case Some(cmd) if SessionCommands.isBtw(cmd.name) =>
           doBtw(cmd.args)
         case Some(cmd) if SessionCommands.isConfigAgents(cmd.name) || SessionCommands.isPersonas(cmd.name) =>
@@ -477,7 +518,7 @@ final class ChatRuntime private (
           val chosen = PromptChip.chipsForSend(s.chips, activeFile(), s.settingsState.includeActiveFileByDefault)
           val pics   = if images.nonEmpty then images else s.pendingImages
           if trimmed.isEmpty && chosen.isEmpty && pics.isEmpty then ZIO.unit
-          else if s.running || !s.initialized then enqueue(trimmed, chosen, pics)
+          else if s.running || !s.initialized || s.pendingResume.nonEmpty then enqueue(trimmed, chosen, pics)
           else put(s.copy(chips = Nil, pendingImages = Nil)) *> runTurn(trimmed, chosen, pics)
       end match
     }
@@ -554,7 +595,7 @@ final class ChatRuntime private (
     snap.flatMap { s =>
       rpc(AcpMethod.SessionSetMode, SessionSetModeParams(s.sid(fallbackSessionId), id).asJson) *>
         edit(_.copy(modeId = id)) *>
-        ZIO.succeed(framed.state.commitMode(id)) *>
+        commitFrameMode(id) *>
         postMeta
     }
 
@@ -677,37 +718,80 @@ final class ChatRuntime private (
     snap.flatMap { s =>
       val prev = s.sessionId.filter(_.nonEmpty)
       edit(st => st.bumpEpoch.cancelPendingResume) *> leaveCurrent *> stopLoops *>
-        edit(_.resetLocal.copy(sessionId = None)) *>
+        edit(_.resetLocal.copy(sessionId = None, phase = SessionPhase.beginNew)) *>
         post(HostMsg.ClearTranscript) *>
-        prev.map(closeSessionRpc).getOrElse(ZIO.unit) *>
+        post(HostMsg.Transcript(Nil)) *>
+        postMeta *>
+        closeOwned(prev) *>
         snap.flatMap(st => rpc(AcpMethod.SessionNew, SessionNewParams(st.sessionCwd).asJson))
     }
+
+  private def closeOwned(prev: Option[SessionId]): UIO[Unit] =
+    prev match
+      case None     => ZIO.unit
+      case Some(id) =>
+        empty.createdByUs(id).flatMap { ours =>
+          if ours then closeSessionRpc(id) else ZIO.unit
+        }
 
   private def doResume(id: SessionId, hasHistory: Boolean): UIO[Unit] =
     snap.flatMap { s =>
       if id.isEmpty then doPostList(open = true)
-      else if s.pendingResume.contains(id) && !s.initialized then ZIO.unit
-      else if s.restoreCodeNext then loadResume(id, s)
+      else if s.pendingResume.contains(id) then ZIO.unit
+      else if s.restoreCodeNext then loadResume(id)
       else if ChatRuntime.canAttach(s, id, hasHistory) then attachResume(id, s.sessionCwd)
       else if s.sessionId.contains(id) && s.pendingResume.isEmpty && !s.loading then doPostList(open = false)
-      else loadResume(id, s)
+      else loadResume(id)
     }
 
   private def attachResume(id: SessionId, cwd: String): UIO[Unit] =
-    doPostList(open = false) *> rpc(AcpMethod.SessionResume, SessionResumeParams(id, cwd).asJson)
+    doPostList(open = false) *>
+      rpc(AcpMethod.SessionResume, SessionResumeParams(id, cwd).asJson, loadSessionId = Some(id)) *>
+      watchAttach(id)
 
-  private def loadResume(id: SessionId, s: ChatState): UIO[Unit] =
-    val meta =
-      if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
-    val initialized = s.initialized
-    val cwd         = s.sessionCwd
+  private def loadResume(id: SessionId): UIO[Unit] =
     edit(st => st.bumpEpoch.cancelPendingResume) *> leaveCurrent *> stopLoops *>
       edit(_.beginResume(id)) *>
       post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *>
-      (if initialized then
-         rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id))
-       else ZIO.unit)
-  end loadResume
+      later(paintThenAttach(id))
+
+  private def paintThenAttach(id: SessionId): UIO[Unit] =
+    sessions
+      .transcript(id)
+      .catchAll(e => post(HostMsg.Error(e.message)).as(SessionSnapshot()))
+      .flatMap(snap => exclusive(applyDiskThenAttach(id, snap)))
+
+  private def applyDiskThenAttach(id: SessionId, snap: SessionSnapshot): UIO[Unit] =
+    this.snap.flatMap { s =>
+      if !s.pendingResume.contains(id) then ZIO.unit
+      else
+        val painted = snap.turns.nonEmpty
+        val next    = s.onDisk(painted).copy(tasks = if snap.tasks.nonEmpty then snap.tasks else s.tasks)
+        val show    =
+          put(next) *>
+            (if !painted then ZIO.unit
+             else
+               post(HostMsg.Transcript(snap.turns)) *>
+                 postLoadedTodos(id, snap.todos) *>
+                 (if snap.tasks.isEmpty then ZIO.unit else post(HostMsg.Tasks(snap.tasks))))
+        show *> this.snap.flatMap { now =>
+          if now.initialized && now.pendingResume.contains(id) && !now.attaching then attachPending(id)
+          else if !now.initialized then ZIO.log(s"resume ${id.value} waits for initialize")
+          else ZIO.unit
+        }
+    }
+
+  private def attachPending(id: SessionId): UIO[Unit] =
+    snap.flatMap { s =>
+      if !s.pendingResume.contains(id) || s.attaching then ZIO.unit
+      else
+        val meta    = if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
+        val useLoad =
+          s.restoreCodeNext || !AgentCapabilities.offersSession(s.agentCaps, "resume")
+        put(s.startAttach(useLoad)) *>
+          (if useLoad then requestLoad(id, s.sessionCwd, meta)
+           else attachResume(id, s.sessionCwd))
+    }
 
   private def openChangesUnlocked: UIO[Unit] =
     val files = store.pending
@@ -753,8 +837,8 @@ final class ChatRuntime private (
             AgentCapabilities.embedded(next.agentCaps),
           )
       val prompt = if blocks.nonEmpty then blocks else List(PromptBlock.Text(text))
-      next.sessionId.foreach(empty.markHasHistory)
-      put(next) *>
+      noteHistory(next) *>
+        put(next) *>
         post(HostMsg.UserMessage(next.currentTurn, text, chosen)) *>
         rpc(AcpMethod.SessionPrompt, SessionPromptParams(sid, prompt).asJson)
     }
@@ -764,23 +848,25 @@ final class ChatRuntime private (
       s.sessionId match
         case None     => ZIO.unit
         case Some(id) =>
-          val del = if empty.shouldDelete(id) then sessions.scheduleEmptyDelete(id) else ZIO.unit
-          empty.forget(id)
-          del
+          empty.shouldDelete(id).flatMap { drop =>
+            val del = if drop then sessions.scheduleEmptyDelete(id) else ZIO.unit
+            empty.forget(id) *> del
+          }
     }
 
   private def doPostList(open: Boolean): UIO[Unit] =
     snap.flatMap { s =>
-      val sid  = s.sessionId.getOrElse(SessionId.empty)
-      val skip = empty.shouldDelete(sid)
-      sessions.list
-        .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
-        .zip(Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
-        .flatMap { (rows, now) =>
-          val listed = SessionIndex.touchCurrent(rows, sid, now, skip)
-          edit(_.copy(listOpen = open, listed = listed)) *>
-            post(HostMsg.SessionList(listed, sid, openPicker = open))
-        }
+      val sid = s.sessionId.getOrElse(SessionId.empty)
+      empty.shouldDelete(sid).flatMap { skip =>
+        sessions.list
+          .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
+          .zip(Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+          .flatMap { (rows, now) =>
+            val listed = SessionIndex.touchCurrent(rows, sid, now, skip)
+            edit(_.copy(listOpen = open, listed = listed)) *>
+              post(HostMsg.SessionList(listed, sid, openPicker = open))
+          }
+      }
     }
 
   private def respond(requestId: RequestId, result: Json): UIO[Unit] =
@@ -802,15 +888,16 @@ final class ChatRuntime private (
     params.as[TerminalCreateParams] match
       case Left(err) => reject(requestId, s"invalid terminal/create params: $err")
       case Right(p)  =>
-        if framed.state.planActive && !PlanTerminals.allowed(p.command, p.args) then
-          reject(requestId, PlanTerminals.Reject)
-        else
-          terminals
-            .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
-            .foldZIO(
-              e => reject(requestId, e.message),
-              id => bindTerminal(requestId, id, p),
-            )
+        frame.get.flatMap { fr =>
+          if fr.planActive && !PlanTerminals.allowed(p.command, p.args) then reject(requestId, PlanTerminals.Reject)
+          else
+            terminals
+              .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
+              .foldZIO(
+                e => reject(requestId, e.message),
+                id => bindTerminal(requestId, id, p),
+              )
+        }
 
   private def bindTerminal(requestId: RequestId, id: TerminalId, p: TerminalCreateParams): UIO[Unit] =
     snap.flatMap { s =>
@@ -1041,18 +1128,24 @@ final class ChatRuntime private (
 
   private def writeRpc(id: RpcId, method: AcpMethod, params: Json): UIO[Unit] =
     val req = Rpc.Request(id, method.value, params)
-    framed.recordOutgoing(req)
-    absorb(transport.write(Ndjson.encode(Rpc.toLine(req))))
+    frame.update(FrameState.recordOutgoing(_, req)) *>
+      absorb(transport.write(Ndjson.encode(Rpc.toLine(req))))
 
   private def ingestChunk(chunk: String): UIO[Unit] =
     snap.flatMap { s =>
       val epoch = s.inboundEpoch
-      val msgs  = framed.feed(chunk)
-      ZIO.foreachDiscard(msgs) { msg =>
-        snap.flatMap { now =>
-          if now.inboundEpoch == epoch then ingestOne(msg) else ZIO.unit
+      frame
+        .modify { st =>
+          val (next, msgs) = FrameState.feed(st, chunk)
+          (msgs, next)
         }
-      }
+        .flatMap { msgs =>
+          ZIO.foreachDiscard(msgs) { msg =>
+            snap.flatMap { now =>
+              if now.inboundEpoch == epoch then ingestOne(msg) else ZIO.unit
+            }
+          }
+        }
     }
 
   private def ingestOne(msg: Rpc): UIO[Unit] =
@@ -1067,9 +1160,12 @@ final class ChatRuntime private (
               (updateSid.exists(sid => s.sessionId.exists(_ != sid)) && !child)
           if stale then ZIO.unit
           else if child then ingestChild(updateSid.get, p)
-          else if s.loading then ingestLoading(p) *> ingestUpdate(p)
+          else if s.ignoreReplay then ZIO.unit
+          else if s.loading then ingestLoading(p)
           else ingestLive(p) *> ingestUpdate(p)
         }
+      case Rpc.Notify(method, p) if SharedCards.isCancelRequest(method) =>
+        dismissCancelled(p)
       case Rpc.Request(rid, rawMethod, params) =>
         val reqId = requestKey(rid)
         edit(_.recordInbound(reqId, rid)) *> {
@@ -1080,13 +1176,17 @@ final class ChatRuntime private (
             case Some(AcpMethod.ExitPlanMode) =>
               val md =
                 jsonStr(params, "planContent").orElse(jsonStr(params, "planMarkdown")).getOrElse("")
-              post(HostMsg.plan(PlanCard(reqId, md)))
+              edit(_.copy(lastPlan = Option(md).filter(_.trim.nonEmpty)).openCard(CardSlot.Plan, reqId)) *>
+                persistWorkspacePlan(md) *>
+                post(HostMsg.plan(PlanCard(reqId, md)))
             case Some(AcpMethod.AskUserQuestion) =>
               val questions =
                 params.as[AskUserQuestionParams].toOption.map(_.questions).getOrElse(Nil)
-              post(HostMsg.question(QuestionCard(reqId, questions)))
+              edit(_.openCard(CardSlot.Question, reqId)) *>
+                post(HostMsg.question(QuestionCard(reqId, questions)))
             case Some(AcpMethod.ElicitCreate) | Some(AcpMethod.Elicit) =>
-              post(HostMsg.elicit(elicitCard(params, reqId)))
+              edit(_.openCard(CardSlot.Elicit, reqId)) *>
+                post(HostMsg.elicit(elicitCard(params, reqId)))
             case Some(AcpMethod.TerminalCreate) =>
               handleTerminalCreate(reqId, params)
             case Some(AcpMethod.TerminalOutput) =>
@@ -1112,12 +1212,11 @@ final class ChatRuntime private (
   private def ingestLoading(p: Json): UIO[Unit] =
     val bump = SessionState.decodeUpdate(p) match
       case Some(_: AcpUpdate.User) => edit(_.noteUserWhileLoading)
-      case Some(
-            _: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate |
-            _: AcpUpdate.TurnCompleted
-          ) =>
-        edit(_.closeUserPrompt.copy(loadCleared = true))
-      case _ => edit(s => if s.loadCleared then s else s.copy(loadCleared = true))
+      case Some(_: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate) =>
+        edit(_.closeUserPrompt.copy(running = true))
+      case Some(_: AcpUpdate.TurnCompleted) =>
+        edit(_.closeUserPrompt.copy(running = false))
+      case _ => ZIO.unit
     bump *> foldTasks(p, loading = true) *> snap.flatMap { s =>
       val msgs = SessionUpdate.hostMsgs(p, s.currentTurn)
       edit { st =>
@@ -1140,11 +1239,22 @@ final class ChatRuntime private (
 
   private def ingestLive(p: Json): UIO[Unit] =
     val cfg = SessionState.decodeUpdate(p) match
-      case Some(AcpUpdate.ConfigOptions(opts)) => edit(_.withConfig(opts))
-      case Some(_: AcpUpdate.User)             =>
+      case Some(AcpUpdate.ConfigOptions(opts)) =>
+        snap.flatMap { before =>
+          edit(_.withConfig(opts)) *> snap.flatMap { after =>
+            if after.models != before.models || after.modelId != before.modelId || after.effort != before.effort
+            then postMeta
+            else ZIO.unit
+          }
+        }
+      case Some(_: AcpUpdate.User) =>
         edit(_.noteUserPrompt)
       case Some(_: AcpUpdate.Thought | _: AcpUpdate.Agent | _: AcpUpdate.ToolCall | _: AcpUpdate.ToolCallUpdate) =>
         edit(_.copy(running = true, userOpen = false))
+      case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
+        val mode = modeId.orElse(currentModeId).getOrElse(ModeId.empty)
+        if mode.isEmpty then ZIO.unit
+        else edit(_.copy(modeId = mode)) *> commitFrameMode(mode)
       case Some(_: AcpUpdate.TurnCompleted) =>
         edit(_.copy(running = false, userOpen = false))
       case _ => ZIO.unit
@@ -1174,17 +1284,65 @@ final class ChatRuntime private (
             case HostMsg.ToolCall(_, row)        => edit(_.noteLiveTool(row))
             case _                               => ZIO.unit
           stamp *> post(out)
-        }
+        } *> dismissShared(p)
       }
     }
   end ingestLive
+
+  private def finishCard(slot: CardSlot): UIO[Unit] =
+    edit(s => s.copy(openCards = s.openCards - slot)) *> post(HostMsg.ClearCard(slot))
+
+  private def dismissCard(slot: CardSlot): UIO[Unit] =
+    bag
+      .modify { s =>
+        if !s.openCards.contains(slot) then (false, s)
+        else (true, s.closeCard(slot))
+      }
+      .flatMap {
+        case false => ZIO.unit
+        case true  => post(HostMsg.ClearCard(slot))
+      }
+
+  private def dismissShared(p: Json): UIO[Unit] =
+    SessionState.decodeUpdate(p) match
+      case Some(call: AcpUpdate.ToolCall) =>
+        dismissPermissionFor(call.toolCallId, call.status)
+      case Some(call: AcpUpdate.ToolCallUpdate) =>
+        dismissPermissionFor(call.toolCallId, call.status)
+      case Some(AcpUpdate.CurrentMode(modeId, currentModeId)) =>
+        val mode = modeId.orElse(currentModeId).getOrElse(ModeId.empty)
+        if SharedCards.leavesPlan(mode) then dismissCard(CardSlot.Plan) else ZIO.unit
+      case Some(_: AcpUpdate.Agent | _: AcpUpdate.User | _: AcpUpdate.TurnCompleted) =>
+        dismissCard(CardSlot.Question) *> dismissCard(CardSlot.Elicit)
+      case _ => ZIO.unit
+
+  private def dismissPermissionFor(toolCallId: ToolCallId, status: ToolStatus): UIO[Unit] =
+    snap.flatMap { s =>
+      if SharedCards.resolvedPermission(s.pendingPerm, toolCallId, status).isEmpty then ZIO.unit
+      else dismissCard(CardSlot.Permission)
+    }
+
+  private def dismissCancelled(params: Json): UIO[Unit] =
+    SharedCards.cancelRpcId(params) match
+      case None      => ZIO.unit
+      case Some(rpc) =>
+        snap.flatMap { s =>
+          s.inbound.find(_._2 == rpc).map(_._1) match
+            case None        => ZIO.unit
+            case Some(reqId) =>
+              val slot = s.openCards.find(_._2 == reqId).map(_._1)
+              edit { st =>
+                val closed = slot.fold(st)(st.closeCard)
+                closed.dropInbound(reqId)
+              } *> slot.map(sl => post(HostMsg.ClearCard(sl))).getOrElse(ZIO.unit)
+        }
 
   private def ingestResponse(id: RpcId, result: Option[Json], error: Option[RpcError]): UIO[Unit] =
     bag.modify(_.popMethod(id)).flatMap { method =>
       val quiet =
         method.exists(m =>
           m == AcpMethod.SessionLoad || m == AcpMethod.SessionResume || m == AcpMethod.RewindPoints ||
-            m == AcpMethod.SessionFork
+            m == AcpMethod.SessionFork || m == AcpMethod.Interject
         )
       val errPost =
         if quiet then ZIO.unit
@@ -1207,7 +1365,7 @@ final class ChatRuntime private (
         case Some(AcpMethod.SessionLoad) =>
           ingestLoad(id, result, error)
         case Some(AcpMethod.SessionResume) =>
-          ingestResume(result, error)
+          ingestResume(id, result, error)
         case Some(AcpMethod.RewindPoints) =>
           if error.isDefined then ZIO.unit
           else post(HostMsg.RewindList(Rewind.decodePoints(result.getOrElse(Json.Null))))
@@ -1224,43 +1382,74 @@ final class ChatRuntime private (
             .flatMap { quiet =>
               if quiet then ZIO.unit else ingestPromptDone(result)
             }
+        case Some(AcpMethod.Interject) =>
+          ingestInterject(result, error)
         case _ => ZIO.unit)
     }
 
   private def ingestInitialize(result: Option[Json]): UIO[Unit] =
-    snap.flatMap { s =>
-      val caps = result.flatMap(_.as[InitializeResult].toOption).map(_.agentCapabilities).getOrElse(s.agentCaps)
-      val next = s.copy(
-        initialized = true,
-        canWorktree = result.exists(Fork.offersWorktree),
-        agentCaps = caps,
-        restoreCodeNext = false,
-      )
-      val meta =
-        if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
-      put(next) *> (next.pendingResume match
-        case Some(id) =>
-          rpc(
-            AcpMethod.SessionLoad,
-            SessionLoadParams(id, next.sessionCwd, _meta = meta).asJson,
-            loadSessionId = Some(id),
+    snap.flatMap: s =>
+      val caps   = result.flatMap(_.as[InitializeResult].toOption).map(_.agentCapabilities).getOrElse(s.agentCaps)
+      val seeded = result.flatMap(SessionModelState.ofInitialize)
+      val next   = seeded match
+        case Some(st) =>
+          val catalog = if st.availableModels.nonEmpty then st.availableModels else s.models
+          val id      = if st.currentModelId.nonEmpty then st.currentModelId else s.modelId
+          val effort  =
+            val active = Effort.activeOf(catalog.find(_.modelId == id))
+            if active.nonEmpty then active else s.effort
+          s.copy(
+            initialized = true,
+            canWorktree = result.exists(Fork.offersWorktree),
+            agentCaps = caps,
+            restoreCodeNext = false,
+            modelId = id,
+            models = catalog,
+            effort = effort,
           )
         case None =>
-          if !next.settingsState.shareBackend then rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+          s.copy(
+            initialized = true,
+            canWorktree = result.exists(Fork.offersWorktree),
+            agentCaps = caps,
+            restoreCodeNext = false,
+          )
+      val meta = if s.restoreCodeNext then Some(Json.Obj("restoreCode" -> Json.Bool(true))) else None
+      ZIO.log(
+        s"initialize models=${next.models.size} model=${next.modelId.value} share=${next.settingsState.shareBackend}"
+      ) *> put(next) *> startAfterInitialize(next, meta)
+
+  private def startAfterInitialize(next: ChatState, meta: Option[Json]): UIO[Unit] =
+    val _         = meta
+    val inSession = next.sessionId.exists(_.nonEmpty)
+    if next.pendingLoad.nonEmpty then ZIO.log("initialize: session/load already in flight") *> postMeta
+    else if inSession && next.pendingResume.isEmpty && !next.loading then
+      ZIO.log("initialize: session already open") *> postMeta *> post(HostMsg.settings(next.settingsState))
+    else
+      next.pendingResume match
+        case Some(id) if next.attaching =>
+          ZIO.log(s"initialize: attach in flight ${id.value}") *> postMeta
+        case Some(id) if next.paintDone =>
+          ZIO.log(s"initialize: attach pending ${id.value}") *> attachPending(id)
+        case Some(id) =>
+          ZIO.log(s"initialize: resume ${id.value} waits for disk") *> postMeta
+        case None =>
+          if !next.settingsState.shareBackend then
+            ZIO.log("session/new") *> rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
           else
-            sessions.list.catchAll(_ => ZIO.succeed(Nil)).flatMap { rows =>
-              SessionIndex.shareJoin(rows) match
-                case None     => rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
-                case Some(id) =>
-                  val loaded = next.beginResume(id)
-                  put(loaded) *> postMeta *>
-                    rpc(
-                      AcpMethod.SessionLoad,
-                      SessionLoadParams(id, loaded.sessionCwd, _meta = meta).asJson,
-                      loadSessionId = Some(id),
-                    )
-            })
-    }
+            sessions.list
+              .catchAll(_ => ZIO.succeed(Nil))
+              .flatMap: rows =>
+                SessionIndex.shareJoin(rows) match
+                  case None =>
+                    ZIO.log("session/new (no live session)") *>
+                      rpc(AcpMethod.SessionNew, SessionNewParams(next.sessionCwd).asJson)
+                  case Some(id) =>
+                    val loaded = next.beginResume(id)
+                    ZIO.log(s"share-join ${id.value}") *>
+                      put(loaded) *> postMeta *> later(paintThenAttach(id))
+    end if
+  end startAfterInitialize
 
   private def ingestSessionNew(result: Option[Json]): UIO[Unit] =
     result match
@@ -1270,20 +1459,23 @@ final class ChatRuntime private (
           case Left(_)        => ZIO.unit
           case Right(decoded) =>
             snap.flatMap { s =>
-              empty.markCreated(decoded.sessionId)
-              val steal =
-                s.pendingResume.nonEmpty || s.sessionId.exists(cur => cur.nonEmpty && cur != decoded.sessionId)
-              if steal then
-                if empty.shouldDelete(decoded.sessionId) then sessions.scheduleEmptyDelete(decoded.sessionId)
-                else ZIO.unit
-              else
-                decoded.modes.foreach(m => framed.state.commitMode(m.currentModeId))
-                val applied = s.withSession(decoded, json)
-                val withId  =
-                  if applied.sessionId.isEmpty then applied.copy(sessionId = Some(fallbackSessionId)) else applied
-                put(withId) *> postMeta *> post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
-                  (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit)
-              end if
+              empty.markCreated(decoded.sessionId) *> {
+                val steal =
+                  s.pendingResume.nonEmpty || s.sessionId.exists(cur => cur.nonEmpty && cur != decoded.sessionId)
+                if steal then
+                  empty.shouldDelete(decoded.sessionId).flatMap { drop =>
+                    if drop then sessions.scheduleEmptyDelete(decoded.sessionId) else ZIO.unit
+                  }
+                else
+                  val applied = s.withSession(decoded, json).readyEmpty
+                  val withId  =
+                    if applied.sessionId.isEmpty then applied.copy(sessionId = Some(fallbackSessionId)) else applied
+                  decoded.modes.map(m => commitFrameMode(m.currentModeId)).getOrElse(ZIO.unit) *>
+                    put(withId) *> postMeta *> post(HostMsg.Transcript(Nil)) *>
+                    post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
+                    (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit)
+                end if
+              }
             }
 
   private def ingestRewind(error: Option[RpcError]): UIO[Unit] =
@@ -1323,47 +1515,50 @@ final class ChatRuntime private (
         loadSid.exists(popped.cancelledLoads.contains) ||
           popped.pendingResume.exists(want => loadSid.exists(_ != want)) ||
           popped.pendingResume.isEmpty
-      if stale then put(popped)
+      if stale then ZIO.log(s"session/load stale sid=${loadSid.map(_.value).getOrElse("-")}") *> put(popped)
       else
-        val wanted = popped.pendingResume
-        val base   = popped.copy(loading = false, pendingResume = None)
+        val wanted  = popped.pendingResume
+        val painted = popped.diskPainted
+        val cleared = popped.loadCleared
         error match
           case Some(err) =>
             val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
             val sid  = wanted.getOrElse(SessionId.empty)
-            put(base.copy(pendingForkPrompt = None)) *>
+            ZIO.log(s"session/load error ${sid.value} $kind ${err.message}") *>
+              put(popped.failAttach.copy(pendingForkPrompt = None)) *>
               post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
               (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
+          case None if painted =>
+            val sid     = wanted.getOrElse(SessionId.empty)
+            val applied = applyLoadResult(popped.finishAttach, result)
+            val withId  = stampLoaded(applied, wanted)
+            ZIO.log(s"session/load ok ${sid.value} disk-painted") *>
+              noteHistory(withId) *>
+              put(withId.copy(running = false, userOpen = false)) *>
+              postMeta *> post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
+              (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
+              sendForkPrompt
           case None =>
-            val clear       = if !base.loadCleared then post(HostMsg.ClearTranscript) else ZIO.unit
-            val snapTurns   = ChatModel.snapshotTurns(base.loadModel.turns)
-            val todos       = base.loadModel.todos
-            val loadedTasks = base.loadModel.tasks
+            val clear       = if !cleared then post(HostMsg.ClearTranscript) else ZIO.unit
+            val snapTurns   = ChatModel.snapshotTurns(popped.loadModel.turns)
+            val live        = snapTurns.lastOption.exists(_.stopReason.isEmpty)
+            val todos       = popped.loadModel.todos
+            val loadedTasks = popped.loadModel.tasks
             val sid         = wanted.getOrElse(SessionId.empty)
-            val withTasks   = base.copy(loadModel = ChatModel.empty, tasks = loadedTasks)
-            val applied     =
-              result match
-                case Some(json) =>
-                  json.as[SessionNewResult] match
-                    case Right(decoded) =>
-                      decoded.modes.foreach(m => framed.state.commitMode(m.currentModeId))
-                      withTasks.withSession(decoded, json)
-                    case Left(_) => withTasks.withConfig(result.map(ConfigOption.of).getOrElse(Nil))
-                case None => withTasks
-            val withId =
-              wanted match
-                case Some(loadId) =>
-                  val sid2 = if applied.sessionId.isEmpty then applied.copy(sessionId = Some(loadId)) else applied
-                  empty.markHasHistory(sid2.sessionId.getOrElse(loadId))
-                  sid2
-                case None => applied
-            put(withId) *>
+            val applied     = applyLoadResult(popped.finishAttach.copy(tasks = loadedTasks), result)
+            val withId      = stampLoaded(applied, wanted)
+            ZIO.log(
+              s"session/load ok ${withId.sessionId.map(_.value).getOrElse("-")} turns=${snapTurns.size} live=$live"
+            ) *>
+              noteHistory(withId) *>
+              put(withId.copy(running = live, userOpen = false)) *>
               clear *>
               post(HostMsg.Transcript(snapTurns)) *>
               postLoadedTodos(sid, todos) *>
               (if loadedTasks.isEmpty then ZIO.unit else post(HostMsg.Tasks(loadedTasks))) *>
               postMeta *> post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
-              (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *> sendForkPrompt
+              (if live then ZIO.unit else if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
+              sendForkPrompt
         end match
       end if
     }
@@ -1378,15 +1573,18 @@ final class ChatRuntime private (
     reconstruct(body.asJson, DiffContent.diskIsBefore(status)).flatMap { diffs =>
       if diffs.isEmpty then ZIO.unit
       else
-        snap.flatMap { s =>
-          store.ingest(
-            s.sid(fallbackSessionId),
-            s.currentTurn,
-            s.currentTitle,
-            diffs.map(DiffContent.fileChangeFrom),
-          )
-          postChanges
-        }
+        ZIO.foreachDiscard(diffs) { d =>
+          if d.path == WorkspacePlan.path(cwd) then persistWorkspacePlan(d.newText) else ZIO.unit
+        } *>
+          snap.flatMap { s =>
+            store.ingest(
+              s.sid(fallbackSessionId),
+              s.currentTurn,
+              s.currentTitle,
+              diffs.map(DiffContent.fileChangeFrom),
+            )
+            postChanges
+          }
     }
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
@@ -1459,7 +1657,10 @@ final class ChatRuntime private (
       .foreach(paths)(p => review.readDisk(p).map(p -> _))
       .map { pairs =>
         val snaps = pairs.toMap
-        DiffContent.reconstruct(toolCall, p => snaps.getOrElse(p, None), diskIsBefore)
+        DiffContent.reconstruct(toolCall, p => snaps.getOrElse(p, None), diskIsBefore).map { d =>
+          val next = WorkspacePlan.rewrite(d.path, cwd)
+          if next == d.path then d else d.copy(path = next)
+        }
       }
       .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
   end reconstruct
@@ -1490,9 +1691,41 @@ final class ChatRuntime private (
           if disk.isEmpty then ZIO.unit else post(HostMsg.Todos(disk))
         }
 
+  private def requestLoad(id: SessionId, cwd: String, meta: Option[Json]): UIO[Unit] =
+    ZIO.log(s"session/load ${id.value}") *>
+      rpc(AcpMethod.SessionLoad, SessionLoadParams(id, cwd, _meta = meta).asJson, loadSessionId = Some(id)) *>
+      watchAttach(id)
+
+  private def watchAttach(id: SessionId): UIO[Unit] =
+    (ZIO.sleep(ChatRuntime.LoadBudget) *> exclusive(timeoutAttach(id))).forkIn(scope).unit
+
+  private def timeoutAttach(id: SessionId): UIO[Unit] =
+    snap.flatMap { s =>
+      val waiting = s.attachWaiting(id)
+      if !waiting || s.diskPainted then
+        if waiting && s.diskPainted then ZIO.log(s"session attach still in flight ${id.value}")
+        else ZIO.unit
+      else
+        val turns = ChatModel.snapshotTurns(s.loadModel.turns)
+        ZIO.log(s"session/load timeout ${id.value} turns=${turns.size}") *>
+          put(s.failAttach) *>
+          post(HostMsg.Error(ChatRuntime.LoadTimeout)) *>
+          post(HostMsg.Transcript(turns))
+      end if
+    }
+
+  private def replayChrome: UIO[Unit] =
+    snap.flatMap { s =>
+      postMeta *>
+        post(HostMsg.settings(s.settingsState)) *>
+        (if s.commands.nonEmpty then post(HostMsg.AvailableCommands(s.commands)) else ZIO.unit) *>
+        doPostList(open = false)
+    }
+
   private def postMeta: UIO[Unit] =
     snap.flatMap { s =>
-      val sid = s.sessionId.getOrElse(SessionId.empty)
+      val sid     = s.sessionId.getOrElse(SessionId.empty)
+      val loading = s.metaLoading
       sessions.list
         .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
         .flatMap { rows =>
@@ -1502,7 +1735,20 @@ final class ChatRuntime private (
               .map(SessionIndex.displayTitle)
               .filter(_.nonEmpty)
               .getOrElse(ChatRuntime.ProductTitle)
-          post(HostMsg.SessionMeta(sid, named, s.modeId, s.modes, s.occupancy, s.modelId, s.models, s.effort, cwd))
+          post(
+            HostMsg.SessionMeta(
+              sid,
+              named,
+              s.modeId,
+              s.modes,
+              s.occupancy,
+              s.modelId,
+              s.models,
+              s.effort,
+              cwd,
+              loading,
+            )
+          )
         }
     }
 
@@ -1542,26 +1788,51 @@ final class ChatRuntime private (
         wf.map(runs => post(HostMsg.Workflows(runs))).getOrElse(ZIO.unit)
     }
 
-  private def ingestResume(result: Option[Json], error: Option[RpcError]): UIO[Unit] =
-    snap.flatMap { s =>
-      error match
-        case Some(err) =>
-          val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
-          val sid  = s.sessionId.getOrElse(SessionId.empty)
-          post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
-            (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
-        case None =>
-          val applied =
-            result match
-              case Some(json) =>
-                json.as[SessionNewResult] match
-                  case Right(decoded) =>
-                    decoded.modes.foreach(m => framed.state.commitMode(m.currentModeId))
-                    s.withSession(decoded, json)
-                  case Left(_) => s
-              case None => s
-          put(applied) *> postMeta *> post(HostMsg.settings(applied.settingsState)) *> doPostList(open = false)
+  private def ingestResume(id: RpcId, result: Option[Json], error: Option[RpcError]): UIO[Unit] =
+    snap.flatMap { s0 =>
+      val (loadSid, popped) = s0.popLoad(id)
+      if popped.staleResume(loadSid) then
+        ZIO.log(s"session/resume stale sid=${loadSid.map(_.value).getOrElse("-")}") *> put(popped)
+      else
+        error match
+          case Some(err) =>
+            val kind = SessionLoad.classify(err.message, Some(err.code.toString), err.data)
+            val sid  = loadSid.orElse(popped.sessionId).getOrElse(SessionId.empty)
+            put(popped.failAttach) *>
+              post(HostMsg.SessionLocked(sid, SessionLoad.copy(kind))) *>
+              (if kind == SessionLoadKind.Failed then post(HostMsg.Error(err.message)) else ZIO.unit)
+          case None =>
+            val snapTurns   = ChatModel.snapshotTurns(popped.loadModel.turns)
+            val replayEmpty = popped.loading && !popped.diskPainted
+            val applied     = applyLoadResult(popped.finishAttach, result)
+            val show        =
+              if replayEmpty then post(HostMsg.Transcript(snapTurns)) else ZIO.unit
+            put(applied) *> show *> postMeta *> post(HostMsg.settings(applied.settingsState)) *>
+              doPostList(open = false) *>
+              (if applied.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
+              sendForkPrompt
+      end if
     }
+
+  private def applyLoadResult(base: ChatState, result: Option[Json]): ChatState =
+    result match
+      case Some(json) =>
+        json.as[SessionNewResult] match
+          case Right(decoded) =>
+            base.withSession(decoded, json)
+          case Left(_) => base.withConfig(ConfigOption.of(json))
+      case None => base
+
+  private def stampLoaded(applied: ChatState, wanted: Option[SessionId]): ChatState =
+    wanted match
+      case Some(loadId) =>
+        if applied.sessionId.isEmpty then applied.copy(sessionId = Some(loadId)) else applied
+      case None => applied
+
+  private def noteHistory(s: ChatState): UIO[Unit] =
+    s.sessionId match
+      case Some(id) if id.nonEmpty => empty.markHasHistory(id)
+      case _                       => ZIO.unit
 
   private def doWorkflowControl(verb: String, name: String): UIO[Unit] =
     val handle = name.trim
@@ -1630,7 +1901,8 @@ final class ChatRuntime private (
     else
       snap.flatMap { s =>
         val sid = s.sid(fallbackSessionId)
-        post(HostMsg.Btw(body, done = false)) *>
+        put(s.copy(pendingBtw = Some(body))) *>
+          post(HostMsg.Btw(body, done = false)) *>
           rpc(
             AcpMethod.Interject,
             Json.Obj("sessionId" -> Json.Str(sid.value), "text" -> Json.Str(body)),
@@ -1639,10 +1911,70 @@ final class ChatRuntime private (
     end if
   end doBtw
 
+  private def persistWorkspacePlan(md: String): UIO[Unit] =
+    if md.trim.isEmpty then ZIO.unit
+    else
+      sessions.writeWorkspacePlan(md).foldZIO(e => post(HostMsg.Error(e.message)), _ => ZIO.unit) *>
+        edit(_.copy(lastPlan = Some(md)))
+
+  private def doOpenPlan: UIO[Unit] =
+    snap.flatMap { s =>
+      val id     = s.sessionId.getOrElse(SessionId.empty)
+      val cached = s.lastPlan.filter(_.trim.nonEmpty)
+      cached match
+        case Some(md) => publishAndOpen(md)
+        case None     =>
+          sessions
+            .planMarkdown(id)
+            .foldZIO(
+              e => post(HostMsg.Error(e.message)),
+              md =>
+                if md.trim.nonEmpty then publishAndOpen(md)
+                else
+                  val path = WorkspacePlan.path(cwd)
+                  review
+                    .readDisk(path)
+                    .foldZIO(
+                      e => post(HostMsg.Error(e.message)),
+                      {
+                        case Some(ws) if ws.trim.nonEmpty => review.openText(path)
+                        case _                            => post(HostMsg.Error(WorkspacePlan.Missing))
+                      },
+                    ),
+            )
+      end match
+    }
+
+  private def publishAndOpen(md: String): UIO[Unit] =
+    sessions
+      .writeWorkspacePlan(md)
+      .foldZIO(
+        e => post(HostMsg.Error(e.message)),
+        path => edit(_.copy(lastPlan = Some(md))) *> review.openText(path),
+      )
+
+  private def ingestInterject(result: Option[Json], error: Option[RpcError]): UIO[Unit] =
+    bag
+      .modify { s =>
+        val aside = s.pendingBtw.getOrElse("")
+        (aside, s.copy(pendingBtw = None))
+      }
+      .flatMap { aside =>
+        error match
+          case Some(err) if err.code == Rpc.MethodNotFound =>
+            post(HostMsg.Btw(aside, done = true)) *> post(HostMsg.Error(BtwReply.Missing))
+          case Some(err) =>
+            post(HostMsg.Btw(aside, done = true)) *> post(HostMsg.Error(err.message))
+          case None =>
+            post(HostMsg.Btw(BtwReply.panel(aside, BtwReply.answer(result)), done = true))
+      }
+
 end ChatRuntime
 
 object ChatRuntime:
-  val ProductTitle: String = "Grok's Beard"
+  val ProductTitle: String     = "Grok's Beard"
+  val LoadBudget: zio.Duration = 20.seconds
+  val LoadTimeout: String      = "Timed out attaching to session"
 
   def canAttach(s: ChatState, id: SessionId, hasHistory: Boolean): Boolean =
     hasHistory &&
@@ -1670,19 +2002,22 @@ object ChatRuntime:
       beforeInitialize: UIO[Unit] = ZIO.unit,
   ): ZIO[Scope & ChatEnv.Env, Nothing, ChatRuntime] =
     for
-      host      <- ZIO.service[HostOut]
-      sessions  <- ZIO.service[SessionRepo]
-      mentions  <- ZIO.service[Mentions]
-      persist   <- ZIO.service[ChangesPersist]
-      copies    <- ZIO.service[TranscriptOut]
-      review    <- ZIO.service[ReviewOps]
-      terminals <- ZIO.service[Terminals]
-      mcps      <- ZIO.service[Mcps]
-      prefs     <- ZIO.service[UiPrefs]
-      scope     <- ZIO.scope
-      gate      <- Semaphore.make(1)
-      reentrant <- FiberRef.make(false)
-      bag       <- Ref.make(ChatState.seed(cwd, seedSettings(settings(), includeActiveFile), DefaultModes))
+      host        <- ZIO.service[HostOut]
+      sessions    <- ZIO.service[SessionRepo]
+      mentions    <- ZIO.service[Mentions]
+      persist     <- ZIO.service[ChangesPersist]
+      copies      <- ZIO.service[TranscriptOut]
+      review      <- ZIO.service[ReviewOps]
+      terminals   <- ZIO.service[Terminals]
+      mcps        <- ZIO.service[Mcps]
+      prefs       <- ZIO.service[UiPrefs]
+      empty       <- ZIO.service[EmptySessions]
+      scope       <- ZIO.scope
+      gate        <- Semaphore.make(1)
+      reentrant   <- FiberRef.make(false)
+      bag         <- Ref.make(ChatState.seed(cwd, seedSettings(settings(), includeActiveFile), DefaultModes))
+      pendingWork <- Ref.make(Chunk.empty[UIO[Unit]])
+      frame       <- Ref.make(FrameState.empty)
       rt = ChatRuntime(
         host,
         transport,
@@ -1705,6 +2040,9 @@ object ChatRuntime:
         beforeInitialize,
         bag,
         prefs,
+        pendingWork,
+        empty,
+        frame,
       )
       _ <- transport.attach(chunk => rt.exclusive(rt.ingestChunk(chunk)))
       _ <- ZIO.addFinalizer(rt.close)

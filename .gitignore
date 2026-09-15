@@ -27,6 +27,9 @@ build.sbt.semanticdb
 .vscode/
 .mcp.json
 
+# Agent local memory
+.grok/
+
 # Agent / Playwright review captures. Product images live under media/.
 /*.png
 /test-results/

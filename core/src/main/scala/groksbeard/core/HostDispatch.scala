@@ -48,7 +48,7 @@ object HostDispatch:
       case WebviewMsg.UndoAll                          => runtime.undoAll
       case WebviewMsg.CloseDiff                        => runtime.closeDiff
       case WebviewMsg.PermissionChoice(requestId, opt) => runtime.permissionChoice(requestId, opt)
-      case WebviewMsg.PermissionPark(_)                => ZIO.unit
+      case WebviewMsg.PermissionPark(requestId)        => runtime.permissionPark(requestId)
       case WebviewMsg.PlanVerdict(requestId, verdict)  => runtime.planVerdict(requestId, verdict)
       case WebviewMsg.QuestionSubmit(id, answers)      => runtime.questionSubmit(id, answers)
       case WebviewMsg.QuestionDismiss(id)              => runtime.questionDismiss(id)
@@ -69,6 +69,7 @@ object HostDispatch:
       case WebviewMsg.DetachChild                      => ZIO.unit
       case WebviewMsg.SteerChild(id, text, queue)      => runtime.steerChild(id, text, queue)
       case WebviewMsg.ViewPlan                         => runtime.viewPlan
+      case WebviewMsg.OpenPlan                         => runtime.openPlan
       case WebviewMsg.OpenAgents                       => runtime.openAgents
       case WebviewMsg.OpenDashboard                    => runtime.openDashboard
       case WebviewMsg.OpenWorkflows                    => runtime.openWorkflows

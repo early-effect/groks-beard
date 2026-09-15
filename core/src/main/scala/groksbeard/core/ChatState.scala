@@ -22,12 +22,11 @@ final case class ChatState(
     settingsState: SettingsState = SettingsState.defaults,
     occupancy: Option[Occupancy] = None,
     pendingPerm: Map[RequestId, Json] = Map.empty,
+    openCards: Map[CardSlot, RequestId] = Map.empty,
     inbound: Map[RequestId, RpcId] = Map.empty,
     pendingMethod: Map[RpcId, AcpMethod] = Map.empty,
-    loading: Boolean = false,
-    loadCleared: Boolean = false,
+    phase: SessionPhase = SessionPhase.Idle,
     loadModel: ChatModel = ChatModel.empty,
-    pendingResume: Option[SessionId] = None,
     pendingLoad: Map[RpcId, SessionId] = Map.empty,
     pendingRewind: Option[Int] = None,
     cancelledLoads: Set[SessionId] = Set.empty,
@@ -56,10 +55,29 @@ final case class ChatState(
     workflows: List[WorkflowRun] = Nil,
     slashPass: Set[RpcId] = Set.empty,
     userOpen: Boolean = false,
+    pendingBtw: Option[String] = None,
+    lastPlan: Option[String] = None,
 ):
   def sid(fallback: SessionId): SessionId = sessionId.getOrElse(fallback)
 
   def currentModel: Option[ModelOption] = models.find(_.modelId == modelId)
+
+  def pendingResume: Option[SessionId] = phase.pendingResume
+  def loading: Boolean                 = phase.loading
+  def diskPainted: Boolean             = phase.diskPainted
+  def paintDone: Boolean               = phase.paintDone
+  def attaching: Boolean               = phase.attaching
+  def ignoreReplay: Boolean            = phase.ignoreReplay
+  def loadCleared: Boolean             = phase.loadCleared
+  def metaLoading: Boolean             = phase.metaLoading
+
+  def attachWaiting(id: SessionId): Boolean =
+    phase.pendingResume.contains(id) || (phase.loading && sessionId.contains(id))
+
+  def staleResume(loadSid: Option[SessionId]): Boolean =
+    loadSid.exists(cancelledLoads.contains) ||
+      pendingResume.exists(want => loadSid.exists(_ != want)) ||
+      (pendingResume.isEmpty && loadSid.exists(sid => !sessionId.contains(sid) || loading))
 
   def bumpEpoch: ChatState = copy(inboundEpoch = inboundEpoch + 1)
 
@@ -88,25 +106,43 @@ final case class ChatState(
     workflows = Nil,
     slashPass = Set.empty,
     userOpen = false,
+    pendingBtw = None,
+    lastPlan = None,
   )
 
   def resetLocal: ChatState =
-    resetTurn.copy(loading = false, loadCleared = false, pendingResume = None)
+    resetTurn.copy(phase = SessionPhase.Idle)
 
   def cancelPendingResume: ChatState =
-    pendingResume match
-      case None     => this
-      case Some(id) => copy(cancelledLoads = cancelledLoads + id)
+    val (next, gone) = SessionPhase.cancel(phase)
+    gone match
+      case None     => copy(phase = next)
+      case Some(id) => copy(phase = next, cancelledLoads = cancelledLoads + id)
 
   def beginResume(id: SessionId): ChatState =
     resetTurn.copy(
       cancelledLoads = cancelledLoads - id,
       sessionId = Some(id),
-      loading = true,
-      loadCleared = true,
-      pendingResume = Some(id),
-      restoreCodeNext = false,
+      phase = SessionPhase.beginResume(id),
     )
+
+  def onDisk(hasTurns: Boolean): ChatState =
+    copy(
+      phase = SessionPhase.onDisk(phase, hasTurns),
+      loadModel = if hasTurns then ChatModel.empty else loadModel,
+    )
+
+  def startAttach(useLoad: Boolean): ChatState =
+    copy(phase = SessionPhase.startAttach(phase, useLoad), restoreCodeNext = false)
+
+  def finishAttach: ChatState =
+    copy(phase = SessionPhase.attached(phase, sessionId), loadModel = ChatModel.empty)
+
+  def failAttach: ChatState =
+    copy(phase = SessionPhase.fail(phase), loadModel = ChatModel.empty, running = false, userOpen = false)
+
+  def readyEmpty: ChatState =
+    copy(phase = SessionPhase.Empty)
 
   def bumpTurn: ChatState =
     val n = turnSeq + 1
@@ -177,9 +213,18 @@ final case class ChatState(
   def withConfig(opts: List[ConfigOption]): ChatState =
     if opts.isEmpty then this
     else
+      val catalog = ConfigOption.models(opts)
+      val merged  =
+        if catalog.isEmpty then models
+        else
+          catalog.map { m =>
+            if m._meta.isDefined then m
+            else models.find(_.modelId == m.modelId).flatMap(_._meta).fold(m)(meta => m.copy(_meta = Some(meta)))
+          }
       copy(
         configOptions = opts,
         modelId = ConfigOption.modelId(opts).getOrElse(modelId),
+        models = merged,
         effort = ConfigOption.effort(opts).getOrElse(effort),
       )
 
@@ -200,26 +245,33 @@ final case class ChatState(
       case Some(id) => (Some(id), dropInbound(reqId))
 
   def parkPermission(reqId: RequestId, params: Json): ChatState =
-    copy(pendingPerm = pendingPerm.updated(reqId, params))
+    copy(pendingPerm = pendingPerm.updated(reqId, params)).openCard(CardSlot.Permission, reqId)
+
+  def openCard(slot: CardSlot, reqId: RequestId): ChatState =
+    copy(openCards = openCards.updated(slot, reqId))
+
+  def closeCard(slot: CardSlot): ChatState =
+    val id      = openCards.get(slot)
+    val dropped = id.fold(this)(dropInbound)
+    dropped.copy(openCards = openCards - slot)
 
   def addImage(mime: String, data: String, name: String): ChatState =
     val n = imageSeq + 1
     copy(imageSeq = n, pendingImages = pendingImages :+ ImageAttach.mint(n, mime, data, name))
 
   def noteUserWhileLoading: ChatState =
-    noteUserPrompt.copy(loadCleared = true)
+    noteUserPrompt
 
   def markAgentGone: ((Boolean, Option[SessionId], Boolean, TurnId), ChatState) =
     if agentGone then ((true, None, false, currentTurn), this)
     else
-      val locked    = pendingResume
-      val afterLoad = pendingResume match
+      val locked    = phase.pendingResume
+      val afterLoad = phase.pendingResume match
         case None     => this
         case Some(id) =>
           copy(
             cancelledLoads = cancelledLoads + id,
-            loading = false,
-            pendingResume = None,
+            phase = SessionPhase.fail(phase),
             pendingLoad = Map.empty,
           )
       val wasRunning = afterLoad.running

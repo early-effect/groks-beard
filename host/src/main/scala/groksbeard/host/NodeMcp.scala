@@ -3,8 +3,6 @@ package groksbeard.host
 import groksbeard.core.*
 import zio.*
 
-import scala.scalajs.js
-
 object NodeMcp:
   def awaitIn(cwd: String, post: HostMsg => UIO[Unit], log: String => Unit): UIO[Unit] =
     LocalMcp.awaitLocalHttp(

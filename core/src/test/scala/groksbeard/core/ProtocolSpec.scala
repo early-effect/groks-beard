@@ -11,9 +11,16 @@ object ProtocolSpec extends ZIOSpecDefault:
         assertTrue(json.contains("\"_tag\":\"ready\""), json.fromJson[HostMsg] == Right(HostMsg.Ready))
       },
       test("HostMsg sessionMeta round-trips") {
-        val msg  = HostMsg.SessionMeta("s1", "Grok's Beard", "normal")
-        val json = msg.toJson
-        assertTrue(json.fromJson[HostMsg] == Right(msg))
+        val msg: HostMsg  = HostMsg.SessionMeta("s1", "Grok's Beard", "normal")
+        val json          = msg.toJson
+        val load: HostMsg = HostMsg.SessionMeta("s1", "Grok's Beard", "normal", loading = true)
+        val legacy        =
+          """{"_tag":"sessionMeta","sessionId":"s1","title":"Grok's Beard","modeId":"normal"}"""
+        assertTrue(
+          json.fromJson[HostMsg] == Right(msg),
+          load.toJson.fromJson[HostMsg] == Right(load),
+          legacy.fromJson[HostMsg] == Right(msg),
+        )
       },
       test("sessionMeta models round-trip") {
         val msg: HostMsg = HostMsg.SessionMeta(
@@ -164,11 +171,13 @@ object ProtocolSpec extends ZIOSpecDefault:
         val choice: WebviewMsg  = WebviewMsg.PermissionChoice("r1", "allow")
         val plan: HostMsg       = HostMsg.plan(PlanCard("p1", "# Plan\n\nDo it."))
         val verdict: WebviewMsg = WebviewMsg.PlanVerdict("p1", "approved")
+        val clear: HostMsg      = HostMsg.ClearCard(CardSlot.Plan)
         assertTrue(
           perm.toJson.fromJson[HostMsg] == Right(perm),
           choice.toJson.fromJson[WebviewMsg] == Right(choice),
           plan.toJson.fromJson[HostMsg] == Right(plan),
           verdict.toJson.fromJson[WebviewMsg] == Right(verdict),
+          clear.toJson.fromJson[HostMsg] == Right(clear),
         )
       },
       test("transcript snapshot round-trips") {
@@ -190,6 +199,10 @@ object ProtocolSpec extends ZIOSpecDefault:
       },
       test("openFile round-trips") {
         val msg: WebviewMsg = WebviewMsg.OpenFile("/tmp/Main.scala", Some(4))
+        assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
+      },
+      test("openPlan round-trips") {
+        val msg: WebviewMsg = WebviewMsg.OpenPlan
         assertTrue(msg.toJson.fromJson[WebviewMsg] == Right(msg))
       },
       test("webview log round-trips") {

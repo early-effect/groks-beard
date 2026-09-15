@@ -26,7 +26,7 @@ object McpStdio:
   val ProtocolVersion                = "2025-03-26"
   val SupportedVersions: Set[String] = Set("2024-11-05", "2025-03-26", "2025-06-18")
   val ServerName                     = "groks-beard"
-  val ServerVersion                  = "0.2.0"
+  val ServerVersion                  = ProductVersion.current
 
   def parseWorkspaceArg(argv: List[String]): Option[String] =
     argv.zipWithIndex

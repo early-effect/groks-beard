@@ -151,9 +151,15 @@ final class PreviewBridge extends HostBridge:
         ()
       case WebviewMsg.StopTask(id) =>
         emit(HostMsg.Tasks(List(TaskRow(id, TaskKind.Subagent, TaskStatus.Cancelled, "stopped"))))
-      case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PlanVerdict(_, _) | WebviewMsg.QuestionSubmit(_, _) |
-          WebviewMsg.QuestionDismiss(_) | WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) |
-          WebviewMsg.Cancel =>
+      case WebviewMsg.PlanVerdict(_, _) =>
+        emit(HostMsg.ClearCard(CardSlot.Plan))
+      case WebviewMsg.PermissionChoice(_, _) | WebviewMsg.PermissionPark(_) =>
+        emit(HostMsg.ClearCard(CardSlot.Permission))
+      case WebviewMsg.QuestionSubmit(_, _) | WebviewMsg.QuestionDismiss(_) =>
+        emit(HostMsg.ClearCard(CardSlot.Question))
+      case WebviewMsg.ElicitAccept(_) | WebviewMsg.ElicitDecline(_) =>
+        emit(HostMsg.ClearCard(CardSlot.Elicit))
+      case WebviewMsg.Cancel =>
         emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.EndTurn))
       case WebviewMsg.SlashPick(name) =>
         if SessionCommands.isNew(name) then post(WebviewMsg.NewSession)
@@ -172,11 +178,12 @@ final class PreviewBridge extends HostBridge:
       case WebviewMsg.RewindTo(index) =>
         emit(HostMsg.Rewound(index))
       case WebviewMsg.NewSession =>
-        currentId = SessionId.empty
+        currentId = SessionId("new")
         pickerOpen = false
         emit(HostMsg.ClearTranscript)
-        emitMeta(SessionId.empty, "Grok's Beard")
-        emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
+        emitMeta(currentId, "Grok's Beard")
+        emit(HostMsg.Transcript(Nil))
+        emit(HostMsg.SessionList(sessions, currentId, openPicker = false))
       case WebviewMsg.ResumeSession(id, _, hasHistory) =>
         currentId = id
         pickerOpen = false
@@ -224,8 +231,7 @@ final class PreviewBridge extends HostBridge:
           emitMeta(SessionId.empty, "Grok's Beard")
           emit(HostMsg.SessionList(sessions, SessionId.empty, openPicker = false))
         else emit(HostMsg.SessionList(sessions, currentId, openPicker = pickerOpen))
-      case WebviewMsg.MentionPick(_, _) | WebviewMsg.PermissionPark(_) | WebviewMsg.AddSelection |
-          WebviewMsg.RemoveChip(_, _, _) =>
+      case WebviewMsg.MentionPick(_, _) | WebviewMsg.AddSelection | WebviewMsg.RemoveChip(_, _, _) =>
         ()
       case WebviewMsg.OpenFile(_, _) =>
         ()
@@ -259,9 +265,6 @@ final class PreviewBridge extends HostBridge:
         emit(HostMsg.Copied(TranscriptCopy.toast(path, conversation)))
       case WebviewMsg.Log(message, _) =>
         emit(HostMsg.Error(message, Some(Wire.Decode)))
-      case WebviewMsg.Cancel =>
-        emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
-        emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))
       case WebviewMsg.CancelTurnChoice(_, keep) =>
         emit(HostMsg.TurnEnd(TurnId("t-run"), StopReason.Cancelled))
         emit(HostMsg.TurnEnd(TurnId("t2"), StopReason.Cancelled))
@@ -303,6 +306,8 @@ final class PreviewBridge extends HostBridge:
         )
       case WebviewMsg.ViewPlan =>
         emit(HostMsg.PlanView("# Plan\n\nUse Metals for compile."))
+      case WebviewMsg.OpenPlan =>
+        ()
       case WebviewMsg.OpenAgents =>
         emit(HostMsg.Agents(AgentsCatalog.builtins, List(PersonaDef("concise", "Be concise."))))
       case WebviewMsg.OpenDashboard =>

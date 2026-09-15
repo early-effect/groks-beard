@@ -208,6 +208,9 @@ object ChatModel:
         (turn.user.nonEmpty || turn.thought.nonEmpty) &&
         turn.tools.forall(r => ToolStatus.isLive(r.status)))
 
+  def beginNew(model: ChatModel, title: String): ChatModel =
+    adopt(model, SessionId.empty, title).copy(inSession = true, awaitingSession = None)
+
   def adopt(model: ChatModel, sessionId: SessionId, title: String): ChatModel =
     val order = if sessionId.nonEmpty then Some(listed(model).map(_.id)) else None
     model.copy(
@@ -242,16 +245,19 @@ object ChatModel:
       case Some(want) =>
         msg match
           case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | HostMsg.ToggleQueue |
-              HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers |
-              _: HostMsg.Transcript | _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands |
-              _: HostMsg.Settings | _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit |
-              _: HostMsg.Permission | _: HostMsg.Plan | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
+              HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers | _: HostMsg.Error |
+              _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings | _: HostMsg.MentionResults |
+              _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission | _: HostMsg.Plan |
+              _: HostMsg.ClearCard | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
               _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView | _: HostMsg.Agents |
               _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw | _: HostMsg.DoctorReport |
               _: HostMsg.UiPrefs =>
             false
+          case HostMsg.Transcript(turns) =>
+            want.isEmpty && turns.nonEmpty
           case m: HostMsg.SessionMeta =>
-            want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
+            if want.isEmpty then m.loading
+            else want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
           case m: HostMsg.SessionLocked =>
             want.nonEmpty && m.sessionId.nonEmpty && m.sessionId != want
           case _ => true
@@ -261,6 +267,8 @@ object ChatModel:
       case _: HostMsg.Transcript    => waiting.nonEmpty
       case m: HostMsg.SessionLocked =>
         m.sessionId.nonEmpty && waiting.exists(w => w.isEmpty || w == m.sessionId)
+      case m: HostMsg.SessionMeta =>
+        !m.loading && waiting.exists(_.isEmpty)
       case _ => false
 
   def applyMsg(model: ChatModel, msg: HostMsg): ChatModel =
@@ -277,28 +285,36 @@ object ChatModel:
     msg match
       case HostMsg.Ready =>
         model
-      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort, cwd) =>
-        val sid    = if sessionId.nonEmpty then sessionId else model.sessionId
-        val joined = sessionId.nonEmpty && !model.inSession && model.turns.isEmpty
-        model.copy(
-          sessionId = sid,
-          title = if title.nonEmpty then title else model.title,
-          modeId = if modeId.nonEmpty then modeId else model.modeId,
-          modes = if modes.nonEmpty then modes else model.modes,
-          occupancy = occupancy.orElse(model.occupancy),
-          modelId = if modelId.nonEmpty then modelId else model.modelId,
-          models = if models.nonEmpty then models else model.models,
-          effort = if modelId.nonEmpty then effort else if effort.nonEmpty then effort else model.effort,
-          cwd = if cwd.nonEmpty then cwd else model.cwd,
-          inSession = sid.nonEmpty || model.inSession,
-          awaitingSession = if joined then Some(sid) else model.awaitingSession,
-        )
+      case HostMsg.SessionMeta(sessionId, title, modeId, modes, occupancy, modelId, models, effort, cwd, loading) =>
+        if loading && isEmptySession(model) then model
+        else
+          val sid    = if sessionId.nonEmpty then sessionId else model.sessionId
+          val joined = sessionId.nonEmpty && !model.inSession && model.turns.isEmpty
+          val await  =
+            if loading && sid.nonEmpty then Some(sid)
+            else if joined then None
+            else model.awaitingSession
+          model.copy(
+            sessionId = sid,
+            title = if title.nonEmpty then title else model.title,
+            modeId = if modeId.nonEmpty then modeId else model.modeId,
+            modes = if modes.nonEmpty then modes else model.modes,
+            occupancy = occupancy.orElse(model.occupancy),
+            modelId = if modelId.nonEmpty then modelId else model.modelId,
+            models = if models.nonEmpty then models else model.models,
+            effort = if modelId.nonEmpty then effort else if effort.nonEmpty then effort else model.effort,
+            cwd = if cwd.nonEmpty then cwd else model.cwd,
+            inSession = sid.nonEmpty || model.inSession,
+            awaitingSession = await,
+          )
       case HostMsg.SessionList(sessions, currentId, openPicker) =>
         val keepCurrent =
           model.awaitingSession.exists(want => want.nonEmpty && currentId.nonEmpty && want != currentId)
+        val keepNew =
+          isEmptySession(model) && model.sessionId.nonEmpty && currentId.nonEmpty && currentId != model.sessionId
         model.copy(
           sessions = sessions,
-          sessionId = if currentId.nonEmpty && !keepCurrent then currentId else model.sessionId,
+          sessionId = if currentId.nonEmpty && !keepCurrent && !keepNew then currentId else model.sessionId,
           pickerOpen = openPicker,
           locked = if openPicker then model.locked else None,
           sessionOrder = if openPicker then None else model.sessionOrder,
@@ -323,13 +339,15 @@ object ChatModel:
           )
         )
       case HostMsg.Transcript(turns) =>
-        model.copy(
-          turns = turns,
-          awaitingSession = None,
-          runningSinceMs = None,
-          pickerOpen = false,
-          inSession = true,
-        )
+        if turns.nonEmpty && isEmptySession(model) then model
+        else
+          model.copy(
+            turns = turns,
+            awaitingSession = None,
+            runningSinceMs = None,
+            pickerOpen = false,
+            inSession = true,
+          )
       case HostMsg.ComposerChip(path, absPath, source, startLine, endLine) =>
         model.copy(chips = PromptChip.upsert(model.chips, PromptChip(path, absPath, source, startLine, endLine)))
       case HostMsg.UserMessage(turnId, text, chips, steer) =>
@@ -355,6 +373,13 @@ object ChatModel:
         model.copy(permission = Some(PermissionCard(requestId, toolCallId, title, options, hasDiff)))
       case HostMsg.Plan(requestId, markdown) =>
         model.copy(plan = Some(PlanCard(requestId, markdown)))
+      case HostMsg.ClearCard(slot) =>
+        slot match
+          case CardSlot.Permission => model.copy(permission = None)
+          case CardSlot.Plan       => model.copy(plan = None)
+          case CardSlot.Question   => model.copy(question = None)
+          case CardSlot.Elicit     => model.copy(elicit = None)
+          case CardSlot.Fork       => model.copy(forkAsk = None)
       case HostMsg.Question(requestId, questions) =>
         model.copy(question = Some(QuestionCard(requestId, questions)))
       case HostMsg.Elicit(requestId, serverName, mode, title, url) =>

@@ -2,6 +2,8 @@ package groksbeard.core
 
 import java.nio.file.Files
 
+import zio.json.*
+import zio.json.ast.Json
 import zio.test.*
 
 object SessionWalkSpec extends ZIOSpecDefault:
@@ -20,6 +22,23 @@ object SessionWalkSpec extends ZIOSpecDefault:
         SessionWalk.fromDisk(home.toString, cwd).map { rows =>
           assertTrue(rows.map(_.id) == List("sess-1"), rows.head.title == "Walked")
         }
-      }
+      },
+      test("folds updates.jsonl into a compact transcript") {
+        val home = Files.createTempDirectory("beard-transcript")
+        val cwd  = "/tmp/beard-walk"
+        val dir  = java.nio.file.Path.of(SessionIndex.sessionPath(home.toString, cwd, "sess-1"))
+        Files.createDirectories(dir)
+        val line =
+          Json
+            .Obj(
+              "method" -> Json.Str("session/update"),
+              "params" -> AcpSessionNotify("sess-1", AcpUpdate.User(AcpContent.Text("from disk"))).asJson,
+            )
+            .toJson
+        Files.writeString(dir.resolve("updates.jsonl"), line + "\n")
+        SessionIndex.readTranscript(NioSessionFs, home.toString, cwd, "sess-1").map { snap =>
+          assertTrue(snap.turns.exists(_.user.exists(_.text == "from disk")))
+        }
+      },
     )
 end SessionWalkSpec

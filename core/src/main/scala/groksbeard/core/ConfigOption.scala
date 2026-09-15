@@ -44,6 +44,11 @@ object ConfigOption:
   def modelId(opts: List[ConfigOption]): Option[ModelId] =
     current(opts, ModelKey).map(groksbeard.core.ModelId(_))
 
+  def models(opts: List[ConfigOption]): List[ModelOption] =
+    opts.find(o => o.id == ModelKey || o.category.contains("model")).toList.flatMap { opt =>
+      opt.options.map(sel => ModelOption(ModelId(sel.value), sel.name.filter(_.nonEmpty).getOrElse(sel.value)))
+    }
+
   def effort(opts: List[ConfigOption]): Option[String] =
     current(opts, EffortKey)
 

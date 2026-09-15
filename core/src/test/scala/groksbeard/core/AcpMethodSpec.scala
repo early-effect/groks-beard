@@ -9,7 +9,7 @@ object AcpMethodSpec extends ZIOSpecDefault:
         assertTrue(
           AcpMethod.SessionSetConfig.value == "session/set_config_option",
           AcpMethod.SessionNew.value == "session/new",
-          AcpMethod.Interject.value == "x.ai/interject",
+          AcpMethod.Interject.value == "_x.ai/interject",
         )
       },
       test("parse accepts grok _x.ai aliases") {

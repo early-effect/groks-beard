@@ -29,6 +29,7 @@ object SessionCommands:
   val ViewPlan: SlashCommand      = SlashCommand("view-plan", "Open the saved plan")
   val ShowPlan: SlashCommand      = SlashCommand("show-plan", "Open the saved plan")
   val PlanView: SlashCommand      = SlashCommand("plan-view", "Open the saved plan")
+  val OpenPlan: SlashCommand      = SlashCommand("open-plan", "Open the plan in the editor")
   val Btw: SlashCommand           = SlashCommand("btw", "Ask an aside without interrupting the turn")
   val ConfigAgents: SlashCommand  = SlashCommand("config-agents", "Manage agent definitions and personas")
   val Agents: SlashCommand        = SlashCommand("agents", "Manage agent definitions and personas")
@@ -70,6 +71,7 @@ object SessionCommands:
       Loop,
       Fork,
       ViewPlan,
+      OpenPlan,
       Btw,
       ConfigAgents,
       Personas,
@@ -149,6 +151,9 @@ object SessionCommands:
     val n = name.stripPrefix("/").toLowerCase
     n == "view-plan" || n == "show-plan" || n == "plan-view"
 
+  def isOpenPlan(name: String): Boolean =
+    name.stripPrefix("/").toLowerCase == "open-plan"
+
   def isBtw(name: String): Boolean =
     name.stripPrefix("/").toLowerCase == "btw"
 
@@ -210,11 +215,14 @@ object SessionCommands:
       if isNew(name) || isResume(name) || isHome(name) || isModel(name) || isEffort(name) || isRename(name) ||
         isDelete(name) || isHistory(name) || isCopy(name) || isExport(name) || isRewind(name) || isMcps(name) ||
         isSessionInfo(name) || isContext(name) || isTasks(name) || isLoop(name) || isFork(name) || isViewPlan(name) ||
-        isBtw(name) || isConfigAgents(name) || isPersonas(name) || isDashboard(name) || isTheme(name) ||
+        isOpenPlan(name) || isBtw(name) || isConfigAgents(name) || isPersonas(name) || isDashboard(name) || isTheme(
+          name
+        ) ||
         isCompact(name) || isFullscreen(name) || isVim(name) || isDoctor(name) || isVoice(name) ||
         isAlwaysApprove(name) || isAuto(name) || isWorkflowRuns(name, args) || isWorkflowManage(name, args).nonEmpty
       then Some(ClientCommand(name, args))
       else None
+      end if
     end if
   end intercept
 end SessionCommands

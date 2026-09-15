@@ -7,6 +7,29 @@ import zio.test.*
 object ChatModelSpec extends ZIOSpecDefault:
   def spec =
     suite("ChatModel")(
+      test("ClearCard dismisses plan without ending the turn") {
+        val open = ChatModel.applyMsg(ChatModel.empty, HostMsg.Plan("p1", "# Plan"))
+        val gone = ChatModel.applyMsg(open, HostMsg.ClearCard(CardSlot.Plan))
+        assertTrue(open.plan.isDefined, gone.plan.isEmpty)
+      },
+      test("sessionMeta can populate models after the session is already open") {
+        val later = ChatModel.applyMsg(
+          ChatModel.empty.copy(inSession = true, sessionId = "s1"),
+          HostMsg.SessionMeta(
+            "s1",
+            "Plan",
+            ModeId.Normal,
+            modelId = "grok-4.6",
+            availableModels = List(ModelOption(ModelId("grok-4.6"), "Grok 4.6")),
+            effort = "high",
+          ),
+        )
+        assertTrue(
+          later.modelId == "grok-4.6",
+          later.models.head.name == "Grok 4.6",
+          later.effort == "high",
+        )
+      },
       test("sessionList opens the picker and ClearTranscript closes it") {
         val listed = ChatModel.applyMsg(
           ChatModel.empty,
@@ -237,7 +260,8 @@ object ChatModelSpec extends ZIOSpecDefault:
         assertTrue(
           withOcc.occupancy.contains(Occupancy(80, 500)),
           withOcc.inSession,
-          ChatModel.isLoading(withOcc),
+          !ChatModel.isLoading(withOcc),
+          ChatModel.isEmptySession(withOcc),
           !ChatModel.isHome(withOcc),
           modeOnly.modeId == "plan",
           modeOnly.occupancy.contains(Occupancy(80, 500)),
@@ -441,6 +465,84 @@ object ChatModelSpec extends ZIOSpecDefault:
           ChatModel.listed(bumped).map(_.id) == List("a", "b"),
           ChatModel.listed(picker).map(_.id) == List("b", "a"),
           picker.sessionOrder.isEmpty,
+        )
+      },
+      test("beginNew is an empty session, not home or loading") {
+        val next = ChatModel.beginNew(
+          ChatModel.empty.copy(turns = List(TurnView("t1", agent = "gone"))),
+          "Grok's Beard",
+        )
+        assertTrue(
+          next.inSession,
+          next.turns.isEmpty,
+          next.awaitingSession.isEmpty,
+          next.title == "Grok's Beard",
+          ChatModel.isEmptySession(next),
+          !ChatModel.isHome(next),
+          !ChatModel.isLoading(next),
+        )
+      },
+      test("sessionMeta of a new session is an empty session, not loading") {
+        val meta = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.SessionMeta("s1", "Grok's Beard", "normal"),
+        )
+        assertTrue(
+          meta.inSession,
+          meta.sessionId == "s1",
+          meta.awaitingSession.isEmpty,
+          !ChatModel.isLoading(meta),
+          ChatModel.isEmptySession(meta),
+          !ChatModel.isHome(meta),
+        )
+      },
+      test("a loading sessionMeta does not clobber an empty new session") {
+        val neu   = ChatModel.beginNew(ChatModel.empty.copy(turns = List(TurnView("t1"))), "Grok's Beard")
+        val stale = ChatModel.applyMsg(
+          neu,
+          HostMsg.SessionMeta("disk-live", "TUI", "normal", loading = true),
+        )
+        val paint = ChatModel.applyMsg(
+          stale,
+          HostMsg.Transcript(List(TurnView("t1", user = Some(TurnUser("hello from disk"))))),
+        )
+        assertTrue(
+          ChatModel.isEmptySession(neu),
+          ChatModel.isEmptySession(stale),
+          ChatModel.isEmptySession(paint),
+          stale.sessionId.isEmpty,
+          paint.turns.isEmpty,
+          ChatModel.dropHost(
+            Some(SessionId.empty),
+            HostMsg.SessionMeta("disk-live", "TUI", "normal", loading = true),
+          ),
+          !ChatModel.dropHost(Some(SessionId.empty), HostMsg.SessionMeta("s1", "Grok's Beard", "normal")),
+          ChatModel.dropHost(Some(SessionId.empty), HostMsg.Transcript(List(TurnView("t1")))),
+          !ChatModel.dropHost(Some(SessionId.empty), HostMsg.Transcript(Nil)),
+        )
+      },
+      test("sessionMeta loading waits for the transcript") {
+        val meta = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.SessionMeta("s1", "B", "normal", loading = true),
+        )
+        val snap = ChatModel.applyMsg(meta, HostMsg.Transcript(Nil))
+        assertTrue(
+          ChatModel.isLoading(meta),
+          meta.awaitingSession.contains("s1"),
+          !ChatModel.isLoading(snap),
+          ChatModel.isEmptySession(snap),
+        )
+      },
+      test("ready sessionMeta catches up a new-session wait") {
+        val waiting = Some(SessionId.empty)
+        val meta    = HostMsg.SessionMeta("s1", "Grok's Beard", "normal")
+        val load    = HostMsg.SessionMeta("s1", "B", "normal", loading = true)
+        assertTrue(
+          ChatModel.catchesUp(waiting, meta),
+          !ChatModel.catchesUp(waiting, load),
+          !ChatModel.catchesUp(Some(SessionId("b")), meta),
+          ChatModel.catchesUp(Some(SessionId("b")), HostMsg.Transcript(Nil)),
         )
       },
       test("adopt of a session id leaves home before any host message") {

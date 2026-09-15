@@ -18,7 +18,7 @@ enum AcpMethod(val value: String, val aliases: String*):
   case RewindPoints      extends AcpMethod("x.ai/rewind/points", "_x.ai/rewind/points")
   case RewindExecute     extends AcpMethod("x.ai/rewind/execute", "_x.ai/rewind/execute")
   case SessionFork       extends AcpMethod("x.ai/session/fork", "_x.ai/session/fork")
-  case Interject         extends AcpMethod("x.ai/interject", "_x.ai/interject")
+  case Interject         extends AcpMethod("_x.ai/interject", "x.ai/interject")
   case ExitPlanMode      extends AcpMethod("_x.ai/exit_plan_mode", "x.ai/exit_plan_mode")
   case AskUserQuestion   extends AcpMethod("_x.ai/ask_user_question", "x.ai/ask_user_question")
   case Elicit            extends AcpMethod("_x.ai/mcp/elicit", "x.ai/mcp/elicit")

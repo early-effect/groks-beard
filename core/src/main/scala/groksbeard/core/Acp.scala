@@ -159,6 +159,8 @@ enum AcpContent derives JsonCodec:
   @jsonHint("diff") case Diff(path: String, oldText: Option[String] = None, newText: Option[String] = None)
   @jsonHint("content") case Block(content: AcpContent)
   @jsonHint("terminal") case Terminal(terminalId: String)
+  @jsonHint("image") case Image(data: String = "", mimeType: String = "image/png", uri: Option[String] = None)
+  @jsonHint("resource") case Resource(resource: EmbeddedResource)
 
 final case class AcpToolCall(
     toolCallId: ToolCallId = ToolCallId("tool"),

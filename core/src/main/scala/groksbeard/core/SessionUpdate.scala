@@ -15,7 +15,7 @@ object SessionUpdate:
       case Some(AcpUpdate.Agent(content)) =>
         textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.AgentChunk(turnId, t))
       case Some(AcpUpdate.User(content)) =>
-        textOf(content).filter(_.nonEmpty).toList.map(t => HostMsg.UserMessage(turnId, t))
+        userMsgs(turnId, content)
       case Some(AcpUpdate.Commands(commands)) =>
         List(HostMsg.AvailableCommands(commands))
       case Some(call: AcpUpdate.ToolCall) =>
@@ -44,6 +44,23 @@ object SessionUpdate:
     content match
       case AcpContent.Text(text) => Some(text)
       case _                     => None
+
+  private def userMsgs(turnId: TurnId, content: AcpContent): List[HostMsg] =
+    content match
+      case AcpContent.Text(text) if text.nonEmpty =>
+        List(HostMsg.UserMessage(turnId, text))
+      case AcpContent.Image(data, mime, uri) if data.nonEmpty =>
+        List(HostMsg.UserMessage(turnId, "", images = List(ImageAttach.fromAcp(mime, data, uri.getOrElse("")))))
+      case AcpContent.Resource(res) if res.blob.exists(_.nonEmpty) =>
+        List(
+          HostMsg.UserMessage(
+            turnId,
+            "",
+            images = List(ImageAttach.fromAcp(res.mimeType.getOrElse("image/png"), res.blob.get, res.uri)),
+          )
+        )
+      case AcpContent.Block(inner) => userMsgs(turnId, inner)
+      case _                       => Nil
 
   private def toBody(call: AcpUpdate.ToolCall): AcpToolCall =
     AcpToolCall(

@@ -16,6 +16,53 @@ object SessionUpdateSpec extends ZIOSpecDefault:
           user == List(HostMsg.UserMessage("t1", "hello from disk")),
         )
       },
+      test("user image and resource chunks become UserMessage images") {
+        val img = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("user_message_chunk"),
+              "content"       -> Json.Obj(
+                "type"     -> Json.Str("image"),
+                "data"     -> Json.Str("AAAA"),
+                "mimeType" -> Json.Str("image/png"),
+                "uri"      -> Json.Str("file:///tmp/image.png"),
+              ),
+            ),
+          ),
+          "t1",
+        )
+        val res = SessionUpdate.hostMsgs(
+          Json.Obj(
+            "sessionId" -> Json.Str("sess_test"),
+            "update"    -> Json.Obj(
+              "sessionUpdate" -> Json.Str("user_message_chunk"),
+              "content"       -> Json.Obj(
+                "type"     -> Json.Str("resource"),
+                "resource" -> Json.Obj(
+                  "uri"      -> Json.Str("beard://image/image-1"),
+                  "mimeType" -> Json.Str("image/png"),
+                  "blob"     -> Json.Str("BBBB"),
+                ),
+              ),
+            ),
+          ),
+          "t1",
+        )
+        assertTrue(
+          img == List(
+            HostMsg
+              .UserMessage("t1", "", images = List(ImageAttach.fromAcp("image/png", "AAAA", "file:///tmp/image.png")))
+          ),
+          res == List(
+            HostMsg.UserMessage(
+              "t1",
+              "",
+              images = List(ImageAttach.fromAcp("image/png", "BBBB", "beard://image/image-1")),
+            )
+          ),
+        )
+      },
       test("available_commands_update becomes commands") {
         val msgs = SessionUpdate.hostMsgs(
           Json.Obj(

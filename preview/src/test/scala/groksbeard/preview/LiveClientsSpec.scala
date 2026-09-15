@@ -25,7 +25,7 @@ object LiveClientsSpec extends ZIOSpecDefault:
           _       <- clients.post("a", WebviewMsg.Ready)
           _       <- clients.post("a", WebviewMsg.Send("only-a"))
           b       <- fromB.join
-          texts = b.collect { case HostMsg.UserMessage(_, text, _, _) => text }
+          texts = b.collect { case HostMsg.UserMessage(_, text, _, _, _) => text }
         yield assertTrue(!texts.contains("only-a"))
       } @@ TestAspect.withLiveClock,
       test("the addressed client still sees its own send") {
@@ -34,8 +34,8 @@ object LiveClientsSpec extends ZIOSpecDefault:
           fromA   <- clients
             .eventStream("a")
             .filter {
-              case HostMsg.UserMessage(_, "only-a", _, _) => true
-              case _                                      => false
+              case HostMsg.UserMessage(_, "only-a", _, _, _) => true
+              case _                                         => false
             }
             .take(1)
             .interruptAfter(2.seconds)

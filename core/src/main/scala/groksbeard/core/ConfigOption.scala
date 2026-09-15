@@ -38,7 +38,8 @@ object ConfigOption:
     Json.Obj(
       "sessionId" -> Json.Str(sessionId.value),
       "configId"  -> Json.Str(configId),
-      "value"     -> Json.Obj("value" -> Json.Str(value)),
+      "type"      -> Json.Str("id"),
+      "value"     -> Json.Str(value),
     )
 
   def modelId(opts: List[ConfigOption]): Option[ModelId] =

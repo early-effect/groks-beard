@@ -473,9 +473,24 @@ object PreviewScenes:
       case Scene.Voice =>
         ChatModel.empty.copy(inSession = true)
       case Scene.Images =>
+        val pixel =
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
         ChatModel.empty.copy(
           inSession = true,
           images = List(ImageChip("image-0", "image/png", "AAAA", "paste.png")),
+          turns = List(
+            TurnView(
+              TurnId("turn_1"),
+              user = Some(
+                TurnUser(
+                  "also look at this",
+                  images = List(ImageChip("image.png", "image/png", pixel, "image.png")),
+                )
+              ),
+              agent = "got it",
+              stopReason = Some(StopReason.EndTurn),
+            )
+          ),
         )
       case _ => ChatModel.empty
 end PreviewScenes

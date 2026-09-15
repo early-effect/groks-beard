@@ -842,7 +842,7 @@ final class ChatRuntime private (
       val prompt = if blocks.nonEmpty then blocks else List(PromptBlock.Text(text))
       noteHistory(next) *>
         put(next) *>
-        post(HostMsg.UserMessage(next.currentTurn, text, chosen)) *>
+        post(HostMsg.UserMessage(next.currentTurn, text, chosen, images = images)) *>
         rpc(AcpMethod.SessionPrompt, SessionPromptParams(sid, prompt).asJson)
     }
 

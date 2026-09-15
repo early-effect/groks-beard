@@ -43,6 +43,22 @@ object ChatModelSpec extends ZIOSpecDefault:
           closed.sessions.size == 1,
         )
       },
+      test("consecutive user chunks keep prompt text when an image caption follows") {
+        val prompt = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.UserMessage("turn_1", "also look at this"),
+        )
+        val caption = ChatModel.applyMsg(prompt, HostMsg.UserMessage("turn_1", "[image.png]"))
+        val image   = ChatModel.applyMsg(
+          caption,
+          HostMsg.UserMessage("turn_1", "", images = List(ImageChip("image.png", "image/png", "AAAA", "image.png"))),
+        )
+        assertTrue(
+          image.turns.size == 1,
+          image.turns.head.user.exists(_.text == "also look at this"),
+          image.turns.head.user.exists(_.images.exists(_.name == "image.png")),
+        )
+      },
       test("consecutive user chunks on a live turn keep the @ref and the prompt") {
         val ref = ChatModel.applyMsg(
           ChatModel.empty,

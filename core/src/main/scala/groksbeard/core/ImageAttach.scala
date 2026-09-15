@@ -22,6 +22,19 @@ object ImageAttach:
   def mint(seq: Int, mime: String, data: String, name: String = ""): ImageChip =
     ImageChip(s"image-$seq", mime, data, name)
 
+  def fromAcp(mime: String, data: String, uri: String = ""): ImageChip =
+    val last = uri.replace('\\', '/').split('/').lastOption.getOrElse("")
+    val name =
+      if uri.startsWith("beard://image/") then uri.substring("beard://image/".length)
+      else if last.nonEmpty then last
+      else ""
+    val id = if name.nonEmpty then name else s"image-${Integer.toUnsignedString(data.hashCode)}"
+    ImageChip(id, if mime.nonEmpty then mime else "image/png", data, if name.nonEmpty then name else id)
+
+  def isCaption(text: String): Boolean =
+    val t = text.trim
+    t.matches("(?i)\\[Image #\\d+\\]") || t.matches("(?i)\\[[^\\[\\]]+\\.(png|jpe?g|gif|webp)\\]")
+
   def blocks(chips: List[ImageChip], image: Boolean, embedded: Boolean): List[PromptBlock] =
     chips.zipWithIndex.flatMap { (chip, i) =>
       val caption = s"[${label(chip, i)}]"

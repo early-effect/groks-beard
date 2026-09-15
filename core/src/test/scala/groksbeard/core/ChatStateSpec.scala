@@ -60,6 +60,21 @@ object ChatStateSpec extends ZIOSpecDefault:
           Effort.of(next.currentModel).nonEmpty,
         )
       },
+      test("adoptTurns continues turnSeq past the snapshot") {
+        val snap = List(
+          TurnView("turn_1", user = Some(TurnUser("old")), agent = "done", stopReason = Some(StopReason.EndTurn)),
+          TurnView("turn_2", user = Some(TurnUser("later")), agent = "ok", stopReason = Some(StopReason.EndTurn)),
+        )
+        val s0 = ChatState.seed(".", SettingsState.defaults, Nil).beginResume(SessionId("sess")).adoptTurns(snap)
+        val s1 = s0.startTurn("hello", Nil, SessionId("sess"))
+        assertTrue(
+          s0.turnSeq == 2,
+          s0.currentTurn == TurnId("turn_2"),
+          !s0.running,
+          s1.currentTurn == TurnId("turn_3"),
+          s1.turnSeq == 3,
+        )
+      },
       test("beginResume then onDisk(true) paints without loading chrome") {
         val s0 = ChatState.seed(".", SettingsState.defaults, Nil).beginResume(SessionId("sess"))
         val s1 = s0.onDisk(true)

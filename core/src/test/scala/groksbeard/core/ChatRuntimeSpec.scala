@@ -2617,6 +2617,30 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("send after a painted resume opens a new turn at the tail") {
+        val snap = ChatRuntimeSpec.diskSnap("from disk", "welcome back")
+        chat(onTranscript = id => if id == "sess_disk" then snap else SessionSnapshot()) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- rt.resumeSession("sess_disk")
+            _    <- posted.set(Nil)
+            _    <- rt.send("hello")
+            msgs <- posted.get
+            model = msgs.foldLeft(
+              ChatModel.empty.copy(inSession = true, turns = snap.turns)
+            )(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.UserMessage(id, "hello", _, _) => id == TurnId("turn_2")
+              case _                                      => false
+            },
+            model.turns.size == 2,
+            model.turns.head.user.exists(_.text == "from disk"),
+            model.turns.last.user.exists(_.text == "hello"),
+            model.turns.last.id == TurnId("turn_2"),
+          )
+        }
+      },
       test("send after an idle session/load starts a turn") {
         val lines = scala.collection.mutable.ListBuffer.empty[String]
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
@@ -2802,6 +2826,35 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             case HostMsg.Tasks(rows) => rows.exists(r => r.id.value == "t1" && r.status == TaskStatus.Completed)
             case _                   => false
           })
+        }
+      },
+      test("session/resume timeout after a disk paint unblocks send") {
+        val wrap = AcpTransport.fake(FakeAgent(hangResume = true))
+        chat(
+          transport = wrap,
+          listSessions = () => List(SessionRow("disk-live", "TUI", activityMs = 9, messages = Some(4))),
+          onTranscript = id =>
+            if id == "disk-live" then ChatRuntimeSpec.diskSnap("hello from disk", "welcome back")
+            else SessionSnapshot(),
+        ) { (rt, posted) =>
+          for
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- TestClock.adjust(ChatRuntime.LoadBudget + 1.second)
+            _    <- rt.send("follow up")
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            msgs.exists {
+              case HostMsg.UserMessage(_, "follow up", _, _) => true
+              case _                                         => false
+            },
+            !msgs.exists {
+              case HostMsg.Queued(items) => items.exists(_.text == "follow up")
+              case _                     => false
+            },
+            model.turns.exists(_.user.exists(_.text == "follow up")),
+          )
         }
       },
       test("send while attaching queues until session/resume returns") {

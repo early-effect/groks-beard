@@ -14,14 +14,18 @@ object SessionId:
 
 opaque type TurnId = String
 object TurnId:
-  val empty: TurnId              = ""
-  def apply(raw: String): TurnId = raw.trim
-  def mint(seq: Int): TurnId     = apply(s"turn_$seq")
+  val empty: TurnId                = ""
+  def apply(raw: String): TurnId   = raw.trim
+  def mint(seq: Int): TurnId       = apply(s"turn_$seq")
+  def seq(id: TurnId): Option[Int] =
+    val v = id.value
+    if v.startsWith("turn_") then v.substring(5).toIntOption else None
   extension (id: TurnId)
     def value: String     = id
     def isEmpty: Boolean  = id.length == 0
     def nonEmpty: Boolean = id.length > 0
   given JsonCodec[TurnId] = JsonExt.stringCodec(_.value, apply)
+end TurnId
 
 opaque type ToolCallId = String
 object ToolCallId:

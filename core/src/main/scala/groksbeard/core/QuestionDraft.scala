@@ -2,6 +2,7 @@ package groksbeard.core
 
 import ascent.squawk.Eq
 import zio.json.JsonCodec
+import zio.json.ast.Json
 
 final case class QuestionAnswer(
     questionId: String,
@@ -66,6 +67,35 @@ object QuestionDraft:
       val ft = d.freeText.get(q.id).map(_.trim).filter(_.nonEmpty)
       QuestionAnswer(q.id, d.selected.getOrElse(q.id, Nil), ft)
     }
+
+  /** Grok ACP `AskUserQuestionExtResponse.Accepted`. Keys are question ids (prompt text on the live wire). */
+  def acceptedJson(answers: List[QuestionAnswer]): Json =
+    val rows = answers.flatMap { a =>
+      val ft  = a.freeText.map(_.trim).filter(_.nonEmpty)
+      val ids = a.optionIds.filter(_.nonEmpty)
+      val vec = if ids.nonEmpty then ids else if ft.nonEmpty then List("Other") else Nil
+      if vec.isEmpty || a.questionId.isEmpty then None
+      else Some(a.questionId -> vec)
+    }
+    val answersObj = Json.Obj(rows.map((k, v) => k -> Json.Arr(v.map(Json.Str(_))*))*)
+    val notes      =
+      answers.flatMap { a =>
+        a.freeText.map(_.trim).filter(_.nonEmpty).map { n =>
+          a.questionId -> Json.Obj("notes" -> Json.Str(n))
+        }
+      }
+    val fields =
+      List("outcome" -> Json.Str("accepted"), "answers" -> answersObj) ++
+        (if notes.isEmpty then Nil else List("annotations" -> Json.Obj(notes*)))
+    Json.Obj(fields*)
+  end acceptedJson
+
+  def cancelledJson: Json = Json.Obj("outcome" -> Json.Str("cancelled"))
+
+  def optionCaption(idx: Int, opt: QuestionOption): String =
+    val extra = opt.description.trim
+    if extra.nonEmpty && !extra.equalsIgnoreCase(opt.label) then s"${idx + 1} ${opt.label}  $extra"
+    else s"${idx + 1} ${opt.label}"
 
   def optionKey(key: String, q: AgentQuestion): Option[String] =
     val idx =

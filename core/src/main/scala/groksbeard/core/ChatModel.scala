@@ -2,6 +2,7 @@ package groksbeard.core
 
 import ascent.squawk.Eq
 import zio.json.*
+import zio.json.ast.Json
 
 final case class ToolRow(
     id: ToolCallId,
@@ -64,7 +65,17 @@ final case class PermissionCard(
 
 final case class PlanCard(requestId: RequestId, planMarkdown: String) derives JsonCodec, Eq
 
-final case class QuestionOption(id: String, label: String) derives JsonCodec, Eq
+final case class QuestionOption(id: String, label: String, description: String = "") derives JsonCodec, Eq
+
+object QuestionOption:
+  def fromAcp(json: Json): Option[QuestionOption] = json match
+    case obj: Json.Obj =>
+      val label = JsonObj.str(obj, "label").getOrElse("")
+      val id    = JsonObj.str(obj, "id").filter(_.nonEmpty).getOrElse(label)
+      if label.isEmpty && id.isEmpty then None
+      else Some(QuestionOption(id, if label.nonEmpty then label else id, JsonObj.str(obj, "description").getOrElse("")))
+    case Json.Str(label) if label.nonEmpty => Some(QuestionOption(label, label))
+    case _                                 => None
 
 final case class AgentQuestion(
     id: String,
@@ -74,6 +85,50 @@ final case class AgentQuestion(
     allowFreeText: Boolean = false,
 ) derives JsonCodec,
       Eq
+
+object AgentQuestion:
+  def fromAcp(json: Json): Option[AgentQuestion] = json match
+    case obj: Json.Obj =>
+      val prompt = JsonObj.str(obj, "prompt").orElse(JsonObj.str(obj, "question")).getOrElse("")
+      val id     = JsonObj.str(obj, "id").orElse(JsonObj.str(obj, "header")).filter(_.nonEmpty).getOrElse(prompt)
+      val opts   = JsonObj.arr(obj, "options").flatMap(QuestionOption.fromAcp)
+      if prompt.isEmpty && opts.isEmpty then None
+      else
+        Some(
+          AgentQuestion(
+            id = if id.nonEmpty then id else prompt,
+            prompt = prompt,
+            options = opts,
+            allowMultiple = JsonObj.flag(obj, "allowMultiple", "multiSelect", "multi_select", "multiple"),
+            allowFreeText = JsonObj.bool(obj, "allowFreeText").getOrElse(true),
+          )
+        )
+      end if
+    case _ => None
+end AgentQuestion
+
+object JsonObj:
+  def field(obj: Json.Obj, key: String): Option[Json] =
+    obj.fields.collectFirst { case (k, v) if k == key => v }
+
+  def str(obj: Json.Obj, key: String): Option[String] =
+    field(obj, key).collect { case Json.Str(s) if s.nonEmpty => s }
+
+  def arr(obj: Json.Obj, key: String): List[Json] =
+    field(obj, key) match
+      case Some(Json.Arr(items)) => items.toList
+      case _                     => Nil
+
+  def bool(obj: Json.Obj, key: String): Option[Boolean] =
+    field(obj, key) match
+      case Some(Json.Bool(b))                => Some(b)
+      case Some(Json.Str(s)) if s == "true"  => Some(true)
+      case Some(Json.Str(s)) if s == "false" => Some(false)
+      case _                                 => None
+
+  def flag(obj: Json.Obj, keys: String*): Boolean =
+    keys.iterator.map(bool(obj, _)).collectFirst { case Some(b) => b }.getOrElse(false)
+end JsonObj
 
 final case class QuestionCard(requestId: RequestId, questions: List[AgentQuestion]) derives JsonCodec, Eq
 

@@ -284,11 +284,11 @@ final class ChatRuntime private (
   }
 
   def questionSubmit(requestId: RequestId, answers: List[QuestionAnswer]): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> answers.asJson)) *> finishCard(CardSlot.Question)
+    respond(requestId, QuestionDraft.acceptedJson(answers)) *> finishCard(CardSlot.Question)
   }
 
   def questionDismiss(requestId: RequestId): UIO[Unit] = exclusive {
-    respond(requestId, Json.Obj("answers" -> Json.Arr())) *> finishCard(CardSlot.Question)
+    respond(requestId, QuestionDraft.cancelledJson) *> finishCard(CardSlot.Question)
   }
 
   def elicitAccept(requestId: RequestId): UIO[Unit] = exclusive {
@@ -1183,10 +1183,12 @@ final class ChatRuntime private (
                 persistWorkspacePlan(md) *>
                 post(HostMsg.plan(PlanCard(reqId, md)))
             case Some(AcpMethod.AskUserQuestion) =>
-              val questions =
-                params.as[AskUserQuestionParams].toOption.map(_.questions).getOrElse(Nil)
-              edit(_.openCard(CardSlot.Question, reqId)) *>
-                post(HostMsg.question(QuestionCard(reqId, questions)))
+              val questions = AskUserQuestionParams.questionsOf(params)
+              if questions.isEmpty then
+                ZIO.logWarning("ask_user_question: no questions") *> reject(reqId, "Invalid params")
+              else
+                edit(_.openCard(CardSlot.Question, reqId)) *>
+                  post(HostMsg.question(QuestionCard(reqId, questions)))
             case Some(AcpMethod.ElicitCreate) | Some(AcpMethod.Elicit) =>
               edit(_.openCard(CardSlot.Elicit, reqId)) *>
                 post(HostMsg.elicit(elicitCard(params, reqId)))

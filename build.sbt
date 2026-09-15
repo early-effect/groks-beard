@@ -14,7 +14,7 @@ lazy val beardVersion =
 lazy val stampVsixVersion =
   taskKey[File]("Write beardVersion into package.json")
 
-ThisBuild / beardVersion := "0.2.2"
+ThisBuild / beardVersion := "0.2.3"
 ThisBuild / scalaVersion := (MyVersions.scala: String)
 
 organization         := "rocks.earlyeffect"

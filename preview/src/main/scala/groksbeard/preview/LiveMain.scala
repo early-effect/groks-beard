@@ -3,8 +3,9 @@ package groksbeard.preview
 import ascent.preview.{Preview, PreviewConfig}
 import groksbeard.core.*
 import groksbeard.core.Wire
+import heddle.*
+import heddle.sse.ServerSentEvent
 import zio.*
-import zio.http.*
 import zio.json.*
 
 import java.nio.file.Path as JPath
@@ -58,7 +59,7 @@ object LiveMain extends ZIOAppDefault:
           case None     => ZIO.succeed(Response.badRequest("missing client"))
           case Some(id) =>
             current.flatMap {
-              case None          => ZIO.succeed(Response.status(Status.ServiceUnavailable))
+              case None          => ZIO.succeed(Response.empty(Status.ServiceUnavailable))
               case Some(clients) =>
                 val stream = clients.eventStream(id).map(msg => ServerSentEvent(msg.toJson))
                 ZIO.succeed(Response.fromServerSentEvents(stream))
@@ -69,9 +70,9 @@ object LiveMain extends ZIOAppDefault:
           case None     => ZIO.succeed(Response.badRequest("missing client"))
           case Some(id) =>
             current.flatMap {
-              case None          => ZIO.succeed(Response.status(Status.ServiceUnavailable))
+              case None          => ZIO.succeed(Response.empty(Status.ServiceUnavailable))
               case Some(clients) =>
-                req.body.asString.orDie.flatMap { raw =>
+                req.body.utf8.orDie.flatMap { raw =>
                   Wire.webview(raw) match
                     case Left(err) =>
                       ZIO.logError(err) *> clients
@@ -84,7 +85,7 @@ object LiveMain extends ZIOAppDefault:
     )
 
   def clientId(req: Request): Option[String] =
-    req.queryParam("client").map(_.trim).filter(LiveClients.validId)
+    req.query.get("client").map(_.trim).filter(LiveClients.validId)
 
   def configFromArgs(args: Chunk[String]): PreviewConfig =
     val open       = args.contains("--open")

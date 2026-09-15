@@ -7,6 +7,10 @@ import java.nio.file.{Files, Path}
 object PackageJsonSpec extends ZIOSpecDefault:
   def spec =
     suite("package.json")(
+      test("version matches ProductVersion") {
+        val json = Files.readString(packageJson)
+        assertTrue(json.contains(s""""version": "${ProductVersion.current}""""))
+      },
       test("contributes Add Selection, Add File, and the @-ref copy command") {
         val json = Files.readString(packageJson)
         assertTrue(
@@ -31,7 +35,7 @@ object PackageJsonSpec extends ZIOSpecDefault:
           json.contains("shareBackend"),
           json.contains("editorHasSelection"),
         )
-      }
+      },
     )
 
   private def packageJson: Path =

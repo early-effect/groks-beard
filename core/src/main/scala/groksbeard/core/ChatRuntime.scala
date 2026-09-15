@@ -70,8 +70,8 @@ final class ChatRuntime private (
       c => post(c.host),
     )
 
-  def planActive: UIO[Boolean]          = frame.get.map(_.planActive)
-  def framedMode: UIO[Option[ModeId]]   = frame.get.map(_.modeId)
+  def planActive: UIO[Boolean]               = frame.get.map(_.planActive)
+  def framedMode: UIO[Option[ModeId]]        = frame.get.map(_.modeId)
   def commitFrameMode(id: ModeId): UIO[Unit] =
     frame.update(_.commitMode(id))
 
@@ -104,7 +104,11 @@ final class ChatRuntime private (
         beforeInitialize.forkIn(scope) *> exclusive {
           rpc(
             AcpMethod.Initialize,
-            InitializeParams(1, capabilities, ClientInfo("groks-beard", ChatRuntime.ProductTitle, "0.2.0")).asJson,
+            InitializeParams(
+              1,
+              capabilities,
+              ClientInfo("groks-beard", ChatRuntime.ProductTitle, ProductVersion.current),
+            ).asJson,
           )
         }
     }
@@ -750,7 +754,6 @@ final class ChatRuntime private (
       edit(_.beginResume(id)) *>
       post(HostMsg.ClearTranscript) *> postMeta *> doPostList(open = false) *>
       later(paintThenAttach(id))
-  end loadResume
 
   private def paintThenAttach(id: SessionId): UIO[Unit] =
     sessions
@@ -886,8 +889,7 @@ final class ChatRuntime private (
       case Left(err) => reject(requestId, s"invalid terminal/create params: $err")
       case Right(p)  =>
         frame.get.flatMap { fr =>
-          if fr.planActive && !PlanTerminals.allowed(p.command, p.args) then
-            reject(requestId, PlanTerminals.Reject)
+          if fr.planActive && !PlanTerminals.allowed(p.command, p.args) then reject(requestId, PlanTerminals.Reject)
           else
             terminals
               .create(p.command, p.args, p.cwd, p.env, p.outputByteLimit)
@@ -1472,6 +1474,7 @@ final class ChatRuntime private (
                     put(withId) *> postMeta *> post(HostMsg.Transcript(Nil)) *>
                     post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
                     (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit)
+                end if
               }
             }
 
@@ -1808,6 +1811,7 @@ final class ChatRuntime private (
               doPostList(open = false) *>
               (if applied.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
               sendForkPrompt
+      end if
     }
 
   private def applyLoadResult(base: ChatState, result: Option[Json]): ChatState =
@@ -1998,17 +2002,17 @@ object ChatRuntime:
       beforeInitialize: UIO[Unit] = ZIO.unit,
   ): ZIO[Scope & ChatEnv.Env, Nothing, ChatRuntime] =
     for
-      host      <- ZIO.service[HostOut]
-      sessions  <- ZIO.service[SessionRepo]
-      mentions  <- ZIO.service[Mentions]
-      persist   <- ZIO.service[ChangesPersist]
-      copies    <- ZIO.service[TranscriptOut]
-      review    <- ZIO.service[ReviewOps]
-      terminals <- ZIO.service[Terminals]
-      mcps      <- ZIO.service[Mcps]
-      prefs     <- ZIO.service[UiPrefs]
-      empty     <- ZIO.service[EmptySessions]
-      scope     <- ZIO.scope
+      host        <- ZIO.service[HostOut]
+      sessions    <- ZIO.service[SessionRepo]
+      mentions    <- ZIO.service[Mentions]
+      persist     <- ZIO.service[ChangesPersist]
+      copies      <- ZIO.service[TranscriptOut]
+      review      <- ZIO.service[ReviewOps]
+      terminals   <- ZIO.service[Terminals]
+      mcps        <- ZIO.service[Mcps]
+      prefs       <- ZIO.service[UiPrefs]
+      empty       <- ZIO.service[EmptySessions]
+      scope       <- ZIO.scope
       gate        <- Semaphore.make(1)
       reentrant   <- FiberRef.make(false)
       bag         <- Ref.make(ChatState.seed(cwd, seedSettings(settings(), includeActiveFile), DefaultModes))

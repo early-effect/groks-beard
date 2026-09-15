@@ -245,13 +245,13 @@ object ChatModel:
       case Some(want) =>
         msg match
           case HostMsg.Ready | HostMsg.ClearTranscript | HostMsg.ToggleTodos | HostMsg.ToggleQueue |
-              HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers |
-              _: HostMsg.Error | _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings |
-              _: HostMsg.MentionResults | _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission |
-              _: HostMsg.Plan | _: HostMsg.ClearCard | _: HostMsg.Question | _: HostMsg.Tasks |
-              _: HostMsg.TaskNotice | _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView |
-              _: HostMsg.Agents | _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw |
-              _: HostMsg.DoctorReport | _: HostMsg.UiPrefs =>
+              HostMsg.ToggleTasks | HostMsg.OpenPalette | HostMsg.OpenMcps | _: HostMsg.McpServers | _: HostMsg.Error |
+              _: HostMsg.Copied | _: HostMsg.AvailableCommands | _: HostMsg.Settings | _: HostMsg.MentionResults |
+              _: HostMsg.SessionList | _: HostMsg.Elicit | _: HostMsg.Permission | _: HostMsg.Plan |
+              _: HostMsg.ClearCard | _: HostMsg.Question | _: HostMsg.Tasks | _: HostMsg.TaskNotice |
+              _: HostMsg.ForkAsk | _: HostMsg.ChildTranscript | _: HostMsg.PlanView | _: HostMsg.Agents |
+              _: HostMsg.Workflows | _: HostMsg.Dashboard | _: HostMsg.Btw | _: HostMsg.DoctorReport |
+              _: HostMsg.UiPrefs =>
             false
           case HostMsg.Transcript(turns) =>
             want.isEmpty && turns.nonEmpty
@@ -310,7 +310,7 @@ object ChatModel:
       case HostMsg.SessionList(sessions, currentId, openPicker) =>
         val keepCurrent =
           model.awaitingSession.exists(want => want.nonEmpty && currentId.nonEmpty && want != currentId)
-        val keepNew    =
+        val keepNew =
           isEmptySession(model) && model.sessionId.nonEmpty && currentId.nonEmpty && currentId != model.sessionId
         model.copy(
           sessions = sessions,

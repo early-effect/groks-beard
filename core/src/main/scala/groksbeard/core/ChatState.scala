@@ -251,7 +251,7 @@ final case class ChatState(
     copy(openCards = openCards.updated(slot, reqId))
 
   def closeCard(slot: CardSlot): ChatState =
-    val id = openCards.get(slot)
+    val id      = openCards.get(slot)
     val dropped = id.fold(this)(dropInbound)
     dropped.copy(openCards = openCards - slot)
 

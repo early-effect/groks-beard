@@ -46,8 +46,7 @@ object NodeSessionFs extends SessionFs:
               cb(io)
           rl.on(
             "line",
-            line =>
-              if !done then acc = f(acc, line.asInstanceOf[String]),
+            line => if !done then acc = f(acc, line.asInstanceOf[String]),
           )
           rl.on("close", _ => finish(ZIO.succeed(acc)))
           stream.on(

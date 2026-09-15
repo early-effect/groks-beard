@@ -16,16 +16,16 @@ object SessionPhase:
   extension (p: SessionPhase)
     def pendingResume: Option[SessionId] =
       p match
-        case ResumeDisk(id)       => Some(id)
-        case ResumeEmpty(id)      => Some(id)
-        case ResumePainted(id)    => Some(id)
-        case Attaching(id, _, _)  => Some(id)
+        case ResumeDisk(id)         => Some(id)
+        case ResumeEmpty(id)        => Some(id)
+        case ResumePainted(id)      => Some(id)
+        case Attaching(id, _, _)    => Some(id)
         case Idle | Empty | Live(_) => None
 
     def loading: Boolean =
       p match
-        case ResumeDisk(_) | ResumeEmpty(_)     => true
-        case Attaching(_, _, painted)           => !painted
+        case ResumeDisk(_) | ResumeEmpty(_)            => true
+        case Attaching(_, _, painted)                  => !painted
         case Idle | Empty | ResumePainted(_) | Live(_) => false
 
     def metaLoading: Boolean = p.pendingResume.nonEmpty || p.loading
@@ -51,6 +51,7 @@ object SessionPhase:
         case _                              => false
 
     def loadCleared: Boolean = p.pendingResume.nonEmpty
+  end extension
 
   def beginNew: SessionPhase = Empty
 

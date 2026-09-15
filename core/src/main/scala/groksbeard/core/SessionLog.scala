@@ -5,8 +5,8 @@ import zio.json.ast.Json
 
 /** Compact fold of `updates.jsonl` (or a live ACP replay) into a transcript snapshot.
   *
-  * Thoughts and tool bodies stay off the model. Huge `tool_call_update` lines are scanned for
-  * identity/status instead of parsed as JSON.
+  * Thoughts and tool bodies stay off the model. Huge `tool_call_update` lines are scanned for identity/status instead
+  * of parsed as JSON.
   */
 final case class SessionSnapshot(
     turns: List[TurnView] = Nil,
@@ -105,6 +105,7 @@ object SessionLog:
       path = loc.map(_.path),
       line = loc.flatMap(_.line),
     )
+  end compactCall
 
   private def compactUpdate(call: AcpUpdate.ToolCallUpdate): ToolRow =
     val loc = call.locations.headOption
@@ -116,6 +117,7 @@ object SessionLog:
       path = loc.map(_.path),
       line = loc.flatMap(_.line),
     )
+  end compactUpdate
 
   private def noteUser(state: State): State =
     if state.userOpen then state
@@ -130,7 +132,7 @@ object SessionLog:
     state.copy(model = msgs.foldLeft(state.model)(ChatModel.applyMsg))
 
   private def scanField(line: String, key: String): Option[String] =
-    val tight = s""""$key":""""
+    val tight  = s""""$key":""""
     val spaced = s""""$key": """"
     val at     =
       val i = line.indexOf(tight)
@@ -142,6 +144,7 @@ object SessionLog:
       val end = line.indexOf('"', start)
       if end <= start then None else Some(line.substring(start, end))
     }
+  end scanField
 
   private def str(json: Json, key: String): Option[String] =
     field(json, key).collect { case Json.Str(s) => s }

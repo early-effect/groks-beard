@@ -43,6 +43,19 @@ object ChatModelSpec extends ZIOSpecDefault:
           closed.sessions.size == 1,
         )
       },
+      test("consecutive user chunks on a live turn keep the @ref and the prompt") {
+        val ref = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.UserMessage("turn_1", "@core/src/main/scala/groksbeard/core/ChatModel.scala"),
+        )
+        val both = ChatModel.applyMsg(ref, HostMsg.UserMessage("turn_1", "say \"hello\" in one word"))
+        assertTrue(
+          both.turns.size == 1,
+          both.turns.head.user.exists { u =>
+            u.text.contains("ChatModel.scala") && u.text.contains("say \"hello\" in one word")
+          },
+        )
+      },
       test("user and agent chunks fold into one turn") {
         for
           now <- Clock.currentTime(TimeUnit.MILLISECONDS)

@@ -180,6 +180,16 @@ object ChatModel:
     val n = model.turns.iterator.flatMap(t => TurnId.seq(t.id)).maxOption.getOrElse(model.turns.size) + 1
     TurnId.mint(n)
 
+  /** ACP sends the @ref as one user_message_chunk and the prompt as the next. Keep both. */
+  def mergeUser(prev: Option[TurnUser], text: String, chips: List[PromptChip], steer: Boolean): TurnUser =
+    prev.filter(_.text.nonEmpty) match
+      case Some(u) if text.nonEmpty && u.text != text =>
+        TurnUser(s"${u.text}\n$text", u.chips ++ chips, u.steer || steer)
+      case Some(u) if text.isEmpty =>
+        u.copy(chips = u.chips ++ chips, steer = u.steer || steer)
+      case _ =>
+        TurnUser(text, chips, steer)
+
   def isEmptySession(model: ChatModel): Boolean =
     model.inSession && !isLoading(model) && model.turns.isEmpty
 
@@ -362,9 +372,9 @@ object ChatModel:
         }
         val id = if taken then ChatModel.nextTurnId(model) else turnId
         markRunning(
-          upsert(model.copy(chips = Nil, inSession = true), id)(
-            _.copy(user = Some(TurnUser(text, chips, steer)), stopReason = None)
-          ),
+          upsert(model.copy(chips = Nil, inSession = true), id) { t =>
+            t.copy(user = Some(ChatModel.mergeUser(t.user, text, chips, steer)), stopReason = None)
+          },
           nowMs,
         )
 

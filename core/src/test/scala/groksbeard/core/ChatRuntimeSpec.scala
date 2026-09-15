@@ -907,6 +907,29 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("consecutive user chunks keep the @ref and the prompt") {
+        def notify(update: AcpUpdate): String =
+          Ndjson.encode(
+            Rpc.toLine(Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", update)))
+          )
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              notify(AcpUpdate.User(AcpContent.Text("@core/src/main/scala/groksbeard/core/ChatModel.scala")))
+            )
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("say hello"))))
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            model.turns.size == 1,
+            model.turns.head.user.exists { u =>
+              u.text.contains("ChatModel.scala") && u.text.contains("say hello")
+            },
+          )
+        }
+      },
       test("turn_completed from a shared session ends the turn") {
         chat() { (rt, posted) =>
           for

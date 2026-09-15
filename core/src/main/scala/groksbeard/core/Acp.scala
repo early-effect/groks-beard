@@ -32,7 +32,7 @@ end ClientCapabilities
 final case class InitializeParams(
     protocolVersion: Int,
     clientCapabilities: ClientCapabilities = ClientCapabilities.fake,
-    clientInfo: ClientInfo = ClientInfo("groks-beard", "Grok's Beard", "0.2.0"),
+    clientInfo: ClientInfo = ClientInfo("groks-beard", "Grok's Beard", ProductVersion.current),
 ) derives JsonCodec
 final case class PromptCapabilities(
     image: Boolean = false,

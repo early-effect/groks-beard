@@ -60,7 +60,8 @@ object LiveSession:
                   args => ProcessCapture.run(cmd, args, cwd),
                   ZIO.attempt(Files.readString(JPath.of(home, "config.toml"))).orElseSucceed(""),
                 )
-              )) >+> UiPrefs.layer
+              ) ++
+              EmptySessions.layer) >+> UiPrefs.layer
           ProcessTransport
             .spawn(
               cmd,

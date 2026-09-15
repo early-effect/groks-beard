@@ -1289,11 +1289,11 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Transcript)
           result <- withMounted(ui) { root =>
             for
-              _ <- waitPresent(root, "transcript")
-              _ <- root.button("new-session").click
-              _ <- waitGone(root, "transcript")
-              _ <- waitPresent(root, "session-empty")
-              _ <- waitGone(root, "session-loading")
+              _    <- waitPresent(root, "transcript")
+              _    <- root.button("new-session").click
+              _    <- waitGone(root, "transcript")
+              _    <- waitPresent(root, "session-empty")
+              _    <- waitGone(root, "session-loading")
               copy <- root.getByTestId("session-empty").innerText
             yield assertTrue(copy.contains("Ask Grok anything"))
           }
@@ -1306,14 +1306,14 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Empty)
           result <- withMounted(ui) { root =>
             for
-              _ <- waitPresent(root, "welcome-sessions")
-              _ <- root.button("session-disk-1").click
-              _ <- waitPresent(root, "session-loading")
-              _ <- root.button("new-session").click
-              _ <- waitPresent(root, "session-empty")
-              _ <- waitGone(root, "session-loading")
-              _ <- ZIO.succeed(bridge.completeResume())
-              _ <- waitGone(root, "session-loading")
+              _    <- waitPresent(root, "welcome-sessions")
+              _    <- root.button("session-disk-1").click
+              _    <- waitPresent(root, "session-loading")
+              _    <- root.button("new-session").click
+              _    <- waitPresent(root, "session-empty")
+              _    <- waitGone(root, "session-loading")
+              _    <- ZIO.succeed(bridge.completeResume())
+              _    <- waitGone(root, "session-loading")
               copy <- root.getByTestId("session-empty").innerText
               user = Option(root.element.querySelector("""[data-testid="user-resume-turn"]"""))
             yield assertTrue(copy.contains("Ask Grok anything"), user.isEmpty)

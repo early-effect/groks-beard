@@ -1087,7 +1087,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       test("setMode commits plan before later work") {
         chat() { (rt, _) =>
           for
-            _ <- rt.ready
+            _    <- rt.ready
             _    <- rt.setMode("plan")
             mode <- rt.framedMode
             plan <- rt.planActive
@@ -1109,7 +1109,11 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             "session/update",
             AcpSessionNotify(
               "sess_test",
-              AcpUpdate.ToolCall(toolCallId = ToolCallId("call_1"), title = "Read SKILL.md", status = ToolStatus.Pending),
+              AcpUpdate.ToolCall(
+                toolCallId = ToolCallId("call_1"),
+                title = "Read SKILL.md",
+                status = ToolStatus.Pending,
+              ),
             ),
           )
         val done =
@@ -1124,15 +1128,15 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         val wrap  = AcpTransport.tap(AcpTransport.fake(), lines += _)
         chat(transport = wrap) { (rt, posted) =>
           for
-            _ <- rt.ready
-            _ <- posted.set(Nil)
-            _ <- rt.ingestData(line(perm))
-            _ <- rt.ingestData(line(pending))
-            mid <- posted.get
-            _ <- ZIO.succeed(lines.clear())
-            _ <- posted.set(Nil)
-            _ <- rt.ingestData(line(done))
-            _ <- rt.permissionChoice("perm-1", "allow-once")
+            _     <- rt.ready
+            _     <- posted.set(Nil)
+            _     <- rt.ingestData(line(perm))
+            _     <- rt.ingestData(line(pending))
+            mid   <- posted.get
+            _     <- ZIO.succeed(lines.clear())
+            _     <- posted.set(Nil)
+            _     <- rt.ingestData(line(done))
+            _     <- rt.permissionChoice("perm-1", "allow-once")
             after <- posted.get
           yield assertTrue(
             mid.exists {
@@ -1154,7 +1158,9 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _ <- rt.ready
             _ <- posted.set(Nil)
             _ <- rt.ingestData(
-              line(Rpc.request(RpcId.Str("plan-1"), "_x.ai/exit_plan_mode", Json.Obj("planMarkdown" -> Json.Str("# Go"))))
+              line(
+                Rpc.request(RpcId.Str("plan-1"), "_x.ai/exit_plan_mode", Json.Obj("planMarkdown" -> Json.Str("# Go")))
+              )
             )
             _ <- rt.ingestData(
               line(
@@ -1360,9 +1366,9 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         val wrap  = AcpTransport.tap(AcpTransport.fake(FakeAgent(pairSetModeWithTerminal = true)), lines += _)
         chat(transport = wrap) { (rt, posted) =>
           for
-            _ <- rt.ready
-            _ <- posted.set(Nil)
-            _ <- ZIO.succeed(lines.clear())
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
             _    <- rt.setMode("plan")
             plan <- rt.planActive
             mode <- rt.framedMode
@@ -1388,9 +1394,9 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         )
         chat(transport = wrap) { (rt, posted) =>
           for
-            _ <- rt.ready
-            _ <- posted.set(Nil)
-            _ <- ZIO.succeed(lines.clear())
+            _    <- rt.ready
+            _    <- posted.set(Nil)
+            _    <- ZIO.succeed(lines.clear())
             _    <- rt.setMode("plan")
             plan <- rt.planActive
             blob = lines.mkString
@@ -1411,8 +1417,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             TerminalCreateParams(command = "rm", args = List("-rf", "/tmp/beard-probe")).asJson,
           )
           for
-            _ <- rt.ready
-            _ <- ZIO.succeed(lines.clear())
+            _    <- rt.ready
+            _    <- ZIO.succeed(lines.clear())
             _    <- rt.ingestData(Ndjson.encode(Rpc.toLine(req)))
             plan <- rt.planActive
             blob = lines.mkString
@@ -1749,10 +1755,10 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
           chat(transport = transport) { (rt, posted) =>
             for
-              _ <- rt.ready
-              _ <- posted.set(Nil)
-              _ <- rt.resumeSession("sess_disk")
-              _ <- rt.newSession
+              _        <- rt.ready
+              _        <- posted.set(Nil)
+              _        <- rt.resumeSession("sess_disk")
+              _        <- rt.newSession
               afterNew <- posted.get.map(msgs =>
                 msgs.reverse.collectFirst {
                   case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
@@ -1775,10 +1781,10 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
           chat(transport = transport) { (rt, posted) =>
             for
-              _ <- rt.ready
-              _ <- posted.set(Nil)
-              _ <- rt.resumeSession("sess_disk")
-              _ <- rt.newSession
+              _        <- rt.ready
+              _        <- posted.set(Nil)
+              _        <- rt.resumeSession("sess_disk")
+              _        <- rt.newSession
               afterNew <- posted.get.map(msgs =>
                 msgs.reverse.collectFirst {
                   case m: HostMsg.SessionMeta if m.sessionId.nonEmpty => m.sessionId
@@ -1830,12 +1836,12 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
         ChatRuntimeSpec.delayedResume().flatMap { case (transport, held) =>
           chat(transport = transport) { (rt, posted) =>
             for
-              _    <- rt.ready
-              _    <- posted.set(Nil)
-              _    <- rt.resumeSession("sess_disk")
-              _    <- rt.resumeSession("sess_live")
-              _    <- posted.set(Nil)
-              _    <- rt.ingestData(held.disk)
+              _     <- rt.ready
+              _     <- posted.set(Nil)
+              _     <- rt.resumeSession("sess_disk")
+              _     <- rt.resumeSession("sess_live")
+              _     <- posted.set(Nil)
+              _     <- rt.ingestData(held.disk)
               stale <- posted.get
               _     <- posted.set(Nil)
               _     <- rt.ingestData(held.live)
@@ -2760,9 +2766,13 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
       },
       test("task_completed is applied while session/resume is still attaching") {
         val wrap = AcpTransport.fake(FakeAgent(hangResume = true))
-        val snap = ChatRuntimeSpec.diskSnap("kept", "still here").copy(
-          tasks = List(TaskRow("t1", TaskKind.Command, TaskStatus.Running, "sbt preview", "sbt --no-server ~uiJS/ascentPreview"))
-        )
+        val snap = ChatRuntimeSpec
+          .diskSnap("kept", "still here")
+          .copy(
+            tasks = List(
+              TaskRow("t1", TaskKind.Command, TaskStatus.Running, "sbt preview", "sbt --no-server ~uiJS/ascentPreview")
+            )
+          )
         val done = Ndjson.encode(
           Rpc.toLine(
             Rpc.notifyOf(
@@ -2953,7 +2963,12 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
     )
 
   final class HeldLoad(var disk: String = "", var live: String = "")
-  final class HeldResume(var disk: String = "", var live: String = "", var diskFail: String = "", var liveFail: String = "")
+  final class HeldResume(
+      var disk: String = "",
+      var live: String = "",
+      var diskFail: String = "",
+      var liveFail: String = "",
+  )
   final class HeldNew(var get: String = "")
 
   def delayedLoad(): UIO[(AcpTransport, HeldLoad)] =

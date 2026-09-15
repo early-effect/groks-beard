@@ -8,7 +8,7 @@ object SharedCardsSpec extends ZIOSpecDefault:
   def spec =
     suite("SharedCards")(
       test("resolvedPermission ignores pending status") {
-        val params = PermissionRequestParams(toolCall = AcpToolCall(toolCallId = ToolCallId("call_1"))).asJson
+        val params  = PermissionRequestParams(toolCall = AcpToolCall(toolCallId = ToolCallId("call_1"))).asJson
         val pending = Map(RequestId("perm-1") -> params)
         assertTrue(
           SharedCards.resolvedPermission(pending, "call_1", ToolStatus.Pending).isEmpty,

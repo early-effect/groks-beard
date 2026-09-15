@@ -24,6 +24,7 @@ final case class EmptySessionsLive(ref: Ref[EmptySessions.State]) extends EmptyS
 
   def forget(id: SessionId): UIO[Unit] =
     ref.update(s => s.copy(created = s.created - id, history = s.history - id))
+end EmptySessionsLive
 
 object EmptySessions:
   final case class State(

@@ -29,9 +29,9 @@ object FramedSpec extends ZIOSpecDefault:
         )
       },
       test("feed commits session/set_mode before returning later lines") {
-        val fake = FakeAgent(pairSetModeWithTerminal = true)
-        val req  = Rpc.request(RpcId.Num(7), "session/set_mode", SessionSetModeParams("sess_test", "plan"))
-        val sent = FrameState.recordOutgoing(FrameState.empty, req)
+        val fake         = FakeAgent(pairSetModeWithTerminal = true)
+        val req          = Rpc.request(RpcId.Num(7), "session/set_mode", SessionSetModeParams("sess_test", "plan"))
+        val sent         = FrameState.recordOutgoing(FrameState.empty, req)
         val (next, msgs) = FrameState.feed(sent, fake.encodeReplies(req))
         val sawCreate    = msgs.exists {
           case Rpc.Request(_, "terminal/create", _) => true

@@ -8,6 +8,13 @@ import rocks.earlyeffect.splice.SplicePlugin.autoImport.*
 
 MyVersions.settings
 
+lazy val beardVersion =
+  settingKey[String]("Marketplace / VSIX version written into package.json")
+
+lazy val stampVsixVersion =
+  taskKey[File]("Write beardVersion into package.json")
+
+ThisBuild / beardVersion := "0.2.1"
 ThisBuild / scalaVersion := (MyVersions.scala: String)
 
 organization         := "rocks.earlyeffect"
@@ -92,6 +99,11 @@ lazy val root = (project in file("."))
     name := "groks-beard-root",
     skipPublish,
     test / skip := true,
+    stampVsixVersion := Def.uncached {
+      val base = (ThisBuild / baseDirectory).value
+      BeardPack.stampPackageJson(base, (ThisBuild / beardVersion).value)
+      base / "package.json"
+    },
   )
 
 // JVM + JS. `core/testFull` is JVM-only; CI links and runs coreJS. Use `testCore`.
@@ -105,6 +117,13 @@ lazy val core = (projectMatrix in file("core"))
     MyVersions.jsonLib,
     MyVersions.ascentCore,
     zioTestSettings,
+    Compile / sourceGenerators += Def.task {
+      val out = BeardPack.writeProductVersion(
+        (Compile / sourceManaged).value,
+        (ThisBuild / beardVersion).value,
+      )
+      Seq(out)
+    }.taskValue,
   )
   .jvmPlatform(scalaVersions = scalaVersions)
   .jsPlatform(scalaVersions = scalaVersions, javaTimePolyfill)
@@ -224,7 +243,8 @@ lazy val host = (project in file("host"))
     Test / test     := Def.uncached(sbt.protocol.testing.TestResult.Passed),
     Test / testFull := Def.uncached(sbt.protocol.testing.TestResult.Passed),
     stageExtension := Def.uncached {
-      val dest    = (ThisBuild / baseDirectory).value / "dist"
+      val dest = (ThisBuild / baseDirectory).value / "dist"
+      BeardPack.stampPackageJson((ThisBuild / baseDirectory).value, (ThisBuild / beardVersion).value)
       val webview = dest / "webview"
       IO.createDirectory(webview)
       val hostOut = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value

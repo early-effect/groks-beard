@@ -66,7 +66,7 @@ object SessionLogSpec extends ZIOSpecDefault:
         assertTrue(snap.turns.head.thought.isEmpty, snap.turns.head.agent.contains("answer"))
       },
       test("scans tool_call_update lines instead of parsing bodies") {
-        val body = "secret-tool-body"
+        val body  = "secret-tool-body"
         val lines = List(
           disk(
             AcpUpdate.ToolCall(
@@ -89,7 +89,7 @@ object SessionLogSpec extends ZIOSpecDefault:
         )
       },
       test("scans a huge tool_call_update for status without keeping the body") {
-        val fat = "x" * (SessionLog.HeavyBytes + 100)
+        val fat   = "x" * (SessionLog.HeavyBytes + 100)
         val lines = List(
           disk(
             AcpUpdate.ToolCall(
@@ -119,7 +119,8 @@ object SessionLogSpec extends ZIOSpecDefault:
       test("concatenating line batches equals folding them in order") {
         check(SessionLogSpec.genLines, SessionLogSpec.genLines) { (a, b) =>
           val one = SessionLog.fold(a ++ b)
-          val two = SessionLog.finish(b.foldLeft(a.foldLeft(SessionLog.empty)(SessionLog.foldLine))(SessionLog.foldLine))
+          val two =
+            SessionLog.finish(b.foldLeft(a.foldLeft(SessionLog.empty)(SessionLog.foldLine))(SessionLog.foldLine))
           assertTrue(one == two)
         }
       },

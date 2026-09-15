@@ -45,7 +45,7 @@ object FrameState:
         if error.nonEmpty then dropped
         else
           recorded match
-            case None              => dropped
+            case None                 => dropped
             case Some((method, mode)) =>
               if SessionState.CommitBeforeContinue.contains(method) then mode.fold(dropped)(dropped.commitMode)
               else if method == AcpMethod.SessionNew || method == AcpMethod.SessionLoad then

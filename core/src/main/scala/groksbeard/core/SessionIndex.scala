@@ -41,6 +41,7 @@ trait SessionFs:
         if text.isEmpty then z
         else text.linesIterator.foldLeft(z)(f)
     }
+end SessionFs
 
 object SessionIndex:
   val PageSize: Int              = 100

@@ -56,15 +56,15 @@ trait ReadlineHandle extends js.Object:
 @js.native
 @JSImport("fs", JSImport.Namespace)
 object nodeFs extends js.Object:
-  def mkdirSync(path: String, options: MkdirSyncOptions): Unit     = js.native
-  def unlinkSync(path: String): Unit                               = js.native
-  def chmodSync(path: String, mode: Int): Unit                     = js.native
-  def existsSync(path: String): Boolean                            = js.native
-  def readFileSync(path: String, enc: String): String              = js.native
-  def writeFileSync(path: String, data: String, enc: String): Unit = js.native
-  def readdirSync(path: String): js.Array[String]                  = js.native
-  def statSync(path: String): NodeFsStats                          = js.native
-  def rmSync(path: String, options: RmSyncOptions): Unit           = js.native
+  def mkdirSync(path: String, options: MkdirSyncOptions): Unit                   = js.native
+  def unlinkSync(path: String): Unit                                             = js.native
+  def chmodSync(path: String, mode: Int): Unit                                   = js.native
+  def existsSync(path: String): Boolean                                          = js.native
+  def readFileSync(path: String, enc: String): String                            = js.native
+  def writeFileSync(path: String, data: String, enc: String): Unit               = js.native
+  def readdirSync(path: String): js.Array[String]                                = js.native
+  def statSync(path: String): NodeFsStats                                        = js.native
+  def rmSync(path: String, options: RmSyncOptions): Unit                         = js.native
   def createReadStream(path: String, options: ReadStreamOptions): NodeReadStream = js.native
 end nodeFs
 
@@ -72,7 +72,6 @@ end nodeFs
 @JSImport("readline", JSImport.Namespace)
 object nodeReadline extends js.Object:
   def createInterface(options: ReadlineOptions): ReadlineHandle = js.native
-end nodeReadline
 
 @js.native
 trait NodeFsStats extends js.Object:

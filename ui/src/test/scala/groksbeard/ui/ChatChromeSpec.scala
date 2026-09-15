@@ -962,6 +962,38 @@ object ChatChromeSpec extends ZIOSpecDefault:
         yield result
         end for
       },
+      test("sending a turn page-flips the last prompt to the top") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Empty)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- ZIO.succeed {
+                (1 to 12).foreach { i =>
+                  bridge.push(HostMsg.UserMessage(s"t$i", s"prompt $i"))
+                  bridge.push(HostMsg.AgentChunk(s"t$i", "reply\n" * 8))
+                  bridge.push(HostMsg.TurnEnd(s"t$i", "end_turn"))
+                }
+              }
+              _  <- waitPresent(root, "transcript")
+              el <- ZIO.succeed(root.element.queryHtml("""[data-testid="transcript"]"""))
+              _  <- ZIO.succeed(el.setAttribute("style", "max-height:140px;overflow-y:auto"))
+              _  <- ZIO.succeed {
+                el.scrollTop = 0
+                ChatChromeSpec.fireScroll(el)
+              }
+              _   <- waitSelector(root, """[data-testid="transcript"][data-follow="false"]""")
+              _   <- root.textarea("draft").fill("beard-verify-tail: FOXTROT")
+              _   <- root.button("send").click
+              on  <- waitSelector(root, """[data-testid="transcript"][data-follow="true"]""")
+              gap <- waitTurnAtTop(root, "turn-t12")
+              first = root.element.queryHtml("""[data-testid="turn-t1"]""").getBoundingClientRect()
+              pane  = el.getBoundingClientRect()
+            yield assertTrue(on, gap <= 24, first.bottom <= pane.top + 1)
+          }
+        yield result
+        end for
+      },
       test("todos scene lists entries and Hide dismisses the pane") {
         val bridge = PreviewBridge()
         for
@@ -979,6 +1011,23 @@ object ChatChromeSpec extends ZIOSpecDefault:
               row.contains("Wire ACP plan updates"),
               done.contains("Checkout the branch"),
             )
+          }
+        yield result
+        end for
+      },
+      test("empty todos and tasks do not occupy the composer") {
+        val bridge = PushBridge()
+        for
+          ui     <- ChatApp.component(bridge, None, Scene.Todos)
+          result <- withMounted(ui) { root =>
+            for
+              _ <- waitPresent(root, "todos")
+              _ <- ZIO.succeed(bridge.push(HostMsg.ClearTranscript))
+              _ <- waitGone(root, "todos")
+              _ <- waitGone(root, "todos-empty")
+              _ <- waitGone(root, "tasks")
+              _ <- waitGone(root, "tasks-empty")
+            yield assertTrue(true)
           }
         yield result
         end for
@@ -2154,10 +2203,13 @@ object ChatChromeSpec extends ZIOSpecDefault:
           ui     <- ChatApp.component(bridge, None, Scene.Images)
           result <- withMounted(ui) { root =>
             for
-              _ <- waitPresent(root, "image-0")
-              _ <- root.button("image-remove-image-0").click
-              _ <- waitGone(root, "image-0")
-            yield assertTrue(true)
+              _    <- waitPresent(root, "image-0")
+              _    <- waitPresent(root, "user-turn_1")
+              _    <- waitPresent(root, "user-image-image.png")
+              user <- root.getByTestId("user-turn_1").innerText
+              _    <- root.button("image-remove-image-0").click
+              _    <- waitGone(root, "image-0")
+            yield assertTrue(user.contains("also look at this"))
           }
         yield result
         end for
@@ -2779,6 +2831,22 @@ object ChatChromeSpec extends ZIOSpecDefault:
         case Some(_) => ZIO.sleep(20.millis) *> loop
       }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId to disappear"))(5.seconds)
+
+  private def waitTurnAtTop(root: AscentRoot, testId: String, slack: Double = 24)(using
+      Trace
+  ): IO[Throwable, Double] =
+    def loop: IO[Throwable, Double] =
+      ZIO
+        .succeed {
+          val pane = root.element.queryHtml("""[data-testid="transcript"]""").getBoundingClientRect()
+          val turn = root.element.queryHtml(s"""[data-testid="$testId"]""").getBoundingClientRect()
+          math.abs(turn.top - pane.top)
+        }
+        .flatMap { gap =>
+          if gap <= slack then ZIO.succeed(gap) else ZIO.sleep(20.millis) *> loop
+        }
+    loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId at transcript top"))(5.seconds)
+  end waitTurnAtTop
 
   private def waitScrollTop(root: AscentRoot, sel: String, min: Double)(using Trace): IO[Throwable, Double] =
     def loop: IO[Throwable, Double] =

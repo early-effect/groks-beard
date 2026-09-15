@@ -1,5 +1,6 @@
 package groksbeard.core
 
+import zio.json.ast.Json
 import zio.test.*
 
 object ChatStateSpec extends ZIOSpecDefault:
@@ -29,6 +30,17 @@ object ChatStateSpec extends ZIOSpecDefault:
           b.exists(_.text == "two"),
           c.isEmpty,
           s1.chips.isEmpty,
+        )
+      },
+      test("setParams sends an ACP id value, not a nested object") {
+        val json = ConfigOption.setParams(SessionId("sess"), ConfigOption.EffortKey, "low")
+        assertTrue(
+          json == Json.Obj(
+            "sessionId" -> Json.Str("sess"),
+            "configId"  -> Json.Str("reasoning_effort"),
+            "type"      -> Json.Str("id"),
+            "value"     -> Json.Str("low"),
+          )
         )
       },
       test("withConfig copies model and effort from options") {

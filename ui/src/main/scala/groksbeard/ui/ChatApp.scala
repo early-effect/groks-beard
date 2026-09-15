@@ -804,12 +804,25 @@ object ChatApp:
   object UserMsg
       extends CssClass(
         alignSelf.end,
+        display.flex,
+        flexDirection.column,
+        gap.px(8),
         backgroundColor(inputBg),
         border(Border.solid(1.px, widgetBorder)),
         borderRadius.px(8),
         padding(8.px, 10.px),
         fontSize.px(13),
         whiteSpace.preWrap,
+        maxWidth.pct(100),
+        minWidth.px(0),
+      )
+
+  object UserImage
+      extends CssClass(
+        display.block,
+        maxWidth.pct(100),
+        height.auto,
+        borderRadius.px(6),
       )
 
   object AgentMsg
@@ -1343,7 +1356,7 @@ object ChatApp:
               case HostMsg.ToolChunk(_, id, text, snap) =>
                 toolOut.update(m => m.updated(id, ToolOutput.pull(m.getOrElse(id, ""), text, snap)))
               case HostMsg.ClearTranscript | _: HostMsg.Rewound =>
-                toolOut.set(Map.empty)
+                toolOut.set(Map.empty) *> todosOpen.set(false) *> tasksOpen.set(false)
               case HostMsg.Transcript(turns) =>
                 toolOut.set(turns.flatMap(_.tools).map(t => t.id -> t.output.getOrElse("")).toMap)
               case HostMsg.Error(message, Some(Wire.Decode)) =>
@@ -1600,6 +1613,7 @@ object ChatApp:
                 ZIO.succeed(bridge.post(msg)) *> draft.set("") *> dismissed.set(false) *>
                   historyBrowse.set(None) *> historyPickIdx.set(None) *>
                   chat.update(_.copy(images = Nil)) *>
+                  ZIO.succeed(TranscriptScroll.pageFlip()) *>
                   stash.get.flatMap:
                     case Some(s) if s.restoreAfterSend =>
                       draft.set(s.text) *>
@@ -2115,7 +2129,8 @@ object ChatApp:
       def sendQueuedNow(id: QueueId): UIO[Unit] =
         chat.update(m => m.copy(queue = m.queue.filterNot(_.id == id))) *>
           queueIdx.set(Some(0)) *>
-          ZIO.succeed(bridge.post(WebviewMsg.QueueSendNow(id)))
+          ZIO.succeed(bridge.post(WebviewMsg.QueueSendNow(id))) *>
+          ZIO.succeed(TranscriptScroll.pageFlip())
 
       def dropQueued(id: QueueId): UIO[Unit] =
         chat.update { m =>
@@ -2700,6 +2715,7 @@ object ChatApp:
                         ZIO.succeed(bridge.post(WebviewMsg.AttachChild(TaskId(sid)))),
                   )
                 },
+                E.div(TestId("transcript-pad")),
               ),
               E.button(
                 JumpTail,
@@ -3565,8 +3581,20 @@ object ChatApp:
       TestId(s"turn-$id"),
       Attr.ReactiveAttr("data-selected", selected.map(on => AttrValue.Str(if on then "true" else "false"))),
       Ev.onClick(_ => onSelect),
-      when(turn.map(_.user.exists(_.text.nonEmpty)))(
-        E.div(UserMsg, TestId(s"user-$id"), turn.map(userTextOf))
+      when(turn.map(_.user.exists(u => u.text.nonEmpty || u.images.nonEmpty)))(
+        E.div(
+          UserMsg,
+          TestId(s"user-$id"),
+          when(turn.map(t => userTextOf(t).nonEmpty))(E.span(turn.map(userTextOf))),
+          forEach(turn.map(_.user.toList.flatMap(_.images)))(_.id) { img =>
+            E.img(
+              UserImage,
+              TestId(s"user-image-${img.id}"),
+              A.src(ImageAttach.dataUrl(img)),
+              A.alt(if img.name.nonEmpty then img.name else "image"),
+            )
+          },
+        )
       ),
       when(turn.map(_.thought.nonEmpty))(
         E.details(
@@ -4154,7 +4182,7 @@ object ChatApp:
       todosOpen: ascent.Source[Boolean],
       toggleTodos: UIO[Unit],
   ): ascent.ast.UI[Any] =
-    when(todosOpen)(
+    when(Squawk.zipWith(chat, todosOpen)((c, on) => on && c.todos.nonEmpty))(
       E.div(
         ChangesPane,
         TestId("todos"),
@@ -4209,7 +4237,7 @@ object ChatApp:
       toggleTasks: UIO[Unit],
       stopTask: TaskId => UIO[Unit],
   ): ascent.ast.UI[Any] =
-    when(tasksOpen)(
+    when(Squawk.zipWith(chat, tasksOpen)((c, on) => on && c.tasks.nonEmpty))(
       E.div(
         ChangesPane,
         TestId("tasks"),

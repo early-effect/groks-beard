@@ -84,7 +84,7 @@ final class ChatView(
               else s"$$(diff) $fileCount  +$additions/-$deletions"
             if fileCount > 0 then status.show() else status.hide()
             val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.hasChanges", fileCount > 0)
-          case HostMsg.UserMessage(_, _, _, _) =>
+          case _: HostMsg.UserMessage =>
             val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", true)
           case HostMsg.TurnEnd(_, _) =>
             val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)

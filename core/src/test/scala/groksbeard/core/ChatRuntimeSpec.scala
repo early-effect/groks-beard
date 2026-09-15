@@ -105,8 +105,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               msgs <- posted.get
               _    <- hold.succeed(())
             yield assertTrue(msgs.exists {
-              case HostMsg.UserMessage(_, "hello", _, _) => true
-              case _                                     => false
+              case HostMsg.UserMessage(_, "hello", _, _, _) => true
+              case _                                        => false
             })
           }
         }
@@ -124,8 +124,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                     => false
             },
             later.exists {
-              case HostMsg.UserMessage(_, "hello", _, _) => true
-              case _                                     => false
+              case HostMsg.UserMessage(_, "hello", _, _, _) => true
+              case _                                        => false
             },
           )
         }
@@ -214,8 +214,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.send("/fork --no-worktree ping the child")
             msgs <- posted.get
           yield assertTrue(msgs.exists {
-            case HostMsg.UserMessage(_, "ping the child", _, _) => true
-            case _                                              => false
+            case HostMsg.UserMessage(_, "ping the child", _, _, _) => true
+            case _                                                 => false
           })
         }
       },
@@ -227,12 +227,12 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.send("hello")
             msgs <- posted.get
             tags = msgs.collect {
-              case HostMsg.UserMessage(_, text, _, _) => s"user:$text"
-              case HostMsg.ThoughtChunk(_, text)      => s"thought:$text"
-              case HostMsg.AgentChunk(_, text, _)     => s"agent:$text"
-              case HostMsg.ToolCall(_, tool)          => s"tool:${tool.title}"
-              case HostMsg.ToolChunk(_, _, text, _)   => s"chunk:$text"
-              case HostMsg.TurnEnd(_, reason)         => s"end:${StopReason.wire(reason)}"
+              case HostMsg.UserMessage(_, text, _, _, _) => s"user:$text"
+              case HostMsg.ThoughtChunk(_, text)         => s"thought:$text"
+              case HostMsg.AgentChunk(_, text, _)        => s"agent:$text"
+              case HostMsg.ToolCall(_, tool)             => s"tool:${tool.title}"
+              case HostMsg.ToolChunk(_, _, text, _)      => s"chunk:$text"
+              case HostMsg.TurnEnd(_, reason)            => s"end:${StopReason.wire(reason)}"
             }
           yield assertTrue(
             tags.head == "user:hello",
@@ -273,7 +273,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
                 ChatEnv.test(post =
                   msg =>
                     posted.update(_ :+ msg) *> (msg match
-                      case HostMsg.UserMessage(_, "hello", _, _) =>
+                      case HostMsg.UserMessage(_, "hello", _, _, _) =>
                         slot.get.flatMap {
                           case Some(r) => r.send("later")
                           case None    => ZIO.unit
@@ -286,7 +286,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- posted.set(Nil)
             _    <- rt.send("hello")
             msgs <- posted.get
-            users = msgs.collect { case HostMsg.UserMessage(_, text, _, _) => text }
+            users = msgs.collect { case HostMsg.UserMessage(_, text, _, _, _) => text }
           yield assertTrue(
             msgs.exists {
               case HostMsg.Queued(items) => items.map(_.text) == List("later")
@@ -360,8 +360,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _ => false
             },
             msgs.exists {
-              case HostMsg.UserMessage(_, "check ci", _, _) => true
-              case _                                        => false
+              case HostMsg.UserMessage(_, "check ci", _, _, _) => true
+              case _                                           => false
             },
           )
         }
@@ -550,8 +550,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                     => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "later", _, _) => true
-              case _                                     => false
+              case HostMsg.UserMessage(_, "later", _, _, _) => true
+              case _                                        => false
             },
             msgs.exists {
               case HostMsg.Queued(items) => items.map(_.text) == List("later")
@@ -609,8 +609,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                                        => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "later", _, _) => true
-              case _                                     => false
+              case HostMsg.UserMessage(_, "later", _, _, _) => true
+              case _                                        => false
             },
             msgs.exists {
               case HostMsg.Queued(items) => items.map(_.text) == List("later")
@@ -677,8 +677,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.cancel
             msgs <- posted.get
           yield assertTrue(msgs.exists {
-            case HostMsg.UserMessage(_, "later", _, _) => true
-            case _                                     => false
+            case HostMsg.UserMessage(_, "later", _, _, _) => true
+            case _                                        => false
           })
         }
       },
@@ -700,8 +700,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                                        => false
             },
             msgs.exists {
-              case HostMsg.UserMessage(_, "second", _, _) => true
-              case _                                      => false
+              case HostMsg.UserMessage(_, "second", _, _, _) => true
+              case _                                         => false
             },
             left == List("first"),
           )
@@ -722,8 +722,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                     => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "drop-me", _, _) => true
-              case _                                       => false
+              case HostMsg.UserMessage(_, "drop-me", _, _, _) => true
+              case _                                          => false
             },
           )
         }
@@ -907,6 +907,52 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           )
         }
       },
+      test("consecutive user chunks keep the @ref and the prompt") {
+        def notify(update: AcpUpdate): String =
+          Ndjson.encode(
+            Rpc.toLine(Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", update)))
+          )
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(
+              notify(AcpUpdate.User(AcpContent.Text("@core/src/main/scala/groksbeard/core/ChatModel.scala")))
+            )
+            _    <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("say hello"))))
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            model.turns.size == 1,
+            model.turns.head.user.exists { u =>
+              u.text.contains("ChatModel.scala") && u.text.contains("say hello")
+            },
+          )
+        }
+      },
+      test("text then image user chunks keep the prompt and the image") {
+        def notify(update: AcpUpdate): String =
+          Ndjson.encode(
+            Rpc.toLine(Rpc.notifyOf("session/update", AcpSessionNotify("sess_test", update)))
+          )
+        chat() { (rt, posted) =>
+          for
+            _ <- rt.ready
+            _ <- posted.set(Nil)
+            _ <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("also look at this"))))
+            _ <- rt.ingestData(notify(AcpUpdate.User(AcpContent.Text("[image.png]"))))
+            _ <- rt.ingestData(
+              notify(AcpUpdate.User(AcpContent.Image("AAAA", "image/png", Some("file:///tmp/image.png"))))
+            )
+            msgs <- posted.get
+            model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
+          yield assertTrue(
+            model.turns.size == 1,
+            model.turns.head.user.exists(_.text == "also look at this"),
+            model.turns.head.user.exists(_.images.exists(_.name == "image.png")),
+          )
+        }
+      },
       test("turn_completed from a shared session ends the turn") {
         chat() { (rt, posted) =>
           for
@@ -947,8 +993,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             done <- posted.get
           yield assertTrue(
             mid.exists {
-              case HostMsg.UserMessage(_, "from tui", _, _) => true
-              case _                                        => false
+              case HostMsg.UserMessage(_, "from tui", _, _, _) => true
+              case _                                           => false
             },
             mid.exists {
               case HostMsg.ThoughtChunk(_, "thinking") => true
@@ -1252,7 +1298,7 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             msgs <- posted.get
           yield assertTrue(
             msgs.exists {
-              case HostMsg.UserMessage(_, "explain", chips, _) =>
+              case HostMsg.UserMessage(_, "explain", chips, _, _) =>
                 chips.exists(c => PromptChip.formatAtRef(c) == "@src/Foo.scala:10-50")
               case _ => false
             },
@@ -1275,8 +1321,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                       => false
             },
             msgs.exists {
-              case HostMsg.UserMessage(_, "look", chips, _) => chips.exists(_.path == "src/Main.scala")
-              case _                                        => false
+              case HostMsg.UserMessage(_, "look", chips, _, _) => chips.exists(_.path == "src/Main.scala")
+              case _                                           => false
             },
           )
         }
@@ -1311,8 +1357,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             _    <- rt.send("   ")
             msgs <- posted.get
           yield assertTrue(msgs.exists {
-            case HostMsg.UserMessage(_, "", chips, _) => chips.exists(_.path == "src/Foo.scala")
-            case _                                    => false
+            case HostMsg.UserMessage(_, "", chips, _, _) => chips.exists(_.path == "src/Foo.scala")
+            case _                                       => false
           })
         }
       },
@@ -2037,7 +2083,9 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             msgs <- posted.get
           yield assertTrue(
             lines.exists(l =>
-              l.contains("session/set_config_option") && l.contains("reasoning_effort") && l.contains("xhigh")
+              l.contains("session/set_config_option") && l.contains("reasoning_effort") &&
+                l.contains("\"type\":\"id\"") && l.contains("\"value\":\"xhigh\"") &&
+                !l.contains("{\"value\":\"xhigh\"}")
             ),
             msgs.exists {
               case m: HostMsg.SessionMeta => m.effort == "xhigh" && m.modelId == "grok-4.6"
@@ -2270,8 +2318,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                      => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "/model Grok Code Fast", _, _) => true
-              case _                                                     => false
+              case HostMsg.UserMessage(_, "/model Grok Code Fast", _, _, _) => true
+              case _                                                        => false
             },
           )
         }
@@ -2308,8 +2356,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                       => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "/new", _, _) => true
-              case _                                    => false
+              case HostMsg.UserMessage(_, "/new", _, _, _) => true
+              case _                                       => false
             },
           )
         }
@@ -2383,8 +2431,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                      => false
             },
             !msgs.exists {
-              case HostMsg.UserMessage(_, "/rename Plan", _, _) => true
-              case _                                            => false
+              case HostMsg.UserMessage(_, "/rename Plan", _, _, _) => true
+              case _                                               => false
             },
           )
         }
@@ -2631,8 +2679,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             )(ChatModel.applyMsg)
           yield assertTrue(
             msgs.exists {
-              case HostMsg.UserMessage(id, "hello", _, _) => id == TurnId("turn_2")
-              case _                                      => false
+              case HostMsg.UserMessage(id, "hello", _, _, _) => id == TurnId("turn_2")
+              case _                                         => false
             },
             model.turns.size == 2,
             model.turns.head.user.exists(_.text == "from disk"),
@@ -2655,8 +2703,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
           yield assertTrue(
             lines.exists(l => l.contains("session/prompt") && l.contains("follow up")),
             msgs.exists {
-              case HostMsg.UserMessage(_, "follow up", _, _) => true
-              case _                                         => false
+              case HostMsg.UserMessage(_, "follow up", _, _, _) => true
+              case _                                            => false
             },
             !msgs.exists {
               case HostMsg.Queued(items) => items.exists(_.text == "follow up")
@@ -2846,8 +2894,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             model = msgs.foldLeft(ChatModel.empty)(ChatModel.applyMsg)
           yield assertTrue(
             msgs.exists {
-              case HostMsg.UserMessage(_, "follow up", _, _) => true
-              case _                                         => false
+              case HostMsg.UserMessage(_, "follow up", _, _, _) => true
+              case _                                            => false
             },
             !msgs.exists {
               case HostMsg.Queued(items) => items.exists(_.text == "follow up")
@@ -2875,8 +2923,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             },
             !lines.exists(_.contains("session/prompt")),
             !msgs.exists {
-              case HostMsg.UserMessage(_, "later", _, _) => true
-              case _                                     => false
+              case HostMsg.UserMessage(_, "later", _, _, _) => true
+              case _                                        => false
             },
           )
         }
@@ -3180,8 +3228,8 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
 
   def snapshotUsers(posted: List[HostMsg]): List[String] =
     posted.flatMap {
-      case HostMsg.UserMessage(_, text, _, _) => List(text)
-      case HostMsg.Transcript(turns)          => turns.flatMap(_.user.map(_.text))
-      case _                                  => Nil
+      case HostMsg.UserMessage(_, text, _, _, _) => List(text)
+      case HostMsg.Transcript(turns)             => turns.flatMap(_.user.map(_.text))
+      case _                                     => Nil
     }
 end ChatRuntimeSpec

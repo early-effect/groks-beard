@@ -30,7 +30,13 @@ final case class TurnView(
 ) derives JsonCodec,
       Eq
 
-final case class TurnUser(text: String, chips: List[PromptChip] = Nil, steer: Boolean = false) derives JsonCodec, Eq
+final case class TurnUser(
+    text: String,
+    chips: List[PromptChip] = Nil,
+    steer: Boolean = false,
+    images: List[ImageChip] = Nil,
+) derives JsonCodec,
+      Eq
 
 final case class QueuedPrompt(
     id: QueueId,
@@ -179,6 +185,31 @@ object ChatModel:
   def nextTurnId(model: ChatModel): TurnId =
     val n = model.turns.iterator.flatMap(t => TurnId.seq(t.id)).maxOption.getOrElse(model.turns.size) + 1
     TurnId.mint(n)
+
+  /** ACP sends the @ref, the prompt, then `[image.png]` as separate user_message_chunks. Keep them. */
+  def mergeUser(
+      prev: Option[TurnUser],
+      text: String,
+      chips: List[PromptChip],
+      steer: Boolean,
+      images: List[ImageChip] = Nil,
+  ): TurnUser =
+    prev match
+      case Some(u) =>
+        val nextImages = u.images ++ images
+        val joined     =
+          if ImageAttach.isCaption(text) then u.text
+          else if text.nonEmpty && u.text.nonEmpty && u.text != text then s"${u.text}\n$text"
+          else if text.nonEmpty then text
+          else u.text
+        val nextText = if nextImages.nonEmpty then stripCaptions(joined) else joined
+        TurnUser(nextText, u.chips ++ chips, u.steer || steer, nextImages)
+      case None =>
+        val keep = if ImageAttach.isCaption(text) && images.nonEmpty then "" else text
+        TurnUser(keep, chips, steer, images)
+
+  private def stripCaptions(text: String): String =
+    text.linesIterator.filterNot(ImageAttach.isCaption).mkString("\n")
 
   def isEmptySession(model: ChatModel): Boolean =
     model.inSession && !isLoading(model) && model.turns.isEmpty
@@ -356,15 +387,15 @@ object ChatModel:
           )
       case HostMsg.ComposerChip(path, absPath, source, startLine, endLine) =>
         model.copy(chips = PromptChip.upsert(model.chips, PromptChip(path, absPath, source, startLine, endLine)))
-      case HostMsg.UserMessage(turnId, text, chips, steer) =>
+      case HostMsg.UserMessage(turnId, text, chips, steer, images) =>
         val taken = model.turns.find(_.id == turnId).exists { t =>
           t.stopReason.nonEmpty || t.agent.nonEmpty || t.tools.nonEmpty
         }
         val id = if taken then ChatModel.nextTurnId(model) else turnId
         markRunning(
-          upsert(model.copy(chips = Nil, inSession = true), id)(
-            _.copy(user = Some(TurnUser(text, chips, steer)), stopReason = None)
-          ),
+          upsert(model.copy(chips = Nil, inSession = true), id) { t =>
+            t.copy(user = Some(ChatModel.mergeUser(t.user, text, chips, steer, images)), stopReason = None)
+          },
           nowMs,
         )
 

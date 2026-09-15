@@ -43,6 +43,35 @@ object ChatModelSpec extends ZIOSpecDefault:
           closed.sessions.size == 1,
         )
       },
+      test("consecutive user chunks keep prompt text when an image caption follows") {
+        val prompt = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.UserMessage("turn_1", "also look at this"),
+        )
+        val caption = ChatModel.applyMsg(prompt, HostMsg.UserMessage("turn_1", "[image.png]"))
+        val image   = ChatModel.applyMsg(
+          caption,
+          HostMsg.UserMessage("turn_1", "", images = List(ImageChip("image.png", "image/png", "AAAA", "image.png"))),
+        )
+        assertTrue(
+          image.turns.size == 1,
+          image.turns.head.user.exists(_.text == "also look at this"),
+          image.turns.head.user.exists(_.images.exists(_.name == "image.png")),
+        )
+      },
+      test("consecutive user chunks on a live turn keep the @ref and the prompt") {
+        val ref = ChatModel.applyMsg(
+          ChatModel.empty,
+          HostMsg.UserMessage("turn_1", "@core/src/main/scala/groksbeard/core/ChatModel.scala"),
+        )
+        val both = ChatModel.applyMsg(ref, HostMsg.UserMessage("turn_1", "say \"hello\" in one word"))
+        assertTrue(
+          both.turns.size == 1,
+          both.turns.head.user.exists { u =>
+            u.text.contains("ChatModel.scala") && u.text.contains("say \"hello\" in one word")
+          },
+        )
+      },
       test("user and agent chunks fold into one turn") {
         for
           now <- Clock.currentTime(TimeUnit.MILLISECONDS)

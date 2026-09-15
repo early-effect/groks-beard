@@ -79,6 +79,7 @@ enum HostMsg derives JsonCodec:
       text: String,
       chips: List[PromptChip] = Nil,
       steer: Boolean = false,
+      images: List[ImageChip] = Nil,
   )
   @jsonHint("agentChunk") case AgentChunk(turnId: TurnId, text: String, messageId: Option[String] = None)
   @jsonHint("thoughtChunk") case ThoughtChunk(turnId: TurnId, text: String)

@@ -78,6 +78,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ""
       - name: cache-rehydrate
         run: sbt 'Test/compile'
@@ -104,9 +105,10 @@ jobs:
           node-version: "24"
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ""
       - name: Pinned snapshots
-        run: echo "::warning title=zipx snapshots::pinned snapshots (rocks.earlyeffect:sbt-zipx:0.17.0-SNAPSHOT)"
+        run: echo "::warning title=zipx snapshots::pinned snapshots (rocks.earlyeffect:sbt-splice:0.3.2-42d1f350d30e-SNAPSHOT)"
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -139,6 +141,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ""
       - name: fmt
         run: |
@@ -172,6 +175,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ""
       - name: workflow-check
         run: |
@@ -205,6 +209,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ""
       - name: advisories
         run: |
@@ -215,3 +220,16 @@ jobs:
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    needs:
+      - advisories
+      - fmt
+      - test
+      - workflow-check
+    if: "!cancelled()"
+    steps:
+      - name: Fail when a Verify job failed or was cancelled
+        if: (needs.advisories.result == 'failure' || needs.advisories.result == 'cancelled') || (needs.fmt.result == 'failure' || needs.fmt.result == 'cancelled') || (needs.test.result == 'failure' || needs.test.result == 'cancelled') || (needs.workflow-check.result == 'failure' || needs.workflow-check.result == 'cancelled')
+        run: exit 1

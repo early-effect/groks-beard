@@ -235,7 +235,7 @@ Created by [Russell White](https://github.com/russwyte). Published as `${Install
 
   /** `ascent.domtypes.AttrValue` is not on this classpath. A one-field case is the string. */
   private def attrText(value: Any): String = value match
-    case raw: String                         => raw
+    case raw: String                                   => raw
     case product: Product if product.productArity == 1 =>
       product.productElement(0) match
         case raw: String => raw

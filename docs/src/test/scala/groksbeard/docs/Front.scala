@@ -1,7 +1,6 @@
 package groksbeard.docs
 
 import ascent.ast.{Attr, UI}
-import ascent.domtypes.AttrValue
 import mermoid.{Diagram, LayoutConfig, Mermaid, RenderConfig, SequenceConfig, SequenceModel, SvgNode, SvgRenderer}
 import specular.*
 import specular.site.ProjectMeta
@@ -234,9 +233,18 @@ Created by [Russell White](https://github.com/russwyte). Published as `${Install
     case UI.Scoped(_)              => ""
     case UI.ServerRegion(_, _)     => ""
 
+  /** `ascent.domtypes.AttrValue` is not on this classpath. A one-field case is the string. */
+  private def attrText(value: Any): String = value match
+    case raw: String                         => raw
+    case product: Product if product.productArity == 1 =>
+      product.productElement(0) match
+        case raw: String => raw
+        case other       => other.toString
+    case other => other.toString
+
   private def attr(ui: UI[Any], tag: String, name: String): Option[String] = ui match
     case element: UI.Element[Any] if element.tag == tag =>
-      element.attrs.collectFirst { case Attr.StaticAttr(`name`, AttrValue.Str(raw)) => raw }
+      element.attrs.collectFirst { case Attr.StaticAttr(`name`, value) => attrText(value) }
     case element: UI.Element[Any] =>
       element.children.iterator.map(node => attr(node, tag, name)).collectFirst { case Some(raw) => raw }
     case UI.Fragment(children) =>

@@ -1,6 +1,8 @@
 # Grok's Beard
 
-A VS Code / Cursor client for [Grok Build](https://x.ai). Named for the thing you grow while the agent works, and a nod to [Spock's Beard](https://en.wikipedia.org/wiki/Spock%27s_Beard).
+A VS Code / Cursor client for [Grok Build](https://x.ai), named for the thing you grow while the agent works, and a nod to [Spock's Beard](https://en.wikipedia.org/wiki/Spock%27s_Beard).
+
+Docs: [early-effect.github.io/groks-beard](https://early-effect.github.io/groks-beard/)
 
 Created by [Russell White](https://github.com/russwyte). Published as **`early-effect.groks-beard`**.
 

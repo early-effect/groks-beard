@@ -11,6 +11,8 @@ coverage/
 
 # sbt
 target/
+# Ascent 0.10 jars fetched for the docs classpath. Not the extension's Ascent.
+/docs/lib/
 project/project/
 project/target/
 .bsp/

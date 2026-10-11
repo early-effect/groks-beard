@@ -49,9 +49,11 @@ pomIncludeRepository := { _ => false }
 
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 
-zipxJavaVersion := JdkVersion("25")
+zipxJavaVersion      := JdkVersion("25")
+zipxWorkflowDispatch := true
 zipxEnv += "PLAYWRIGHT_BROWSERS_PATH" ->
   EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright"))
+zipxCapabilities += ZipxDocs.pages()
 zipxCapabilities += Capability
   .once(
     name = Capability.TestName,
@@ -65,6 +67,23 @@ zipxCapabilities += Capability
 
 addCommandAlias("testCore", "core/testFull; coreJS/testFull")
 addCommandAlias("verifyBeard", "uiJS/chekhovInstall; testFull; uiJS/spliceFull")
+
+lazy val fetchDocsClasspath =
+  taskKey[Unit]("Download the Ascent 0.10 jars the docs project puts on its own classpath")
+
+def fetchMavenJar(dir: File, artifact: String, version: String): File =
+  val dest = dir / s"$artifact-$version.jar"
+  if dest.isFile then dest
+  else
+    IO.createDirectory(dir)
+    val url = s"https://repo1.maven.org/maven2/rocks/earlyeffect/$artifact/$version/$artifact-$version.jar"
+    val stream =
+      try new java.net.URI(url).toURL.openStream()
+      catch case err: java.io.IOException => sys.error(s"docs classpath: $url ($err)")
+    try
+      IO.transfer(stream, dest)
+      dest
+    finally stream.close()
 
 val commonScalacOptions = Seq(
   "-deprecation",
@@ -94,9 +113,11 @@ lazy val root = (project in file("."))
     preview,
     host,
     mcp,
+    docs,
   )
   .settings(
-    name := "groks-beard-root",
+    name        := "groks-beard-root",
+    description := "A VS Code and Cursor client for Grok Build.",
     skipPublish,
     test / skip := true,
     stampVsixVersion := Def.uncached {
@@ -290,4 +311,39 @@ lazy val mcp = (project in file("mcp"))
     Test / sources  := Nil,
     Test / test     := Def.uncached(sbt.protocol.testing.TestResult.Passed),
     Test / testFull := Def.uncached(sbt.protocol.testing.TestResult.Passed),
+  )
+
+// Docs only. Not a published library, and not on the extension classpath.
+lazy val docs = (project in file("docs"))
+  .disablePlugins(chekhov.sbt.ChekhovPlugin)
+  .enablePlugins(SpecularPlugin)
+  .settings(MyVersions.docsTest)
+  .settings(
+    name           := "groks-beard-docs",
+    skipPublish,
+    // The catalog pins Ascent 0.7.1 for the extension. Specular 0.20 needs 0.10 on this classpath only.
+    excludeDependencies ++= Seq(
+      ExclusionRule("rocks.earlyeffect", "ascent-core_3"),
+      ExclusionRule("rocks.earlyeffect", "ascent-css_3"),
+      ExclusionRule("rocks.earlyeffect", "ascent-preview_3"),
+    ),
+    fetchDocsClasspath := Def.uncached {
+      val dir = baseDirectory.value / "lib"
+      val _   = fetchMavenJar(dir, "ascent-core_3", "0.10.1")
+      val _   = fetchMavenJar(dir, "ascent-css_3", "0.10.1")
+      val _   = fetchMavenJar(dir, "ascent-dom-types_3", "0.11.1")
+      ()
+    },
+    update            := update.dependsOn(fetchDocsClasspath).value,
+    Compile / compile := (Compile / compile).dependsOn(fetchDocsClasspath).value,
+    Test / compile    := (Test / compile).dependsOn(fetchDocsClasspath).value,
+    scalacOptions ++= commonScalacOptions,
+    Test / mainClass      := Some("specular.site.DocsServe"),
+    specularBuildMain     := "groksbeard.docs.BuildSite",
+    specularMetaProject   := Some(LocalProject("root")),
+    specularArtifactKind  := "library",
+    specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
+    // CI sets SPECULAR_STRIP_CI, which ignores this and would advertise 0.0.0 from 0.0.0-ci.
+    // There is no published tag. BuildSite drops the badge. Do not pin a fake release.
+    specularDisplayVersion := (_ => ""),
   )

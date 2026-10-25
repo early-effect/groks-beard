@@ -182,4 +182,3 @@ object MarkdownSpec extends ZIOSpecDefault:
         assertTrue(earlier == List(1, 2), visible == List(3, 4, 5, 6), ToolView.rollupLabel(2) == "2 earlier tools")
       },
     )
-end MarkdownSpec

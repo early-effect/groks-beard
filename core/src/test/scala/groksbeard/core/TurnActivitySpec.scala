@@ -89,4 +89,3 @@ object TurnActivitySpec extends ZIOSpecDefault:
         )
       },
     )
-end TurnActivitySpec

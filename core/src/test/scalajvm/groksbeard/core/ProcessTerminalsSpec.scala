@@ -37,4 +37,3 @@ object ProcessTerminalsSpec extends ZIOSpecDefault:
         }
       },
     )
-end ProcessTerminalsSpec

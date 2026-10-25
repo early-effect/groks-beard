@@ -26,4 +26,3 @@ object ToolOutputSpec extends ZIOSpecDefault:
         assertTrue(ToolOutput.pull(live, done, snapshot = true) == done)
       },
     )
-end ToolOutputSpec

@@ -22,5 +22,3 @@ object MentionWalk:
             }
           finally walk.close()
           MentionSearch.rank(acc.toList, query).take(limit)
-        end if
-end MentionWalk

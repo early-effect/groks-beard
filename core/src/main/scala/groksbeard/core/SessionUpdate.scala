@@ -106,5 +106,4 @@ object SessionUpdate:
       path = loc.map(_.path),
       line = loc.flatMap(_.line),
     )
-  end toolRow
 end SessionUpdate

@@ -61,7 +61,6 @@ object Markdown:
           val (head, tail) = lines.splitAt(lastBlank + 1)
           if tail.forall(_.trim.isEmpty) then (Chunk.fromIterable(parseBlocks(lines)), "")
           else peelTail(head, tail)
-      end if
 
   /** Fold the next chunk onto an open tail. Closed blocks from the tail are the new prefix. */
   def pull(tail: String, more: String): (Chunk[Block], String) =

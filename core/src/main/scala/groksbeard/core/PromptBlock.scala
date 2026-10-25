@@ -58,7 +58,6 @@ object PromptBlock:
           PromptBlock.Text(ref),
           fileResource(chip.absPath, excerpt, chip.languageId),
         )
-  end chipBlocks
 
   private def fileUri(absPath: String): String =
     val norm = absPath.replace('\\', '/')

@@ -20,7 +20,6 @@ object ProcessTransportSpec extends ZIOSpecDefault:
           (pid, wasAlive) = snap
           gone            = ProcessHandle.of(pid).filter(_.isAlive).isEmpty
         yield assertTrue(wasAlive, gone)
-        end for
       },
       test("onExit fires when the child exits on its own") {
         val win  = sys.props.getOrElse("os.name", "").toLowerCase.contains("win")
@@ -50,7 +49,5 @@ object ProcessTransportSpec extends ZIOSpecDefault:
           _   <- ZIO.sleep(200.millis)
           saw <- fired.get
         yield assertTrue(!saw)
-        end for
       } @@ TestAspect.withLiveClock,
     )
-end ProcessTransportSpec

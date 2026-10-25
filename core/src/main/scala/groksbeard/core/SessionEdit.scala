@@ -83,7 +83,6 @@ object SessionEdit:
                       case RenameOp.Auto          => None
                   }
                 }
-          end match
         }
     }
 

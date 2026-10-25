@@ -39,4 +39,3 @@ object FollowAlongSpec extends ZIOSpecDefault:
         )
       },
     )
-end FollowAlongSpec

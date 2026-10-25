@@ -27,4 +27,3 @@ object AcpMethodSpec extends ZIOSpecDefault:
         )
       },
     )
-end AcpMethodSpec

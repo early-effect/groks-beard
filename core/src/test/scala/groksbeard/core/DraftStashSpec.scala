@@ -22,4 +22,3 @@ object DraftStashSpec extends ZIOSpecDefault:
         assertTrue(s.exists(d => d.images == List(img) && d.restoreAfterSend))
       },
     )
-end DraftStashSpec

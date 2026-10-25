@@ -50,8 +50,6 @@ object TerminalShell:
             case Some(script) => List(host, "-c", script)
             case None         => command :: flags
         else command :: flags
-    end match
-  end posixArgv
 
   /** Peel grok's `/bin/bash -lc <script>` wrapper. One layer only. */
   def unwrapGrokBashLoginWrapper(command: String): Option[String] =
@@ -64,7 +62,6 @@ object TerminalShell:
     val base = exe.substring(exe.lastIndexOf('/') + 1)
     if base != "bash" then None
     else unwrapFlagsAndScript(stripBlanks(after))
-  end unwrapGrokBashLoginWrapper
 
   def unwrapGrokBashLoginArgs(command: String, args: List[String]): Option[String] =
     val exe  = command.trim
@@ -105,7 +102,6 @@ object TerminalShell:
           else
             word.append(s.charAt(i))
             i += 1
-        end while
         if !closed then return None
       else if ch == '\\' then
         if i + 1 >= s.length then return None
@@ -116,10 +112,7 @@ object TerminalShell:
       else
         word.append(ch)
         i += 1
-      end if
-    end while
     Some((word.toString, s.substring(i)))
-  end parseOneShellWord
 
   private def unwrapFlagsAndScript(after: String): Option[String] =
     def loop(s0: String, sawLogin: Boolean, sawCommand: Boolean): Option[String] =
@@ -138,10 +131,7 @@ object TerminalShell:
               if chars.exists(ch => ch != 'l' && ch != 'c') then None
               else loop(next, sawLogin || chars.contains('l'), sawCommand || chars.contains('c'))
             else None
-      end if
-    end loop
     loop(after, false, false)
-  end unwrapFlagsAndScript
 
   private def finishScript(sawLogin: Boolean, sawCommand: Boolean, s: String): Option[String] =
     if !sawLogin || !sawCommand || s.isEmpty then None

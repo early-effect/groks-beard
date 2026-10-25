@@ -23,4 +23,3 @@ object SettingKeySpec extends ZIOSpecDefault:
         )
       }
     )
-end SettingKeySpec

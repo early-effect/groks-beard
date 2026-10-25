@@ -259,5 +259,4 @@ object McpSpec extends ZIOSpecDefault:
     def showChanges(title: Option[String], files: List[ShowChangesFile]): ShowChangesResult =
       shown = files.size
       ShowChangesResult(ok = true, shown = files.size)
-  end FakeHost
 end McpSpec

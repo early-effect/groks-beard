@@ -341,5 +341,4 @@ object SessionIndexSpec extends ZIOSpecDefault:
       ZIO.succeed(files.get(path).collect { case File(m, _) => m })
     def readText(path: String): BeardError.Result[Option[String]] =
       ZIO.succeed(files.get(path).collect { case File(_, t) => t })
-  end MemorySessionFs
 end SessionIndexSpec

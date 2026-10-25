@@ -103,9 +103,7 @@ object AgentQuestion:
             allowFreeText = JsonObj.bool(obj, "allowFreeText").getOrElse(true),
           )
         )
-      end if
     case _ => None
-end AgentQuestion
 
 object JsonObj:
   def field(obj: Json.Obj, key: String): Option[Json] =
@@ -289,7 +287,6 @@ object ChatModel:
         subagents = t.subagents,
       )
     }
-  end snapshotTurns
 
   def stillLive(turn: TurnView): Boolean =
     turn.tools.exists(r => ToolStatus.isLive(r.status)) ||
@@ -327,7 +324,6 @@ object ChatModel:
       rewind = Nil,
       rewindConfirm = None,
     )
-  end adopt
 
   def dropHost(waiting: Option[SessionId], msg: HostMsg): Boolean =
     waiting match
@@ -601,7 +597,6 @@ object ChatModel:
         turns = List(TurnView(TurnId("subagent-1"), subagents = List(row))),
         inSession = true,
       )
-  end pinSubagent
 
   private def mergeSubagent(turn: TurnView, row: TaskRow): TurnView =
     turn.copy(subagents = Tasks.upsert(turn.subagents, row))
@@ -636,8 +631,6 @@ object ChatModel:
           line = located.fold(prev.line)(_ => row.line),
         ),
       )
-    end if
-  end mergeTool
 
   private def pullToolOutput(
       existing: List[ToolRow],
@@ -659,8 +652,6 @@ object ChatModel:
       val prev = existing(idx)
       val out  = ToolOutput.pull(prev.output.getOrElse(""), text, snapshot)
       existing.updated(idx, prev.copy(output = Some(out).filter(_.nonEmpty)))
-    end if
-  end pullToolOutput
 
   private def mergeToolTitle(prev: ToolRow, row: ToolRow): String =
     val incoming = row.title.trim

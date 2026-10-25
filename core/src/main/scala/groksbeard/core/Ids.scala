@@ -25,7 +25,6 @@ object TurnId:
     def isEmpty: Boolean  = id.length == 0
     def nonEmpty: Boolean = id.length > 0
   given JsonCodec[TurnId] = JsonExt.stringCodec(_.value, apply)
-end TurnId
 
 opaque type ToolCallId = String
 object ToolCallId:
@@ -79,7 +78,6 @@ object ModeId:
     def nonEmpty: Boolean = id.length > 0
     def isPlan: Boolean   = id == Plan
   given JsonCodec[ModeId] = JsonExt.stringCodec(_.value, apply)
-end ModeId
 
 opaque type TerminalId = String
 object TerminalId:

@@ -39,7 +39,6 @@ object Mcps:
               rows
             }
           }
-      end new
     }
 
   def cli(
@@ -78,7 +77,6 @@ object Mcps:
       else
         val body = toml.substring(from, to + 1)
         """"([^"]+)"""".r.findAllMatchIn(body).map(_.group(1)).toSet
-  end disabledNames
 
   def applyDisabled(rows: List[McpServerView], disabled: Set[String]): List[McpServerView] =
     if disabled.isEmpty then rows
@@ -105,8 +103,6 @@ object Mcps:
         if s.contains("~") || s.contains("home") then "~/.grok/config.toml"
         else ".grok/config.toml"
       case s => s
-    end match
-  end sourceLabel
 
   def status(row: McpServerView): String =
     if !row.enabled then "disabled"

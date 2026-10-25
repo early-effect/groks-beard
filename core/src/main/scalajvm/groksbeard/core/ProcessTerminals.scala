@@ -112,13 +112,11 @@ object ProcessTerminals:
           finally
             val code = process.waitFor()
             finish(TerminalExitStatus(Some(code), None))
-          end try
         ,
         "beard-term",
       )
       t.setDaemon(true)
       t.start()
-    end drain
 
     def outputStream: ZStream[Any, Nothing, String] =
       ZStream.asyncScoped { emit =>
@@ -147,7 +145,6 @@ object ProcessTerminals:
           listeners
         }
       notify.foreach(_(chunk))
-    end append
 
     def finish(st: TerminalExitStatus): Unit =
       val done =
@@ -163,7 +160,6 @@ object ProcessTerminals:
           }
         }
       done.foreach(_())
-    end finish
 
     def snapshot: TerminalOutputResult =
       synchronized {
@@ -183,6 +179,5 @@ object ProcessTerminals:
         val _ = process.destroyForcibly()
         val _ = process.waitFor(1, TimeUnit.SECONDS)
       finish(TerminalExitStatus(None, Some("SIGTERM")))
-    end kill
   end Slot
 end ProcessTerminals

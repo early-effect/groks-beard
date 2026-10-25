@@ -25,6 +25,4 @@ object ChildAttach:
       case Some(StopReason.Cancelled) => "Cancelled"
       case Some(StopReason.EndTurn)   => "Completed"
       case Some(other)                => StopReason.wire(other)
-    end match
-  end activity
 end ChildAttach

@@ -24,4 +24,3 @@ object UnifiedDiffSpec extends ZIOSpecDefault:
         )
       },
     )
-end UnifiedDiffSpec

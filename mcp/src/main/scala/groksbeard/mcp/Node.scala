@@ -14,7 +14,6 @@ trait Socket extends js.Object:
   def once(event: String, listener: js.Function1[js.Any, Any]): Socket = js.native
   def off(event: String, listener: js.Function1[js.Any, Any]): Socket  = js.native
   def destroyed: Boolean                                               = js.native
-end Socket
 
 @js.native
 trait Server extends js.Object:
@@ -66,7 +65,6 @@ trait NodeProcessApi extends js.Object:
   def platform: String                       = js.native
   def exit(code: Int): Nothing               = js.native
   def cwd(): String                          = js.native
-end NodeProcessApi
 
 @js.native
 @JSImport("process", JSImport.Namespace)

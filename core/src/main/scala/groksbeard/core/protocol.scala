@@ -34,7 +34,6 @@ object SettingsState:
       "toast",
       shareBackend = true,
     )
-end SettingsState
 
 @jsonDiscriminator("_tag")
 enum HostMsg derives JsonCodec:
@@ -141,7 +140,6 @@ enum HostMsg derives JsonCodec:
   @jsonHint("btw") case Btw(text: String, done: Boolean = false)
   @jsonHint("doctor") case DoctorReport(findings: List[DoctorFinding] = Nil)
   @jsonHint("uiPrefs") case UiPrefs(theme: String = "vscode", compact: Boolean = false, vim: Boolean = false)
-end HostMsg
 
 object HostMsg:
   def settings(state: SettingsState): HostMsg =
@@ -254,4 +252,3 @@ enum WebviewMsg derives JsonCodec:
   @jsonHint("addImage") case AddImage(mime: String, data: String, name: String = "")
   @jsonHint("removeImage") case RemoveImage(id: String)
   @jsonHint("persistConfig") case PersistConfig(table: String, key: String, value: String)
-end WebviewMsg

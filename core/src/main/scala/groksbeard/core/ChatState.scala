@@ -179,7 +179,6 @@ final case class ChatState(
         ChangeSet.turnTitle(if text.nonEmpty then text else chosen.headOption.map(_.path).getOrElse("chip")),
       promptSid = Some(sessionId.getOrElse(fallback)),
     )
-  end startTurn
 
   def enqueue(text: String, chosen: List[PromptChip], images: List[ImageChip]): ChatState =
     val n = queueSeq + 1
@@ -219,7 +218,6 @@ final case class ChatState(
         )
         next.copy(effort = Effort.activeOf(next.currentModel))
     withModels.withConfig(decoded.configOptions ++ ConfigOption.of(raw))
-  end withSession
 
   def withConfig(opts: List[ConfigOption]): ChatState =
     if opts.isEmpty then this
@@ -323,7 +321,6 @@ final case class ChatState(
       )
     val next = Tasks.upsert(tasks, row)
     ((id, next), copy(loopSeq = n, tasks = next))
-  end mintLoop
 end ChatState
 
 object ChatState:

@@ -265,7 +265,6 @@ object McpTools:
       languageId = languageId,
       atRef = atRef,
     )
-  end selectionResult
 
   def sidecarFile(path: String, kind: FileKind): FileChange =
     FileChange(

@@ -58,7 +58,6 @@ final class ChatView(
         val text = out.error("resolveWebviewView", e)
         try webview.html = ChatHtml.errorPage(text)
         catch case _: Throwable => ()
-  end resolveWebviewView
 
   private def resolve(webview: Webview): Unit =
     webview.options = WebviewOptions(
@@ -91,7 +90,6 @@ final class ChatView(
           case HostMsg.ClearTranscript =>
             val _ = vscode.commands.executeCommand[js.Any]("setContext", "groksBeard.turnRunning", false)
           case _ => ()
-        end match
         ()
       }
     addSink(post)
@@ -106,7 +104,6 @@ final class ChatView(
           handleWebview(msg, post)
     }
     ()
-  end resolve
 
   private def handleWebview(msg: WebviewMsg, post: HostMsg => UIO[Unit]): Unit =
     msg match
@@ -141,8 +138,6 @@ final class ChatView(
               case _                    => HostRuntime.runUIO(post(HostMsg.Error(err)))
           case None =>
             if msg == WebviewMsg.Ready then pendingReady = true
-    end match
-  end handleWebview
 
   private def broadcast(msg: HostMsg): UIO[Unit] =
     ZIO.foreachDiscard(sinks.get())(_(msg))
@@ -224,8 +219,6 @@ final class ChatView(
       _ <- ZIO.log("runtime up")
       _ <- rt.restoreChanges(saved)
     yield rt
-    end for
-  end spawnPipeline
 
   private def agentEnv(
       bin: String,
@@ -326,7 +319,6 @@ final class ChatView(
       changesPresentation = cfg.get[String](SettingKey.ChangesPresentation.wire).toOption.getOrElse("toast"),
       shareBackend = cfg.get[Boolean](SettingKey.ShareBackend.wire).toOption.getOrElse(true),
     )
-  end readSettings
 
   private def writeSetting(key: SettingKey, value: String | Boolean): Unit =
     val cfg = vscode.workspace.getConfiguration("groksBeard")
@@ -340,8 +332,6 @@ final class ChatView(
         case s: String =>
           val _ = cfg.update(key.wire, s, ConfigurationTarget.Global)
         case _ => ()
-    end if
-  end writeSetting
 
   private def workspaceRoot: Option[String] =
     vscode.workspace.workspaceFolders.toOption.filter(_.length > 0).map(_(0).uri.fsPath)

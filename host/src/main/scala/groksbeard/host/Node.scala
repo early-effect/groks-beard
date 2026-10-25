@@ -66,7 +66,6 @@ object nodeFs extends js.Object:
   def statSync(path: String): NodeFsStats                                        = js.native
   def rmSync(path: String, options: RmSyncOptions): Unit                         = js.native
   def createReadStream(path: String, options: ReadStreamOptions): NodeReadStream = js.native
-end nodeFs
 
 @js.native
 @JSImport("readline", JSImport.Namespace)

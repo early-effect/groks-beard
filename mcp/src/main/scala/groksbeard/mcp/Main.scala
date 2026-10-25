@@ -23,8 +23,6 @@ object Main:
             val _ = process.stderr.write(s"${McpToml.EditorDownMessage}\n")
             process.exit(1),
         )
-    end match
-  end main
 
   def sha256Hex(text: String): String =
     crypto.createHash("sha256").update(text).digest("hex")
@@ -47,7 +45,6 @@ object Main:
     sock.setTimeout(2000, () => finish(false))
     sock.once("connect", (_: js.Any) => finish(true))
     sock.once("error", (_: js.Any) => finish(false))
-  end probe
 
   private def serve(workspace: String, address: String): Unit =
     var buffer                  = ""
@@ -93,7 +90,6 @@ object Main:
     process.stdin.on("end", (_: js.Any) => finish(0))
     process.stdin.on("error", (_: js.Any) => finish(1))
     val _ = workspace
-  end serve
 
   private def callBridge(
       address: String,
@@ -132,5 +128,4 @@ object Main:
         },
     )
     sock.once("error", (_: js.Any) => finish(Left(McpToml.EditorDownMessage), isDown = true))
-  end callBridge
 end Main

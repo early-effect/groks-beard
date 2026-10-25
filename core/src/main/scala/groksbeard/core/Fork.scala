@@ -41,14 +41,11 @@ object Fork:
           err = Some(AtUnsupported)
         case _ =>
           flags = false
-      end match
-    end while
     err match
       case Some(e) => Left(e)
       case None    =>
         val directive = Option(rest).map(_.trim).filter(_.nonEmpty)
         Right(ForkArgs(worktree, directive))
-  end parse
 
   def offersWorktree(json: Json): Boolean =
     json.toString.toLowerCase.contains("git/worktree")

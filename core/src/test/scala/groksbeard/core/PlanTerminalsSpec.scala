@@ -44,4 +44,3 @@ object PlanTerminalsSpec extends ZIOSpecDefault:
         )
       },
     )
-end PlanTerminalsSpec

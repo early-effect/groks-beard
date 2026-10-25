@@ -35,7 +35,6 @@ final class LivePreviewBridge extends HostBridge:
         case Left(err)   =>
           Browser.console.error(err, data)
           f(HostMsg.Error(err, Some(Wire.Decode)))
-  end onHost
 
   private def send(msg: WebviewMsg): Unit =
     val _ = ascent.dom.window.fetch(
@@ -49,3 +48,4 @@ object LivePreviewBridge:
   def msgPath(client: String): String    = s"/__beard/msg?client=$client"
 
   def newClientId(): String = ascent.dom.window.crypto.randomUUID()
+end LivePreviewBridge

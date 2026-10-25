@@ -75,7 +75,6 @@ object TranscriptScroll:
         else
           setPad(0)
           el.scrollTop = el.scrollHeight.toDouble
-        end if
         pinned = el.scrollTop
       }
     var rafId                                      = Option.empty[Int]
@@ -131,5 +130,4 @@ object TranscriptScroll:
           ()
         })
         .unit
-  end bind
 end TranscriptScroll

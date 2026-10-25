@@ -57,7 +57,6 @@ object SessionFacts:
         if model.sessionId.nonEmpty || model.inSession || model.turns.nonEmpty then "This session"
         else "No session"
       }
-  end title
 
   def info(model: ChatModel): List[FactRow] =
     val named = title(model)
@@ -72,7 +71,6 @@ object SessionFacts:
       occupancyLabel(model),
       mcpRow(model),
     ).flatten
-  end info
 
   def context(model: ChatModel): List[FactRow] =
     occupancyBreakdown(model) ++ List(Some(turnsRow(model)), mcpRow(model)).flatten

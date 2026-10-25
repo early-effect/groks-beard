@@ -37,7 +37,6 @@ class File(
   def name: String   = js.native
   def `type`: String = js.native
   def size: Double   = js.native
-end File
 
 @js.native
 @JSGlobal

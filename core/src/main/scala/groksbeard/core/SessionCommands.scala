@@ -222,7 +222,4 @@ object SessionCommands:
         isAlwaysApprove(name) || isAuto(name) || isWorkflowRuns(name, args) || isWorkflowManage(name, args).nonEmpty
       then Some(ClientCommand(name, args))
       else None
-      end if
-    end if
-  end intercept
 end SessionCommands

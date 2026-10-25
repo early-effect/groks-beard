@@ -82,4 +82,3 @@ object HostDispatch:
       case WebviewMsg.AddImage(mime, data, name)       => runtime.addImage(mime, data, name)
       case WebviewMsg.RemoveImage(id)                  => runtime.removeImage(id)
       case WebviewMsg.PersistConfig(table, key, value) => runtime.persistConfig(table, key, value)
-end HostDispatch

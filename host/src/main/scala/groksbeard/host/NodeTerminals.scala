@@ -112,7 +112,6 @@ object NodeTerminals:
             code.asInt
           finish(TerminalExitStatus(n, None)),
       )
-    end listen
 
     def outputStream: ZStream[Any, Nothing, String] =
       ZStream.asyncScoped { emit =>
@@ -142,7 +141,6 @@ object NodeTerminals:
           cbs
         }
       notify.foreach(_(chunk))
-    end append
 
     def snapshot: TerminalOutputResult =
       synchronized {
@@ -176,6 +174,5 @@ object NodeTerminals:
         }
       pending.foreach(_(st))
       done.foreach(_())
-    end finish
   end Slot
 end NodeTerminals

@@ -33,4 +33,3 @@ object OccupancySpec extends ZIOSpecDefault:
         assertTrue(Occupancy.fromJson(json).contains(Occupancy(80, 500)))
       },
     )
-end OccupancySpec

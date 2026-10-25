@@ -105,7 +105,6 @@ object SessionLog:
       path = loc.map(_.path),
       line = loc.flatMap(_.line),
     )
-  end compactCall
 
   private def compactUpdate(call: AcpUpdate.ToolCallUpdate): ToolRow =
     val loc = call.locations.headOption
@@ -117,7 +116,6 @@ object SessionLog:
       path = loc.map(_.path),
       line = loc.flatMap(_.line),
     )
-  end compactUpdate
 
   private def noteUser(state: State): State =
     if state.userOpen then state
@@ -144,7 +142,6 @@ object SessionLog:
       val end = line.indexOf('"', start)
       if end <= start then None else Some(line.substring(start, end))
     }
-  end scanField
 
   private def str(json: Json, key: String): Option[String] =
     field(json, key).collect { case Json.Str(s) => s }

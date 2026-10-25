@@ -144,7 +144,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case m: HostMsg.Settings => m.cliPath == "/tmp/grok"
               case _                   => false
             })
-            end for
           }
         }
       } @@ TestAspect.timeout(5.seconds),
@@ -451,7 +450,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _                     => false
             },
           )
-          end for
         }
       },
       test("send /rewind intercepts and lists points") {
@@ -829,7 +827,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("restoreChanges after ready posts immediately") {
         val file =
@@ -1473,7 +1470,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             blob.contains("\"terminalId\":\"term-1\""),
             !blob.contains(PlanTerminals.Reject),
           )
-          end for
         }
       },
       test("PTY stdout is posted as ToolChunk events") {
@@ -2538,7 +2534,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
             blob.contains("dense"),
             blob.contains("notes"),
           )
-          end for
         }
       },
       test("questionDismiss replies with empty answers") {
@@ -2610,7 +2605,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case _ => false
             }
           )
-          end for
         }
       },
       test("setModel falls back to session/set_model when configOptions are empty") {
@@ -3142,7 +3136,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case Right(msg) => ingest(agent.encodeReplies(msg))
               case Left(_)    => ZIO.unit
           }
-        end write
         def close: UIO[Unit] = ZIO.unit
       (transport, held)
     }
@@ -3173,7 +3166,6 @@ object ChatRuntimeSpec extends ZIOSpecDefault:
               case Right(msg) => ingest(agent.encodeReplies(msg))
               case Left(_)    => ZIO.unit
           }
-        end write
         def close: UIO[Unit] = ZIO.unit
       (transport, held)
     }

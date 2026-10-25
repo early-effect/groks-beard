@@ -47,4 +47,3 @@ object ForkSpec extends ZIOSpecDefault:
         assertTrue(Fork.offersWorktree(yes), !Fork.offersWorktree(no))
       },
     )
-end ForkSpec

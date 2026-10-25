@@ -28,4 +28,3 @@ object ChatHtmlSpec extends ZIOSpecDefault:
         )
       },
     )
-end ChatHtmlSpec

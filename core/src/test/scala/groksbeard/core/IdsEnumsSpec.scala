@@ -37,4 +37,3 @@ object IdsEnumsSpec extends ZIOSpecDefault:
       )
     },
   )
-end IdsEnumsSpec

@@ -30,4 +30,3 @@ object SpawnSpec extends ZIOSpecDefault:
         )
       },
     )
-end SpawnSpec

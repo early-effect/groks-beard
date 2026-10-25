@@ -44,8 +44,6 @@ object Main extends ZIOAppDefault:
       }
       _ <- ZIO.never
     yield ()
-    end for
-  end boot
 
   private def readLogo: Option[String] =
     def attr(el: ascent.dom.Element | Null): Option[String] =

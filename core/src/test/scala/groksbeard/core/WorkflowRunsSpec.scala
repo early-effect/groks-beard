@@ -37,4 +37,3 @@ object WorkflowRunsSpec extends ZIOSpecDefault:
         )
       },
     )
-end WorkflowRunsSpec

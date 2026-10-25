@@ -103,4 +103,3 @@ object DiffContentSpec extends ZIOSpecDefault:
         assertTrue(card.hasDiff, card.toolCallId == "edit-1", card.options.head.optionId == "allow")
       },
     )
-end DiffContentSpec

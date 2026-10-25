@@ -209,7 +209,6 @@ enum AcpUpdate derives JsonCodec:
   @jsonHint("turn_completed") case TurnCompleted(
       @jsonField("stop_reason") stopReason: StopReason = StopReason.EndTurn
   )
-end AcpUpdate
 
 final case class AcpSessionNotify(sessionId: SessionId = SessionId.empty, update: AcpUpdate) derives JsonCodec
 

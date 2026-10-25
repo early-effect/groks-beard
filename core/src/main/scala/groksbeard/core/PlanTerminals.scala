@@ -119,8 +119,6 @@ object PlanTerminals:
         else if name == "sed" then !sedInPlace(words.drop(1))
         else ReadOnly.contains(name)
       }
-    end if
-  end allowedSimple
 
   private def gitRead(args: List[String]): Boolean =
     val sub = args.dropWhile(a => a.startsWith("-") && a != "--").headOption.getOrElse("")

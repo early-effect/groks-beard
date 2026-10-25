@@ -14,7 +14,6 @@ object Utf8:
       else n += 3
       i += 1
     n
-  end byteLength
 
   def truncateToByteCap(text: String, cap: Int): String =
     if byteLength(text) <= cap then text
@@ -31,7 +30,6 @@ object Utf8:
         if n + size > cap then return text.substring(0, i)
         n += size
         i += (if size == 4 then 2 else 1)
-      end while
       text.substring(0, i)
 
   /** Drop a prefix so the remainder fits `cap` bytes, on a character boundary. */
@@ -50,8 +48,5 @@ object Utf8:
           else 3
         skip -= size
         i += (if size == 4 then 2 else 1)
-      end while
       text.substring(i)
-    end if
-  end keepTailToByteCap
 end Utf8

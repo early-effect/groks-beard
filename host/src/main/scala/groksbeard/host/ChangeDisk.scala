@@ -34,8 +34,6 @@ final class ChangeDisk(context: ExtensionContext):
             sets
           }
         }
-    end if
-  end load
 
   def save(sets: List[ChangeSet]): BeardError.Result[Unit] =
     val ticket = gate.incrementAndGet()
@@ -54,8 +52,6 @@ final class ChangeDisk(context: ExtensionContext):
         if gate.get() == ticket then written = next
       }
     yield ()
-    end for
-  end save
 
   private def joinRel(root: Uri, rel: String): Uri =
     vscode.Uri.joinPath(root, rel.split('/').toList*)

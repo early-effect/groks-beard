@@ -25,4 +25,3 @@ object AgentLogSpec extends ZIOSpecDefault:
         )
       },
     )
-end AgentLogSpec

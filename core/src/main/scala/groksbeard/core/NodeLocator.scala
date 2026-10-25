@@ -29,7 +29,6 @@ object NodeLocator:
         if input.win then out += join(dir, "node.cmd")
     }
     out.result()
-  end candidates
 
   def resolveSpawnTarget(candidate: String, exists: String => Boolean): String =
     if candidate.matches("(?i).*\\.(cmd|bat)$") then

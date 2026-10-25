@@ -21,5 +21,4 @@ object TranscriptPageFlip:
     val max = math.max(0d, contentWithoutPad + pad - viewport)
     if viewport > 0 && turnHeight >= viewport - SlackPx then max
     else math.min(math.max(0d, turnTop), max)
-  end scrollTop
 end TranscriptPageFlip

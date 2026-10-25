@@ -155,7 +155,6 @@ final class ChatRuntime private (
           else params
         rpc(AcpMethod.SessionPrompt, tagged)
       }
-    end if
   }
 
   def viewPlan: UIO[Unit] = exclusive {
@@ -520,7 +519,6 @@ final class ChatRuntime private (
           if trimmed.isEmpty && chosen.isEmpty && pics.isEmpty then ZIO.unit
           else if s.running || !s.initialized || s.pendingResume.nonEmpty then enqueue(trimmed, chosen, pics)
           else put(s.copy(chips = Nil, pendingImages = Nil)) *> runTurn(trimmed, chosen, pics)
-      end match
     }
 
   private def doListMcps: UIO[Unit] =
@@ -565,7 +563,6 @@ final class ChatRuntime private (
           }
         }
     kids *> stopTurn *> drainQueue
-  end doCancelTurn
 
   private def doSendNow(id: QueueId): UIO[Unit] =
     snap.flatMap { s =>
@@ -612,7 +609,6 @@ final class ChatRuntime private (
           val carried = Option(s.effort).filter(_.nonEmpty).filter(e => allowed.exists(_.value == e))
           writeModel(id, carried, carried.getOrElse(Effort.defaultOf(target)))
     }
-  end doSetModel
 
   private def doSetEffort(raw: String): UIO[Unit] =
     snap.flatMap { s =>
@@ -632,7 +628,6 @@ final class ChatRuntime private (
                 ConfigOption.setParams(s.sid(fallbackSessionId), ConfigOption.EffortKey, level.value),
               ) *> edit(_.copy(effort = level.value)) *> postMeta
             else writeModel(s.modelId, Some(level.value), level.value)
-      end if
     }
 
   private def writeModel(id: ModelId, sendEffort: Option[String], display: String): UIO[Unit] =
@@ -687,7 +682,6 @@ final class ChatRuntime private (
                   case Some(_) => postMeta *> doPostList(s.listOpen)
                 },
               )
-      end if
     }
 
   private def doDelete(id: SessionId): UIO[Unit] =
@@ -705,7 +699,6 @@ final class ChatRuntime private (
                 closeSessionRpc(target) *>
                   (if s.sessionId.contains(target) then doNewSession else doPostList(s.listOpen)),
           )
-      end if
     }
 
   private def closeSessionRpc(id: SessionId): UIO[Unit] =
@@ -813,8 +806,6 @@ final class ChatRuntime private (
         )
       )
       showDiffs("Grok Changes", diffs)
-    end if
-  end openChangesUnlocked
 
   private def enqueue(text: String, chosen: List[PromptChip], images: List[ImageChip] = Nil): UIO[Unit] =
     edit(_.enqueue(text, chosen, images)) *> postQueue
@@ -1080,7 +1071,6 @@ final class ChatRuntime private (
       fiber <- (ZIO.sleep(spec.interval) *> fire).forever.unit.forkIn(scope)
       _     <- edit(s => s.copy(loopFibers = s.loopFibers.updated(id.value, fiber)))
     yield ()
-  end startLoop
 
   private def doStopTask(id: TaskId): UIO[Unit] =
     snap.flatMap { s =>
@@ -1240,7 +1230,6 @@ final class ChatRuntime private (
         case _ => ZIO.unit
       }
     }
-  end ingestLoading
 
   private def ingestLive(p: Json): UIO[Unit] =
     val cfg = SessionState.decodeUpdate(p) match
@@ -1292,7 +1281,6 @@ final class ChatRuntime private (
         } *> dismissShared(p)
       }
     }
-  end ingestLive
 
   private def finishCard(slot: CardSlot): UIO[Unit] =
     edit(s => s.copy(openCards = s.openCards - slot)) *> post(HostMsg.ClearCard(slot))
@@ -1453,8 +1441,6 @@ final class ChatRuntime private (
                     val loaded = next.beginResume(id)
                     ZIO.log(s"share-join ${id.value}") *>
                       put(loaded) *> postMeta *> later(paintThenAttach(id))
-    end if
-  end startAfterInitialize
 
   private def ingestSessionNew(result: Option[Json]): UIO[Unit] =
     result match
@@ -1479,7 +1465,6 @@ final class ChatRuntime private (
                     put(withId) *> postMeta *> post(HostMsg.Transcript(Nil)) *>
                     post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
                     (if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit)
-                end if
               }
             }
 
@@ -1564,8 +1549,6 @@ final class ChatRuntime private (
               postMeta *> post(HostMsg.settings(withId.settingsState)) *> doPostList(open = false) *>
               (if live then ZIO.unit else if withId.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
               sendForkPrompt
-        end match
-      end if
     }
 
   private def ingestUpdate(params: Json): UIO[Unit] =
@@ -1668,7 +1651,6 @@ final class ChatRuntime private (
         }
       }
       .catchAll(e => post(HostMsg.Error(e.message)).as(Nil))
-  end reconstruct
 
   private def showFile(file: FileChange): UIO[Unit] =
     val oldText = file.oldSnapshot.getOrElse("")
@@ -1719,7 +1701,6 @@ final class ChatRuntime private (
           put(s.failAttach.adoptTurns(turns)) *>
           post(HostMsg.Error(ChatRuntime.LoadTimeout)) *>
           post(HostMsg.Transcript(turns))
-      end if
     }
 
   private def replayChrome: UIO[Unit] =
@@ -1771,7 +1752,6 @@ final class ChatRuntime private (
           .collect { case Json.Str(s) => s }
           .getOrElse("unknown")
       case _ => "unknown"
-  end sessionUpdateKind
 
   private def jsonStr(json: Json, key: String): Option[String] =
     json match
@@ -1820,7 +1800,6 @@ final class ChatRuntime private (
               doPostList(open = false) *>
               (if applied.pendingQueue.nonEmpty then drainQueue else ZIO.unit) *>
               sendForkPrompt
-      end if
     }
 
   private def applyLoadResult(base: ChatState, result: Option[Json]): ChatState =
@@ -1858,8 +1837,6 @@ final class ChatRuntime private (
             SessionPromptParams(sid, List(PromptBlock.text(text))).asJson,
           )
       }
-    end if
-  end doWorkflowControl
 
   private def doDashboard: UIO[Unit] =
     snap.flatMap { s =>
@@ -1917,8 +1894,6 @@ final class ChatRuntime private (
             Json.Obj("sessionId" -> Json.Str(sid.value), "text" -> Json.Str(body)),
           )
       }
-    end if
-  end doBtw
 
   private def persistWorkspacePlan(md: String): UIO[Unit] =
     if md.trim.isEmpty then ZIO.unit
@@ -1951,7 +1926,6 @@ final class ChatRuntime private (
                       },
                     ),
             )
-      end match
     }
 
   private def publishAndOpen(md: String): UIO[Unit] =

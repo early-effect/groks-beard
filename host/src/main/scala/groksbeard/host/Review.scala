@@ -25,7 +25,6 @@ final class Review(docs: BeardDocs):
     )
     val _ = vscode.window.showTextDocument(uri, opts).`catch`((_: Any) => ())
     ()
-  end follow
 
   def openText(path: String): Unit =
     val uri  = vscode.Uri.file(abs(path))

@@ -55,7 +55,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash arrows move the highlight and Enter picks it") {
         val bridge = PreviewBridge()
@@ -71,7 +70,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(mode == "Always approve")
           }
         yield result
-        end for
       },
       test("mentions scene lists files and picking one chips the path") {
         val bridge = PreviewBridge()
@@ -87,7 +85,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "", chip.contains("@src/Main.scala"))
           }
         yield result
-        end for
       },
       test("removing a mention chip hides the chip row") {
         val bridge = PreviewBridge()
@@ -102,7 +99,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("settings toggle flips Ctrl+Enter to send") {
         val bridge = PreviewBridge()
@@ -116,7 +112,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(before.contains("off"), after.contains("on"))
           }
         yield result
-        end for
       },
       test("settings share Grok defaults on and toggles off") {
         val bridge = PreviewBridge()
@@ -130,7 +125,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(before.contains("on"), after.contains("off"))
           }
         yield result
-        end for
       },
       test("settings arrows from the composer move the highlight") {
         val bridge = PreviewBridge()
@@ -145,7 +139,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(after.contains("on"))
           }
         yield result
-        end for
       },
       test("settings Esc closes the panel") {
         val bridge = PreviewBridge()
@@ -159,7 +152,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("permission scene shows a live activity row") {
         val bridge = PreviewBridge()
@@ -172,7 +164,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("Editing") || text.contains("Waiting"))
           }
         yield result
-        end for
       },
       test("permission Esc parks the card without answering") {
         val bridge = PreviewBridge()
@@ -186,7 +177,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("permission 1 picks the first option") {
         val bridge = PreviewBridge()
@@ -200,7 +190,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("clicking a session fades that row and keeps welcome order") {
         val bridge = GatedResumeBridge()
@@ -220,7 +209,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("clicking a recent session leaves welcome before the snapshot arrives") {
         val bridge = GatedResumeBridge()
@@ -245,7 +233,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("an empty snapshot stays in the session, not welcome") {
         val bridge = GatedResumeBridge()
@@ -263,7 +250,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("empty welcome shows the hero logo") {
         val bridge = PreviewBridge()
@@ -277,7 +263,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(src == "/logo.png")
           }
         yield result
-        end for
       },
       test("empty welcome still shows a default hero when logoSrc is missing") {
         val bridge = PreviewBridge()
@@ -291,7 +276,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(src == "/logo.png")
           }
         yield result
-        end for
       },
       test("occupancy from sessionMeta paints the toolbar") {
         val bridge = PushBridge()
@@ -306,7 +290,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("80"), text.contains("500"))
           }
         yield result
-        end for
       },
       test("occupancy click opens the context pane") {
         val bridge = PreviewBridge()
@@ -321,7 +304,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(used.contains("12k"))
           }
         yield result
-        end for
       },
       test("session-info scene lists the session id and copies it with c") {
         val bridge = PreviewBridge()
@@ -336,7 +318,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(id.contains("01a04ead-8d8e-7e92-9824-3e8580203167"), toast.contains("Copied"))
           }
         yield result
-        end for
       },
       test("context scene Esc closes the pane") {
         val bridge = PreviewBridge()
@@ -350,7 +331,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("session-info Tab switches to context") {
         val bridge = PreviewBridge()
@@ -365,7 +345,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("permission Allow dismisses the card") {
         val bridge = PreviewBridge()
@@ -399,7 +378,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(h1, ol, nest, plus, tbl)
           }
         yield result
-        end for
       },
       test("a long plan keeps Send and Approve") {
         val bridge = PreviewBridge()
@@ -414,7 +392,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(send, ok, body.contains("Heddle"), body.contains("Port transcript"))
           }
         yield result
-        end for
       },
       test("plan Open in editor stays on the card") {
         val bridge = PreviewBridge()
@@ -428,7 +405,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(still)
           }
         yield result
-        end for
       },
       test("plan Close dismisses the card") {
         val bridge = PreviewBridge()
@@ -442,7 +418,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("permission Close parks the card") {
         val bridge = PreviewBridge()
@@ -456,7 +431,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("plan Approve dismisses the card") {
         val bridge = PreviewBridge()
@@ -482,7 +456,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("elicit Esc declines the card") {
         val bridge = PreviewBridge()
@@ -496,7 +469,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("question option dismisses the card") {
         val bridge = PreviewBridge()
@@ -515,7 +487,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(pos.contains("2 of 3"))
           }
         yield result
-        end for
       },
       test("question Dismiss skips the card") {
         val bridge = PreviewBridge()
@@ -529,7 +500,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("question Esc dismisses the card") {
         val bridge = PreviewBridge()
@@ -543,7 +513,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("question Back returns to the previous item") {
         val bridge = PreviewBridge()
@@ -559,7 +528,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(pos.contains("1 of 3"))
           }
         yield result
-        end for
       },
       test("question Send answers submits free text") {
         val bridge = PreviewBridge()
@@ -579,7 +547,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(pos.contains("3 of 3"))
           }
         yield result
-        end for
       },
       test("parked follow-up is readable in the queue pane") {
         val bridge = PushBridge()
@@ -594,7 +561,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("the follow-up I typed"))
           }
         yield result
-        end for
       },
       test("queue scene lists parked follow-ups") {
         val bridge = PreviewBridge()
@@ -608,7 +574,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(one.contains("then run the tests"), two.contains("then open the PR"))
           }
         yield result
-        end for
       },
       test("queue Drop removes a row") {
         val bridge = PreviewBridge()
@@ -623,7 +588,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("queue Edit fills the composer") {
         val bridge = PreviewBridge()
@@ -638,7 +602,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "then run the tests")
           }
         yield result
-        end for
       },
       test("queue Esc hides the list") {
         val bridge = PreviewBridge()
@@ -653,7 +616,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("queue arrows then Enter send the highlighted follow-up") {
         val bridge = PreviewBridge()
@@ -670,7 +632,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("empty Enter sends the top queued follow-up now") {
         val bridge = PreviewBridge()
@@ -685,7 +646,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("a host decode error is visible") {
         val bridge = PushBridge()
@@ -698,7 +658,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("Could not read host message"))
           }
         yield result
-        end for
       },
       test("transcript scene shows the user turn") {
         val bridge = PreviewBridge()
@@ -745,7 +704,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("a tool path in the transcript is clickable") {
         val bridge = PreviewBridge()
@@ -759,7 +717,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("Main.scala"))
           }
         yield result
-        end for
       },
       test("up on an empty composer recalls the last prompt") {
         val bridge = PreviewBridge()
@@ -775,7 +732,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "Summarize Main.scala", empty.isEmpty)
           }
         yield result
-        end for
       },
       test("slash copy toasts the last reply") {
         val bridge = PreviewBridge()
@@ -790,7 +746,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status == "Copied!")
           }
         yield result
-        end for
       },
       test("slash export toasts the conversation copy") {
         val bridge = PreviewBridge()
@@ -805,7 +760,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status == "Conversation copied to clipboard")
           }
         yield result
-        end for
       },
       test("copy to a path toasts the file") {
         val bridge = PreviewBridge()
@@ -820,7 +774,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status == "Copied to notes.md")
           }
         yield result
-        end for
       },
       test("copy with no replies toasts no assistant messages") {
         val bridge = PreviewBridge()
@@ -834,7 +787,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status == "No assistant messages to copy")
           }
         yield result
-        end for
       },
       test("slash history lists this session's prompts") {
         val bridge = PreviewBridge()
@@ -850,7 +802,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "Summarize Main.scala")
           }
         yield result
-        end for
       },
       test("transcript follows the tail until the user scrolls up") {
         val bridge = PushBridge()
@@ -896,7 +847,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(held < 32, stillHeld < 32, restuck)
           }
         yield result
-        end for
       },
       test("jump-tail click resticks follow") {
         val bridge = PushBridge()
@@ -931,7 +881,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(on, top > 32)
           }
         yield result
-        end for
       },
       test("Ctrl+End from the draft resticks follow") {
         val bridge = PushBridge()
@@ -960,7 +909,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(on, top > 32)
           }
         yield result
-        end for
       },
       test("sending a turn page-flips the last prompt to the top") {
         val bridge = PushBridge()
@@ -992,7 +940,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(on, gap <= 24, first.bottom <= pane.top + 1)
           }
         yield result
-        end for
       },
       test("todos scene lists entries and Hide dismisses the pane") {
         val bridge = PreviewBridge()
@@ -1013,7 +960,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("empty todos and tasks do not occupy the composer") {
         val bridge = PushBridge()
@@ -1030,7 +976,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("Ctrl+T toggles the todos pane") {
         val bridge = PreviewBridge()
@@ -1046,7 +991,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("tasks scene lists running work and Hide dismisses the pane") {
         val bridge = PreviewBridge()
@@ -1068,7 +1012,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("Ctrl+G toggles the tasks pane") {
         val bridge = PreviewBridge()
@@ -1084,7 +1027,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("tasks scene groups subagents and pins a transcript block") {
         val bridge = PreviewBridge()
@@ -1103,7 +1045,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("a live task update opens the tasks pane") {
         val bridge = PushBridge()
@@ -1124,7 +1065,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(head.contains("Tasks 1 running"), row.contains("sbt compile"))
           }
         yield result
-        end for
       },
       test("a live subagent update pins a transcript block and completes in place") {
         val bridge = PushBridge()
@@ -1159,7 +1099,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("a live plan update opens the todos pane") {
         val bridge = PushBridge()
@@ -1196,7 +1135,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(head.contains("Todos 1/2"), row.contains("Checkout branch"))
           }
         yield result
-        end for
       },
       test("changes list stays collapsed until Show") {
         val bridge = PreviewBridge()
@@ -1219,7 +1157,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("changes Keep all drops the pending turn") {
         val bridge = PreviewBridge()
@@ -1234,7 +1171,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("changes scene lists the pending file and Keep drops it") {
         val bridge = PreviewBridge()
@@ -1251,7 +1187,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(row.contains("Main.scala"), row.contains("+2/-1"))
           }
         yield result
-        end for
       },
       test("Review on an edit tool paints the sidebar diff") {
         val bridge = PreviewBridge()
@@ -1265,7 +1200,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("def run"))
           }
         yield result
-        end for
       },
       test("Open on a change paints a sidebar diff") {
         val bridge = PreviewBridge()
@@ -1281,7 +1215,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(text.contains("def run"), text.contains("object Main"))
           }
         yield result
-        end for
       },
       test("permission Open diff paints the reviewer") {
         val bridge = PreviewBridge()
@@ -1313,7 +1246,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(BeardPath.sessionId(here).contains("disk-1"))
           }
         yield result
-        end for
       },
       test("resume scene lists sessions and picking one restores a turn") {
         val bridge = PreviewBridge()
@@ -1330,7 +1262,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(user.contains("hello from disk"))
           }
         yield result
-        end for
       },
       test("New in the toolbar clears a transcript") {
         val bridge = PreviewBridge()
@@ -1347,7 +1278,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(copy.contains("Ask Grok anything"))
           }
         yield result
-        end for
       },
       test("New during a resume wait is empty, not loading") {
         val bridge = GatedResumeBridge()
@@ -1368,7 +1298,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(copy.contains("Ask Grok anything"), user.isEmpty)
           }
         yield result
-        end for
       },
       test("model chip opens a menu and picking one updates the label") {
         val bridge = PreviewBridge()
@@ -1388,7 +1317,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(before.contains("Grok 4.6"), after.contains("Grok Code Fast"))
           }
         yield result
-        end for
       },
       test("effort arrows move the highlight and Enter picks it") {
         val bridge = PreviewBridge()
@@ -1405,7 +1333,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(after == "xhigh")
           }
         yield result
-        end for
       },
       test("mode arrows move the highlight and Enter picks it") {
         val bridge = PreviewBridge()
@@ -1422,7 +1349,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(after.contains("Plan"))
           }
         yield result
-        end for
       },
       test("effort chip opens a menu and picking one updates the label") {
         val bridge = PreviewBridge()
@@ -1441,7 +1367,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(before == "high", after == "xhigh", model == "Grok 4.6")
           }
         yield result
-        end for
       },
       test("slash effort opens the effort menu") {
         val bridge = PreviewBridge()
@@ -1456,7 +1381,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("picking an effort from slash updates the effort chip") {
         val bridge = PreviewBridge()
@@ -1474,7 +1398,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(after == "xhigh")
           }
         yield result
-        end for
       },
       test("slash effort on a model without reasoning toasts") {
         val bridge = PreviewBridge()
@@ -1494,7 +1417,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status.contains("does not support"))
           }
         yield result
-        end for
       },
       test("slash model opens the model menu") {
         val bridge = PreviewBridge()
@@ -1508,7 +1430,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("rewind lists prompts and confirm keeps the earlier turn") {
         val bridge = PushBridge()
@@ -1533,7 +1454,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(first.contains("first prompt"))
           }
         yield result
-        end for
       },
       test("slash rewind with no turns toasts") {
         val bridge = PreviewBridge()
@@ -1547,7 +1467,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(status.contains("Nothing to rewind"))
           }
         yield result
-        end for
       },
       test("slash rewind with turns opens the picker from local prompts") {
         val bridge = PushBridge()
@@ -1569,7 +1488,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash resume opens the session picker") {
         val bridge = PreviewBridge()
@@ -1583,7 +1501,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("Send shows the user turn and agent echo") {
         val bridge = PreviewBridge()
@@ -1601,7 +1518,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "", user.contains("hello"), agent.contains("hello"))
           }
         yield result
-        end for
       },
       test("expanding a finished execute tool still shows command and stdout after the live tail") {
         val bridge  = PushBridge()
@@ -1665,7 +1581,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("a running execute tool's live tail updates as stdout grows") {
         val bridge                                                    = PushBridge()
@@ -1713,7 +1628,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("a running execute tool shows a live output tail until expanded") {
         val bridge  = PushBridge()
@@ -1759,7 +1673,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("execute tool details keep the command and its output") {
         val bridge  = PushBridge()
@@ -1804,7 +1717,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("thought details keep the full thinking body") {
         val bridge = PushBridge()
@@ -1829,7 +1741,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(cls.contains("ThoughtBody"), text.contains("thinking"))
           }
         yield result
-        end for
       },
       test("a live ACP burst still paints the agent reply") {
         val bridge   = PushBridge()
@@ -1853,7 +1764,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(user.contains("hello"), agent.contains("Hi"))
           }
         yield result
-        end for
       },
       test("palette scene lists MCP Servers and picking it opens the MCP pane") {
         val bridge = PreviewBridge()
@@ -1874,7 +1784,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(off.contains("Off"), on.contains("On"))
           }
         yield result
-        end for
       },
       test("empty draft question-mark opens the command palette") {
         val bridge = PreviewBridge()
@@ -1890,7 +1799,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(filter == "")
           }
         yield result
-        end for
       },
       test("palette Enter from the composer opens MCP servers") {
         val bridge = PreviewBridge()
@@ -1907,7 +1815,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("palette arrows from the composer move the highlight") {
         val bridge = PreviewBridge()
@@ -1924,7 +1831,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("palette Enter from the filter opens MCP servers") {
         val bridge = PreviewBridge()
@@ -1939,7 +1845,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("palette arrows from the filter move the highlight") {
         val bridge = PreviewBridge()
@@ -1954,7 +1859,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("palette filter input narrows the list") {
         val bridge = PreviewBridge()
@@ -1970,7 +1874,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash /mcps opens the MCP pane") {
         val bridge = PreviewBridge()
@@ -1986,7 +1889,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(metals.contains("metals"))
           }
         yield result
-        end for
       },
       test("slash /session-info opens the session pane") {
         val bridge = PreviewBridge()
@@ -2000,7 +1902,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash /context opens the context pane") {
         val bridge = PreviewBridge()
@@ -2014,7 +1915,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("palette lists Session info and Context") {
         val bridge = PreviewBridge()
@@ -2030,7 +1930,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash rename prefills the composer") {
         val bridge = PreviewBridge()
@@ -2044,7 +1943,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(draft == "/rename ")
           }
         yield result
-        end for
       },
       test("picker Delete then Confirm removes the row") {
         val bridge = PreviewBridge()
@@ -2062,7 +1960,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("rename from the composer updates the session chip") {
         val bridge = PreviewBridge()
@@ -2081,7 +1978,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(label.contains("Beard plan"))
           }
         yield result
-        end for
       },
       test("esc on a running turn toasts Ctrl+C and does not stop") {
         val bridge = PushBridge()
@@ -2097,7 +1993,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(toast.contains("Ctrl+C"), still)
           }
         yield result
-        end for
       },
       test("child scene opens a framed transcript") {
         val bridge = PreviewBridge()
@@ -2123,7 +2018,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(frame.contains("Heard: steer note"))
           }
         yield result
-        end for
       },
       test("cancel scene lists 1-4 keep/stop choices") {
         val bridge = PreviewBridge()
@@ -2137,7 +2031,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(one.contains("Stop running"), four.contains("Always continue"))
           }
         yield result
-        end for
       },
       test("agents scene has agents and personas") {
         val bridge = PreviewBridge()
@@ -2152,7 +2045,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("plan-view, doctor, theme, workflows, dashboard, btw, images, voice scenes mount") {
         val bridge                      = PreviewBridge()
@@ -2170,7 +2062,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
           img   <- scene(Scene.Images, "image-0")
           voice <- scene(Scene.Voice, "voice")
         yield assertTrue(plan, doc, theme, wf, dash, btw, img, voice)
-        end for
       },
       test("theme click sets data-theme tokyonight") {
         val bridge = PreviewBridge()
@@ -2186,7 +2077,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(attr.contains("tokyonight") || html.contains("tokyonight"))
           }
         yield result
-        end for
       },
       test("compact scene marks data-compact") {
         val bridge = PreviewBridge()
@@ -2212,7 +2102,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(user.contains("also look at this"))
           }
         yield result
-        end for
       },
       test("resume picker has Restore code") {
         val bridge = PreviewBridge()
@@ -2227,7 +2116,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(box)
           }
         yield result
-        end for
       },
       test("vim mode selects a turn") {
         val bridge = PushBridge()
@@ -2243,7 +2131,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(sel)
           }
         yield result
-        end for
       },
       test("idle Esc Esc stashes a draft and shows the caption") {
         val bridge = PreviewBridge()
@@ -2261,7 +2148,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(toast.contains("press again"), cap.contains(DraftStash.Caption))
           }
         yield result
-        end for
       },
       test("Ctrl+S stashes and restores a draft") {
         val bridge = PreviewBridge()
@@ -2279,7 +2165,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(got == "stashed draft")
           }
         yield result
-        end for
       },
       test("Ctrl+S stash restores after send") {
         val bridge = PreviewBridge()
@@ -2298,7 +2183,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(got == "stashed draft")
           }
         yield result
-        end for
       },
       test("Esc Esc stash does not restore after send") {
         val bridge = PreviewBridge()
@@ -2319,7 +2203,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(left.isEmpty)
           }
         yield result
-        end for
       },
       test("voice scene Esc disarms listening") {
         val bridge = PreviewBridge()
@@ -2333,7 +2216,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("slash voice toasts when the speech constructor is missing") {
         val bridge = PreviewBridge()
@@ -2348,7 +2230,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(toast.contains(VoiceCapture.NoDevice))
           }
         yield result
-        end for
       },
       test("cancel Esc keeps the turn running") {
         val bridge = PreviewBridge()
@@ -2363,7 +2244,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(still)
           }
         yield result
-        end for
       },
       test("cancel 1 stops running subagents") {
         val bridge = PreviewBridge()
@@ -2377,7 +2257,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(true)
           }
         yield result
-        end for
       },
       test("theme arrows preview then Esc reverts") {
         val bridge = PreviewBridge()
@@ -2394,7 +2273,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(previewed.contains("auto"), restored.contains("vscode"))
           }
         yield result
-        end for
       },
       test("doctor fix lists CLI repair") {
         val bridge = PushBridge()
@@ -2417,7 +2295,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(row.contains("CLI"))
           }
         yield result
-        end for
       },
       test("child queue checkbox is present") {
         val bridge = PreviewBridge()
@@ -2474,7 +2351,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(idle == "Send", live == "Stop", done == "Send")
           }
         yield result
-        end for
       },
       test("btw panel does not end a running turn") {
         val bridge = PushBridge()
@@ -2493,7 +2369,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(label == "Stop", still)
           }
         yield result
-        end for
       },
       test("Stop on a running turn ends activity") {
         val bridge = PushBridge()
@@ -2509,7 +2384,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(label == "Stop")
           }
         yield result
-        end for
       },
       test("Ctrl+C clears a draft then a second Ctrl+C stops the turn") {
         val bridge = PushBridge()
@@ -2528,7 +2402,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(empty.isEmpty, still)
           }
         yield result
-        end for
       },
       test("idle Esc Esc on an empty draft opens rewind") {
         val bridge = PreviewBridge()
@@ -2543,7 +2416,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(shown)
           }
         yield result
-        end for
       },
       test("vim j and k move the selected turn") {
         val bridge = PushBridge()
@@ -2565,7 +2437,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(next, prev)
           }
         yield result
-        end for
       },
       test("vim y on a turn does not type into the draft") {
         val bridge = PushBridge()
@@ -2582,7 +2453,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(got.isEmpty)
           }
         yield result
-        end for
       },
       test("vim on does not steal j from the focused draft") {
         val bridge = PushBridge()
@@ -2603,7 +2473,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(still)
           }
         yield result
-        end for
       },
       test("cancel 2 keeps subagents") {
         val bridge = PreviewBridge()
@@ -2619,7 +2488,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(still)
           }
         yield result
-        end for
       },
       test("cancel 3 persists always stop") {
         val bridge = PersistSpy()
@@ -2635,7 +2503,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("cancel 4 persists always continue") {
         val bridge = PersistSpy()
@@ -2653,7 +2520,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("slash view-plan opens the plan overlay") {
         val bridge = PreviewBridge()
@@ -2667,7 +2533,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(shown)
           }
         yield result
-        end for
       },
       test("workflow overlay p pauses the selected run without Stop") {
         val bridge = PreviewBridge()
@@ -2692,7 +2557,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("dashboard click of the current session keeps the transcript") {
         val bridge = PreviewBridge()
@@ -2713,7 +2577,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             )
           }
         yield result
-        end for
       },
       test("slash workflow runs opens the workflows pane") {
         val bridge = PreviewBridge()
@@ -2727,7 +2590,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(shown)
           }
         yield result
-        end for
       },
       test("slash config-agents opens agents") {
         val bridge = PreviewBridge()
@@ -2742,7 +2604,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(row)
           }
         yield result
-        end for
       },
       test("slash personas opens the personas tab") {
         val bridge = PreviewBridge()
@@ -2756,7 +2617,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(row)
           }
         yield result
-        end for
       },
       test("slash minimal then fullscreen toggles compact chrome") {
         val bridge = PreviewBridge()
@@ -2773,7 +2633,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
             yield assertTrue(on, off)
           }
         yield result
-        end for
       },
     )
 
@@ -2846,7 +2705,6 @@ object ChatChromeSpec extends ZIOSpecDefault:
           if gap <= slack then ZIO.succeed(gap) else ZIO.sleep(20.millis) *> loop
         }
     loop.timeoutFail(new RuntimeException(s"timed out waiting for $testId at transcript top"))(5.seconds)
-  end waitTurnAtTop
 
   private def waitScrollTop(root: AscentRoot, sel: String, min: Double)(using Trace): IO[Throwable, Double] =
     def loop: IO[Throwable, Double] =
@@ -2890,7 +2748,6 @@ final class PushBridge extends HostBridge:
       case _ => ()
   def onHost(f: HostMsg => Unit): Unit = listener = f
   def push(msg: HostMsg): Unit         = listener(msg)
-end PushBridge
 
 final class PersistSpy extends HostBridge:
   private val inner                           = PreviewBridge()

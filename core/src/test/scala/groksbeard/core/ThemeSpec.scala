@@ -20,4 +20,3 @@ object ThemeSpec extends ZIOSpecDefault:
         assertTrue(next == ids(1), wrap == ids.head)
       },
     )
-end ThemeSpec

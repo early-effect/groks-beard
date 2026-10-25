@@ -22,4 +22,3 @@ object DoctorSpec extends ZIOSpecDefault:
         )
       },
     )
-end DoctorSpec

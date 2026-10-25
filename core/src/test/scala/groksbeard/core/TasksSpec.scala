@@ -158,4 +158,3 @@ object TasksSpec extends ZIOSpecDefault:
         )
       },
     )
-end TasksSpec

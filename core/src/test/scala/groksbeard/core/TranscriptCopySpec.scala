@@ -67,4 +67,3 @@ object TranscriptCopySpec extends ZIOSpecDefault:
         )
       },
     )
-end TranscriptCopySpec

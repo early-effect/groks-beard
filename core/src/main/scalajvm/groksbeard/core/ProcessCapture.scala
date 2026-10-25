@@ -20,4 +20,3 @@ object ProcessCapture:
         throw new RuntimeException(s"$command timed out")
       text
     }.orSystem
-end ProcessCapture

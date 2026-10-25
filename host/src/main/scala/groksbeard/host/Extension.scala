@@ -199,7 +199,6 @@ object Extension:
                         if pick.toOption.contains("Delete") then HostRuntime.runUIO(rt.deleteSession(id))
                         js.undefined
                       }
-                  end if
                 }
               }
             }
@@ -247,7 +246,6 @@ object Extension:
     )
     beard.line("activated")
     ()
-  end activateWith
 
   @JSExportTopLevel("deactivate")
   def deactivate(): Unit =
@@ -302,14 +300,10 @@ object Extension:
                 case Some(p) if p == copy =>
                   val _ = vscode.env.clipboard.writeText(snippet)
                 case _ => ()
-              end match
               js.undefined
             }
-      end match
       val _ = context.workspaceState.update(TuiBridge.StateKey, true)
       bridge.sync(enabled = true, workspace)
-    end if
-  end enableBridge
 
   private def disableBridge(context: ExtensionContext, mcpHost: McpHost, bridge: TuiBridge): Unit =
     val _ = context.workspaceState.update(TuiBridge.StateKey, false)
@@ -326,7 +320,6 @@ object Extension:
         }
       js.undefined
     }
-  end disableBridge
 
   private def asString(arg: js.Any): String =
     import groksbeard.facade.asNonEmptyString

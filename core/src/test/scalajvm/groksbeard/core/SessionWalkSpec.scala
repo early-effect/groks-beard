@@ -41,4 +41,3 @@ object SessionWalkSpec extends ZIOSpecDefault:
         }
       },
     )
-end SessionWalkSpec

@@ -98,5 +98,4 @@ object LiveMain extends ZIOAppDefault:
       .toAbsolutePath
       .normalize
     PreviewConfig(root = root, port = port, openBrowser = open)
-  end configFromArgs
 end LiveMain

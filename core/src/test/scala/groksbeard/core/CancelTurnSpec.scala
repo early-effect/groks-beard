@@ -25,4 +25,3 @@ object CancelTurnSpec extends ZIOSpecDefault:
         )
       },
     )
-end CancelTurnSpec

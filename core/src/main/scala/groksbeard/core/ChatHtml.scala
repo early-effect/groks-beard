@@ -23,7 +23,6 @@ object ChatHtml:
 </body>
 </html>
 """
-  end page
 
   def errorPage(message: String): String =
     s"""<!DOCTYPE html>

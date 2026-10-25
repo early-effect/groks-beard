@@ -53,4 +53,3 @@ object TodosSpec extends ZIOSpecDefault:
         )
       },
     )
-end TodosSpec

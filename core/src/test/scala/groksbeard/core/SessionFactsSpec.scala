@@ -66,4 +66,3 @@ object SessionFactsSpec extends ZIOSpecDefault:
         assertTrue(SessionFacts.title(model) == "This session")
       },
     )
-end SessionFactsSpec

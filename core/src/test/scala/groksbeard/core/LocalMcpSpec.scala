@@ -54,7 +54,6 @@ object LocalMcpSpec extends ZIOSpecDefault:
           out.exists(_.contains("try 1")),
           out.exists(_.contains("is up")),
         )
-        end for
       },
       test("tells the user when the wait times out") {
         val url = "http://localhost:56126/mcp"
@@ -76,7 +75,5 @@ object LocalMcpSpec extends ZIOSpecDefault:
           out.exists(_.contains("try 1")),
           out.exists(_.contains("try 2")),
         )
-        end for
       },
     )
-end LocalMcpSpec

@@ -58,8 +58,6 @@ object ComposerQuery:
         !name.startsWith(q) && !name.contains(q) && c.description.toLowerCase.contains(q)
       }
       prefix ++ mid ++ desc
-    end if
-  end filterSlash
 
   def mentionQuery(draft: String): Option[String] =
     val rx = "(?:^|\\s)@([^\\s]*)$".r

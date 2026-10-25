@@ -58,7 +58,6 @@ object McpToml:
       val next = nextTableOffset(text, after)
       (s, next.getOrElse(text.length))
     }
-  end tableRange
 
   private def isHSpace(c: Char): Boolean = c == ' ' || c == '\t'
 
@@ -81,5 +80,4 @@ object McpToml:
         if k < text.length && text.charAt(k) == '[' then return Some(i)
       i += 1
     None
-  end nextTableOffset
 end McpToml

@@ -57,7 +57,6 @@ object WorkflowRuns:
         case "Home"      => names.headOption
         case "End"       => names.lastOption
         case _           => clamp(runs, sel)
-  end step
 
   def applyVerb(runs: List[WorkflowRun], name: String, verb: String): List[WorkflowRun] =
     runs.map { r =>
@@ -104,8 +103,6 @@ object WorkflowRuns:
           paused = str(obj, "status").contains("paused"),
         )
       )
-    end if
-  end from
 
   private def obj(params: Json): Option[Json.Obj] =
     params match

@@ -24,4 +24,3 @@ object ConfigTomlSpec extends ZIOSpecDefault:
         )
       },
     )
-end ConfigTomlSpec

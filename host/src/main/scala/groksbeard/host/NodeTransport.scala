@@ -72,4 +72,3 @@ object NodeTransport:
         new NodeTransport(child, log, onErr, onExit, run, new AtomicBoolean(false))
       }.orSystem
     )(_.close)
-end NodeTransport

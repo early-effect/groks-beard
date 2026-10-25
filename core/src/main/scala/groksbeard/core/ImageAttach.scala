@@ -51,6 +51,5 @@ object ImageAttach:
           ),
         )
       else List(PromptBlock.Text(caption))
-      end if
     }
 end ImageAttach

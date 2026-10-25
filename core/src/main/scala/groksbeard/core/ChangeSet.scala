@@ -211,10 +211,7 @@ object ChangeSet:
         curr = tmp
         java.util.Arrays.fill(curr, 0)
         i += 1
-      end while
       prev(m)
-    end if
-  end longestCommonSubsequence
 end ChangeSet
 
 final class ChangeStore:
@@ -270,8 +267,6 @@ final class ChangeStore:
         )
       then files
       else files.updated(idx, withBudget(incoming))
-    end if
-  end mergeFile
 
   private def withBudget(change: FileChange): FileChange =
     val stored = sets.flatMap(_.files)
@@ -286,5 +281,4 @@ final class ChangeStore:
         newSnapshot = None,
         undoDisabled = Some(ChangeSet.MissingSnapshot),
       )
-  end withBudget
 end ChangeStore

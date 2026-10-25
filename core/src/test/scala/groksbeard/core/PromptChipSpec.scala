@@ -64,4 +64,3 @@ object PromptChipSpec extends ZIOSpecDefault:
         }
       },
     )
-end PromptChipSpec

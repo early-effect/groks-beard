@@ -41,4 +41,3 @@ object PromptBlockSpec extends ZIOSpecDefault:
         )
       },
     )
-end PromptBlockSpec

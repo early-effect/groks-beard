@@ -76,4 +76,3 @@ object LiveClientsSpec extends ZIOSpecDefault:
         yield assertTrue(seen.nonEmpty)
       } @@ TestAspect.timeout(5.seconds),
     )
-end LiveClientsSpec

@@ -39,4 +39,3 @@ object TranscriptFollowSpec extends ZIOSpecDefault:
         assertTrue(pad == 0d, top == 1000d)
       },
     )
-end TranscriptFollowSpec

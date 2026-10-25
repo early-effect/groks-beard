@@ -50,5 +50,4 @@ object PackageJsonSpec extends ZIOSpecDefault:
       }
       .find(_ != null)
       .getOrElse(sys.error(s"package.json not found from $start"))
-  end packageJson
 end PackageJsonSpec

@@ -30,8 +30,6 @@ object GrokVersion:
         val channel = Chan.findPrefixMatchOf(rest).map(_.group(1))
         GrokVersion(m.group(1).toInt, m.group(2).toInt, m.group(3).toInt, git, channel, trimmed)
       }
-    end if
-  end parse
 
   def compare(a: GrokVersion, major: Int, minor: Int, patch: Int): Int =
     if a.major != major then a.major - major

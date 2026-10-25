@@ -62,7 +62,6 @@ object DiffContent:
                   !hasOld,
                 )
               )
-            end if
       case Left(_) => Nil
 
   def replaceAllFromRawInput(raw: Json): Boolean =
@@ -103,7 +102,6 @@ object DiffContent:
       fromPath = fromPathFromRawInput(raw),
       locations = body.locations,
     )
-  end diffsFromToolCall
 
   def diskIsBefore(status: ToolStatus): Boolean = status != ToolStatus.Completed
 
@@ -168,7 +166,6 @@ object DiffContent:
         regionStandIn = standIn,
       )
     }
-  end reconstruct
 
   def fileChangeFrom(diff: ReconstructedFileDiff): FileChange =
     val (add, del) = ChangeSet.lineDiffStats(diff.oldText, diff.newText)
@@ -184,7 +181,6 @@ object DiffContent:
       newSnapshot = if diff.kind == ChangeKind.Delete then None else Some(diff.newText),
       undoDisabled = ChangeSet.undoDisabledFor(diff.kind, diff.wholeFile, snapshotStored = true),
     )
-  end fileChangeFrom
 
   def permissionCard(params: Json, requestId: RequestId): PermissionCard =
     val parsed = params
@@ -198,7 +194,6 @@ object DiffContent:
       parsed.options,
       hasDiff = diffsFromToolCall(tool.asJson).diffs.nonEmpty,
     )
-  end permissionCard
 
   private def completePostWrite(
       sides: DiffSides,

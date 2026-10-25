@@ -33,4 +33,3 @@ object LiveMainSpec extends ZIOSpecDefault:
         yield assertTrue(up.isDefined, down.isEmpty)
       },
     ) @@ TestAspect.sequential
-end LiveMainSpec

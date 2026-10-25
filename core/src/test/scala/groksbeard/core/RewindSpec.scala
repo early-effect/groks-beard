@@ -48,4 +48,3 @@ object RewindSpec extends ZIOSpecDefault:
         assertTrue(json.contains("\"sessionId\""), json.contains("\"prompt_index\""), json.contains("2"))
       },
     )
-end RewindSpec

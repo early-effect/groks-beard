@@ -23,5 +23,4 @@ object SocketAddress:
     else
       val root = runtimeDir.stripSuffix("/").stripSuffix("\\")
       s"$root/groks-beard/$hash.sock"
-  end address
 end SocketAddress

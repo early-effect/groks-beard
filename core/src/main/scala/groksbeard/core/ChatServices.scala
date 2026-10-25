@@ -23,7 +23,6 @@ trait SessionRepo:
   def personas: BeardError.Result[List[PersonaDef]]
   def readConfig: BeardError.Result[String]
   def writeConfig(text: String): BeardError.Result[Unit]
-end SessionRepo
 
 object SessionRepo:
   def of(fs: SessionFs, home: String, cwd: String): ULayer[SessionRepo] =
@@ -115,6 +114,7 @@ object Mentions:
       def search(query: String): BeardError.Result[List[MentionFile]] = run(query))
 
   val none: ULayer[Mentions] = layer(_ => ZIO.succeed(Nil))
+end Mentions
 
 trait ChangesPersist:
   def save(sets: List[ChangeSet]): BeardError.Result[Unit]
@@ -270,5 +270,4 @@ object ChatEnv:
         mcps ++
         EmptySessions.layer
     base >+> UiPrefs.layer
-  end test
 end ChatEnv

@@ -28,4 +28,3 @@ object Utf8Spec extends ZIOSpecDefault:
         }
       },
     )
-end Utf8Spec

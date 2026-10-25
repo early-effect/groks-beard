@@ -33,7 +33,6 @@ object UnifiedDiff:
         j -= 1
       i -= 1
     t
-  end lcsTable
 
   private def walk(a: List[String], b: List[String], t: Array[Array[Int]]): List[DiffLine] =
     val out = List.newBuilder[DiffLine]
@@ -52,7 +51,6 @@ object UnifiedDiff:
       else
         out += DiffLine.Add(b(j))
         j += 1
-    end while
     while i < n do
       out += DiffLine.Del(a(i))
       i += 1
@@ -61,7 +59,6 @@ object UnifiedDiff:
       j += 1
     val rows = out.result()
     dropTrailingEmpty(rows)
-  end walk
 
   private def dropTrailingEmpty(rows: List[DiffLine]): List[DiffLine] =
     rows match

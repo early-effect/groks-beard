@@ -115,5 +115,4 @@ object SessionEditSpec extends ZIOSpecDefault:
         val prefix = if path.endsWith("/") then path else path + "/"
         files = files.filterNot((p, _) => p == path || p.startsWith(prefix))
       }
-  end MemoryFs
 end SessionEditSpec

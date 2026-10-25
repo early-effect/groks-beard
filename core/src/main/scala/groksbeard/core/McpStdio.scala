@@ -52,7 +52,6 @@ object McpStdio:
       case McpAction.Reply(json)              => Some(json)
       case McpAction.CallTool(id, name, args) =>
         Some(wrapCall(id, name, call(name, args)))
-  end handle
 
   def classify(message: Json): McpAction =
     message.as[JsonRpcIncoming] match

@@ -26,7 +26,6 @@ object Effort:
       "reasoningEffort"         -> Json.Str(active),
       "reasoningEfforts"        -> Json.Arr(levels*),
     )
-  end grokMeta
 
   def of(model: Option[ModelOption]): List[EffortLevel] =
     val fromMeta = model.toList.flatMap(effortsOf)
@@ -95,8 +94,6 @@ object Effort:
               pick(effortQ, allowed) match
                 case Some(e) => Right((m, Some(e.value)))
                 case None    => Left(unknown(effortQ, allowed))
-    end if
-  end splitModelArgs
 
   private def canonicalize(raw: String): String =
     val n = raw.trim.toLowerCase.replace('_', '-').replace('-', ' ').replaceAll("\\s+", " ")

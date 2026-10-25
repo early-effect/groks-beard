@@ -47,4 +47,3 @@ object ModeLabelSpec extends ZIOSpecDefault:
         )
       },
     )
-end ModeLabelSpec

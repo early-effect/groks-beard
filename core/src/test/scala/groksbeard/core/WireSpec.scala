@@ -73,4 +73,3 @@ object WireSpec extends ZIOSpecDefault:
         assertTrue(Wire.hostMsgs(wrapped) == Right(List(HostMsg.Ready)))
       },
     )
-end WireSpec

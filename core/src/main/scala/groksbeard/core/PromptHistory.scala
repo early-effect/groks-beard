@@ -23,7 +23,6 @@ object PromptHistory:
         !low.startsWith(q) && low.contains(q)
       }
       prefix ++ mid
-  end filter
 
   def older(index: Int, size: Int): Int =
     if size <= 0 then 0 else math.min(size - 1, index + 1)

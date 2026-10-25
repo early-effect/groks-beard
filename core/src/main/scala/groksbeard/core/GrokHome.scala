@@ -9,4 +9,3 @@ object GrokHome:
         home match
           case None    => ".grok"
           case Some(h) => s"${h.replaceAll("[\\\\/]+$", "")}/.grok"
-end GrokHome

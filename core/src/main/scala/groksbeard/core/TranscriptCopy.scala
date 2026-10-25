@@ -20,8 +20,6 @@ object TranscriptCopy:
         if n < 1 || n > Int.MaxValue then Left("nth must be a positive integer")
         else Right(CopySpec(n.toInt, Option(rest).filter(_.nonEmpty)))
       else Right(CopySpec(path = Some(t)))
-    end if
-  end parseCopy
 
   def parseExport(args: String): Either[String, Option[String]] =
     Right(Option(args.trim).filter(_.nonEmpty))
@@ -39,7 +37,6 @@ object TranscriptCopy:
           val n = rows.size
           if n == 1 then Left("Only 1 assistant message available to copy")
           else Left(s"Only $n assistant messages available to copy")
-  end reply
 
   def conversation(turns: List[TurnView]): Option[String] =
     val blocks = turns.flatMap { t =>

@@ -9,6 +9,7 @@ final class SessionState:
   def commitMode(id: ModeId): Unit =
     modeId = Some(id)
     planActive = id.value.toLowerCase.contains("plan")
+end SessionState
 
 object SessionState:
   val CommitBeforeContinue: Set[AcpMethod] = Set(AcpMethod.SessionSetMode)

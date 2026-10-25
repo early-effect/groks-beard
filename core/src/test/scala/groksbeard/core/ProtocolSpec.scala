@@ -300,4 +300,3 @@ object ProtocolSpec extends ZIOSpecDefault:
         assertTrue(got == Right(AcpUpdate.Commands(List(SlashCommand("compact", "Compact context")))))
       },
     )
-end ProtocolSpec

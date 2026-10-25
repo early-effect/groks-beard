@@ -68,7 +68,6 @@ object SessionIndex:
       else sb.append(percentEncode(b))
       i += 1
     sb.toString
-  end encodeCwd
 
   def encodedCwdExceedsLimit(encoded: String): Boolean =
     Utf8.byteLength(encoded) > MaxEncodedCwdBytes
@@ -233,8 +232,6 @@ object SessionIndex:
       dirs = (direct +: fromCwd.map(n => join(root, n))).distinct
       exist <- ZIO.filter(dirs)(fs.isDirectory)
     yield exist
-    end for
-  end groupDirs
 
   def listRows(fs: SessionFs, home: String, cwd: String, limit: Int = PageSize): BeardError.Result[List[SessionRow]] =
     groupDirs(fs, home, cwd).flatMap { groups =>

@@ -33,4 +33,3 @@ object SharedCardsSpec extends ZIOSpecDefault:
         )
       },
     )
-end SharedCardsSpec

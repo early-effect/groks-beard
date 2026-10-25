@@ -33,7 +33,6 @@ object CliLocator:
         if input.win then out += join(dir, "grok.cmd")
     }
     out.result()
-  end candidates
 
   def locate(input: LocateGrok): Either[List[String], String] =
     val searched = candidates(input)

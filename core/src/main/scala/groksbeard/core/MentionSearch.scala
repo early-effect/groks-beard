@@ -23,5 +23,4 @@ object MentionSearch:
         else 3
       (bucket, file.path.length, file.path)
     }
-  end rank
 end MentionSearch

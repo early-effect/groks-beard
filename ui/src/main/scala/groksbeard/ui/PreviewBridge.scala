@@ -203,7 +203,6 @@ final class PreviewBridge extends HostBridge:
               )
             )
           )
-        end if
         emit(HostMsg.SessionList(sessions, id, openPicker = false))
       case WebviewMsg.OpenSessionPicker =>
         pickerOpen = true
@@ -371,8 +370,6 @@ final class PreviewBridge extends HostBridge:
             case "vim_mode"     => uiVim = value == "true"
             case _              => ()
           emit(HostMsg.UiPrefs(uiTheme, uiCompact, uiVim))
-    end match
-  end post
 
   def onHost(f: HostMsg => Unit): Unit =
     listener = f

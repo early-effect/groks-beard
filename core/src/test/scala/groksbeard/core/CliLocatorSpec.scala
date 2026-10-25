@@ -54,4 +54,3 @@ object CliLocatorSpec extends ZIOSpecDefault:
         assertTrue(got.swap.exists(_.exists(_.endsWith("/.grok/bin/grok"))))
       },
     )
-end CliLocatorSpec

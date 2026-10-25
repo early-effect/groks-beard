@@ -39,7 +39,6 @@ object ChangePersist:
       else sb.append(percentEncode(b))
       i += 1
     sb.toString
-  end encodePath
 
   def rel(sessionId: SessionId, turnId: TurnId, path: String, side: String): String =
     s"${sessionId.value}/${turnId.value}/${encodePath(path)}.$side"

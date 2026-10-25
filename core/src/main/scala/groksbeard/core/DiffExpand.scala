@@ -54,9 +54,6 @@ object DiffExpand:
                     else
                       val nextText = replaceOnceAt(located.text, at, needle, replacement)
                       sidesFrom(located, nextText, diskIsBefore)
-            end if
-    end if
-  end expand
 
   private def oversize(text: Option[String]): Boolean =
     text.exists(t => Utf8.byteLength(t) > MaxBytes)

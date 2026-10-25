@@ -11,6 +11,7 @@ extension (value: js.Any)
 
   def hasField(name: String): Boolean =
     value != null && !js.isUndefined(value) && js.typeOf(value) == "object" && JsNative.hasOwn(value, name)
+end extension
 
 extension (t: Throwable)
   def jsStack: Option[String] =

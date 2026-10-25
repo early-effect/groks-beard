@@ -18,8 +18,6 @@ object HostErr:
     val caused =
       Option(e.getCause).filter(c => (c ne e) && (c ne null)).map(c => "\nCaused by: " + format(c)).getOrElse("")
     head + caused
-  end format
-end HostErr
 
 final class BeardOut(ch: OutputChannel):
   def line(msg: String): Unit = ch.appendLine(msg)

@@ -102,8 +102,6 @@ object LiveSession:
                 .as(ZIO.unit)
             }
     yield LiveSession(events, handle, close)
-    end for
-  end start
 
   def fake(): ZIO[Scope, Nothing, LiveSession] =
     for

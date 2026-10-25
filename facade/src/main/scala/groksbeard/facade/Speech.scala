@@ -41,7 +41,6 @@ trait SpeechRecInstance extends js.Object:
   def start(): Unit                                            = js.native
   def stop(): Unit                                             = js.native
   def abort(): Unit                                            = js.native
-end SpeechRecInstance
 
 @js.native
 @JSGlobal("SpeechRecognition")

@@ -66,7 +66,6 @@ final class TuiBridge(host: McpToolHost, log: String => Unit):
         log(s"TUI bridge listening on $addr"),
     )
     server = Some(srv)
-  end bind
 end TuiBridge
 
 object TuiBridge:
@@ -74,3 +73,4 @@ object TuiBridge:
 
   def sha256Hex(text: String): String =
     nodeCrypto.createHash("sha256").update(text).digest("hex")
+end TuiBridge

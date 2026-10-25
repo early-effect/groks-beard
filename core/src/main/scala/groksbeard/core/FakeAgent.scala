@@ -164,7 +164,6 @@ final class FakeAgent(
               ),
               Rpc.ok(id, SessionLoadResult(sid).asJson),
             )
-          end if
       case "session/set_model" =>
         List(Rpc.ok(id, EmptyObject().asJson))
       case "session/set_config_option" =>
@@ -205,7 +204,6 @@ final class FakeAgent(
               else pairTerminal.sessionId),
             ),
           )
-        end if
       case "session/prompt" if hangPrompt =>
         Nil
       case "session/prompt" =>

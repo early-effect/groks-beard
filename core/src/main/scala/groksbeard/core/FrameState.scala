@@ -11,6 +11,7 @@ final case class FrameState(
 
   def commitMode(id: ModeId): FrameState =
     copy(modeId = Some(id))
+end FrameState
 
 object FrameState:
   val empty: FrameState = FrameState()

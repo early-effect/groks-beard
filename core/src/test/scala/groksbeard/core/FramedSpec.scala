@@ -60,4 +60,3 @@ object FramedSpec extends ZIOSpecDefault:
         )
       },
     )
-end FramedSpec

@@ -91,4 +91,3 @@ object SessionPhaseSpec extends ZIOSpecDefault:
         assertTrue(SessionPhase.onDisk(SessionPhase.Idle, hasTurns = true) == SessionPhase.Idle)
       },
     )
-end SessionPhaseSpec

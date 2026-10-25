@@ -63,7 +63,6 @@ object Scene:
       case "voice"        => Scene.Voice
       case "images"       => Scene.Images
       case _              => Scene.Empty
-end Scene
 
 object ChatApp:
   given toolOutEq: Eq[Map[ToolCallId, String]] = (a, b) => a == b
@@ -1493,7 +1492,6 @@ object ChatApp:
                 ZIO.succeed(
                   bridge.post(WebviewMsg.CopyOut(out.text, out.path, backup = SessionCommands.isCopy(cmd.name), conv))
                 )
-          end match
         }
 
       def sendDraft: UIO[Unit] =
@@ -1622,7 +1620,6 @@ object ChatApp:
                         chat.update(_.copy(chips = s.chips, images = s.images)) *>
                         stash.set(None)
                     case _ => ZIO.unit
-            end match
           }
         }
 
@@ -1702,9 +1699,6 @@ object ChatApp:
               chat.update(_.copy(selectedTurn = sel)) *> ZIO.succeed(TranscriptScroll.jump())
             case _ =>
               chat.update(_.copy(selectedTurn = sel))
-          end match
-        end if
-      end applyVim
 
       def ingestClipboard(e: ascent.dom.ClipboardEvent): UIO[Unit] =
         ChatApp.imageFiles(e.clipboardData) match
@@ -1768,7 +1762,6 @@ object ChatApp:
             else if !ctrlOrMeta && !e.altKey && key.length == 1 then
               go(paletteQuery.update(_ + key) *> paletteIdx.set(Some(0)))
             else ZIO.succeed(false)
-            end if
         }
 
       def onSessionPaneKey(e: ascent.dom.KeyboardEvent): UIO[Boolean] =
@@ -1996,7 +1989,6 @@ object ChatApp:
                                                   .flatMap(q => QuestionDraft.optionKey(key, q)) match
                                                   case Some(oid) => steal(applyQuestionPick(card, oid))
                                                   case None      => ZIO.unit
-                                            end match
                                           }
                                         case None =>
                                           c.plan match
@@ -2023,7 +2015,6 @@ object ChatApp:
                 }
             }
         }
-      end handleShellKey
 
       def startNew: UIO[Unit] =
         leaving.set(None) *>
@@ -2064,7 +2055,6 @@ object ChatApp:
                 WorkflowRuns.step(c.workflows, sel, key) match
                   case None    => ZIO.unit
                   case Some(n) => workflowSel.set(Some(n))
-            end match
           }
         }
 
@@ -2184,7 +2174,6 @@ object ChatApp:
               }
           }
         }
-      end onQueueKey
 
       def toggleMenu(menu: OpenMenu): UIO[Unit] =
         openMenu.get.flatMap {
@@ -2256,11 +2245,8 @@ object ChatApp:
                   e.preventDefault()
                   e.stopPropagation()
                   menuIdx.update(i => ComposerQuery.moveIndex(i, key, ids.size)).as(true)
-                end if
               }
           }
-        end if
-      end onMenuKey
 
       def openEffort: UIO[Unit] =
         chat.get.flatMap { c =>
@@ -2281,7 +2267,6 @@ object ChatApp:
                 ZIO.succeed(bridge.post(WebviewMsg.SetEffort(level.value)))
             case None =>
               draft.set("") *> chat.update(_.copy(error = Some(Effort.unknown(raw, allowed))))
-      end applyEffort
 
       def applyModel(args: String, c: ChatModel): UIO[Unit] =
         Effort.splitModelArgs(args, c.models) match
@@ -2504,7 +2489,6 @@ object ChatApp:
         remember *> cancelOpen.set(false) *> ZIO.succeed(
           bridge.post(WebviewMsg.CancelTurnChoice(choice.toString, keep))
         )
-      end applyCancelChoice
 
       def chordStash: UIO[Unit] =
         draft.get.flatMap { text =>
@@ -2583,7 +2567,6 @@ object ChatApp:
           chat.update(m => m.copy(chips = PromptChip.upsert(m.chips, chip))) *>
           ZIO.succeed(bridge.post(WebviewMsg.MentionPick(file.path, file.absPath))) *>
           ZIO.succeed(bridge.post(WebviewMsg.MentionQuery("")))
-      end pickMention
 
       def onDraft(text: String): UIO[Unit] =
         draft.set(text) *>
@@ -3381,8 +3364,6 @@ object ChatApp:
             case ComposerQuery.SendKey.Newline => ZIO.unit
             case ComposerQuery.SendKey.Ignore  => ZIO.unit
     yield out
-    end for
-  end onDraftKey
 
   private def renderActivity(bridge: HostBridge, activity: Squawk[TurnActivity]): ascent.ast.UI[Any] =
     val detail = activity.map(_.detail.getOrElse(""))
@@ -3412,7 +3393,6 @@ object ChatApp:
       when(detail.map(_.nonEmpty))(E.pre(TestId("activity-detail"), detail)),
       when(timer.map(_.nonEmpty))(E.span(TestId("activity-timer"), timer)),
     )
-  end renderActivity
 
   private def writeClipboard(text: String): UIO[Unit] =
     ZIO.succeed {
@@ -3447,7 +3427,6 @@ object ChatApp:
         t.vars.foreach { (k, v) => el.style.setProperty(k, v) }
       }
     catch case _: Throwable => ()
-  end paintTheme
 
   def themeInline(id: String): String =
     Theme.pick(id).toList.flatMap(_.vars.toList).map((k, v) => s"$k: $v").mkString("; ")
@@ -3565,7 +3544,6 @@ object ChatApp:
         ),
       )
     )
-  end renderQueue
 
   private def renderTurn(
       bridge: HostBridge,
@@ -3638,7 +3616,6 @@ object ChatApp:
         E.div(StopReason, turn.map(_.stopReason.map(groksbeard.core.StopReason.wire).getOrElse("")))
       ),
     )
-  end renderTurn
 
   private def userTextOf(turn: TurnView): String =
     turn.user
@@ -3668,7 +3645,6 @@ object ChatApp:
         renderTool(bridge, id, tool, outputOf(id, tool, outputs))
       },
     )
-  end renderTools
 
   private def outputOf(
       id: String,
@@ -3757,7 +3733,6 @@ object ChatApp:
         )
       ),
     )
-  end renderTool
 
   private def cardFrame(testId: String, onClose: UIO[Unit], body: Seq[ascent.ast.UI[Any]]): ascent.ast.UI[Any] =
     E.div(
@@ -4014,7 +3989,6 @@ object ChatApp:
         ),
       ),
     )
-  end renderQuestionCard
 
   private def renderRewind(
       chat: ascent.Source[ChatModel],
@@ -4066,7 +4040,6 @@ object ChatApp:
         )
       ),
     )
-  end renderRewind
 
   private def renderPalette(
       rows: Squawk[List[PaletteRow]],
@@ -4122,7 +4095,6 @@ object ChatApp:
         ),
       ),
     )
-  end renderPalette
 
   private def renderMcps(
       chat: ascent.Source[ChatModel],
@@ -4178,7 +4150,6 @@ object ChatApp:
         ),
       ),
     )
-  end renderMcps
 
   private def renderTodos(
       chat: ascent.Source[ChatModel],
@@ -4232,7 +4203,6 @@ object ChatApp:
         ),
       )
     )
-  end renderTodos
 
   private def renderTasks(
       chat: ascent.Source[ChatModel],
@@ -4279,7 +4249,6 @@ object ChatApp:
         ),
       )
     )
-  end renderTasks
 
   private def renderTaskRow(row: TaskRow, index: Int, stopTask: TaskId => UIO[Unit]): ascent.ast.UI[Any] =
     val key = Tasks.rowKey(row, index)
@@ -4299,7 +4268,6 @@ object ChatApp:
         )
       else E.span(),
     )
-  end renderTaskRow
 
   private def renderChanges(
       bridge: HostBridge,
@@ -4768,7 +4736,6 @@ object ChatApp:
         else if c.turns.isEmpty then "Resume"
         else "This session"
       )
-  end sessionLabel
 
   private def sessionSubline(row: SessionRow): String =
     val shown = SessionIndex.displayTitle(row)
@@ -4808,7 +4775,6 @@ object ChatApp:
         ) ++ extra
       )*
     )
-  end sessionButton
 
   private def renderPicker(
       chat: ascent.Source[ChatModel],
@@ -4867,7 +4833,6 @@ object ChatApp:
         },
       ),
     )
-  end renderPicker
 
   private def occupancyEl(chat: ascent.Source[ChatModel], openContext: UIO[Unit]): ascent.ast.UI[Any] =
     forEach(chat.map(_.occupancy.toList))(o => s"${o.used}/${o.size}") { o =>
@@ -4975,5 +4940,4 @@ object ChatApp:
         },
       ),
     )
-  end renderSessionPane
 end ChatApp

@@ -52,4 +52,3 @@ object ChangePersistSpec extends ZIOSpecDefault:
         assertTrue(out.head.files.head.undoDisabled.contains(ChangeSet.MissingSnapshot))
       },
     )
-end ChangePersistSpec

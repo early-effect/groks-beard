@@ -88,7 +88,6 @@ object QuestionDraft:
       List("outcome" -> Json.Str("accepted"), "answers" -> answersObj) ++
         (if notes.isEmpty then Nil else List("annotations" -> Json.Obj(notes*)))
     Json.Obj(fields*)
-  end acceptedJson
 
   def cancelledJson: Json = Json.Obj("outcome" -> Json.Str("cancelled"))
 

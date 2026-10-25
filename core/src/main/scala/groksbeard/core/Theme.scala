@@ -117,8 +117,6 @@ object Theme:
         "vscode"
       case "system" | "auto" => Auto
       case other             => other
-    end match
-  end canonicalize
 
   def cycle(current: String): ThemeDef =
     val ids = All

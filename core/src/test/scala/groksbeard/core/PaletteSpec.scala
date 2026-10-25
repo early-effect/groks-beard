@@ -66,4 +66,3 @@ object PaletteSpec extends ZIOSpecDefault:
         )
       },
     )
-end PaletteSpec

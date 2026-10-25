@@ -54,7 +54,6 @@ object Tasks:
         case TaskStatus.Failed    => "failed"
         case TaskStatus.Cancelled => "cancelled"
     s"Subagent $word: $quoted$extra"
-  end lifecycle
 
   def headline(rows: List[TaskRow]): String =
     val live = running(rows).size
@@ -75,8 +74,6 @@ object Tasks:
         ).flatten
       if parts.isEmpty then ""
       else parts.mkString(" · ") + " still running"
-    end if
-  end statusLine
 
   def mark(status: TaskStatus): String =
     status match
@@ -113,7 +110,6 @@ object Tasks:
         val prompt = t.drop(i).trim
         if prompt.isEmpty then Left(LoopUsage)
         else interval(raw).map(d => LoopSpec(d.max(MinLoop), prompt))
-  end parseLoop
 
   def humanInterval(d: Duration): String =
     val sec = d.toSeconds.max(1)
@@ -134,7 +130,6 @@ object Tasks:
         case "d" | "day" | "days"                        => Right(n.days)
         case _                                           => Left(LoopUsage)
     }
-  end interval
 
   private def foldUpdate(obj: Json.Obj, current: List[TaskRow]): Option[List[TaskRow]] =
     str(obj, "sessionUpdate") match
@@ -167,8 +162,6 @@ object Tasks:
           detail = str(obj, "command").filter(_ != label).getOrElse(""),
         )
       )
-    end if
-  end fromBackgrounded
 
   private def complete(current: List[TaskRow], obj: Json.Obj): List[TaskRow] =
     val snap = obj.fields.collectFirst { case ("task_snapshot", o: Json.Obj) => o }
@@ -184,7 +177,6 @@ object Tasks:
         case None =>
           TaskRow(TaskId(id), TaskKind.Command, TaskStatus.Completed, if label.nonEmpty then label else id)
       upsert(current, row)
-  end complete
 
   private def fromScheduled(obj: Json.Obj): Option[TaskRow] =
     val id     = str(obj, "task_id").getOrElse("")
@@ -200,8 +192,6 @@ object Tasks:
           detail = str(obj, "human_schedule").getOrElse(""),
         )
       )
-    end if
-  end fromScheduled
 
   private def fromSubagent(obj: Json.Obj): Option[TaskRow] =
     val id    = str(obj, "subagent_id").orElse(str(obj, "child_session_id")).getOrElse("")
@@ -221,8 +211,6 @@ object Tasks:
           detail = bits.mkString(" · "),
         )
       )
-    end if
-  end fromSubagent
 
   private def finishSubagent(current: List[TaskRow], obj: Json.Obj): List[TaskRow] =
     val id = str(obj, "subagent_id").orElse(str(obj, "child_session_id")).getOrElse("")
@@ -236,8 +224,6 @@ object Tasks:
             current,
             TaskRow(TaskId(id), TaskKind.Subagent, status, str(obj, "description").getOrElse(id)),
           )
-    end if
-  end finishSubagent
 
   private def merge(old: TaskRow, next: TaskRow): TaskRow =
     next.copy(

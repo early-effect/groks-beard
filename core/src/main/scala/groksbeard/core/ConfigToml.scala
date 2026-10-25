@@ -17,7 +17,6 @@ object ConfigToml:
           unquote(raw)
         }
     }
-  end get
 
   def set(text: String, table: String, key: String, value: String): String =
     val rendered = s"$key = ${quote(value)}"
@@ -33,8 +32,6 @@ object ConfigToml:
         val body = text.substring(headerEnd, end)
         val next = replaceKey(body, key, rendered)
         text.substring(0, headerEnd) + next + text.substring(end)
-    end match
-  end set
 
   def setBool(text: String, table: String, key: String, value: Boolean): String =
     set(text, table, key, if value then "true" else "false")
@@ -49,7 +46,6 @@ object ConfigToml:
         case c    => c.toString
       }
       s"\"$escaped\""
-  end quote
 
   private def unquote(raw: String): String =
     val t = raw.trim
@@ -70,7 +66,6 @@ object ConfigToml:
         else trimmed :+ rendered :+ ""
       else lines.updated(idx, rendered)
     next.mkString("\n")
-  end replaceKey
 
   private def tableBody(text: String, table: String): Option[String] =
     tableRange(text, table).map { (start, end) =>
@@ -88,7 +83,6 @@ object ConfigToml:
       if after < text.length && text.charAt(after) == '\n' then after += 1
       (s, nextTableOffset(text, after).getOrElse(text.length))
     }
-  end tableRange
 
   private def indexAtLineStart(text: String, needle: String, from: Int): Option[Int] =
     var i = from
@@ -109,5 +103,4 @@ object ConfigToml:
         if k < text.length && text.charAt(k) == '[' then return Some(i)
       i += 1
     None
-  end nextTableOffset
 end ConfigToml

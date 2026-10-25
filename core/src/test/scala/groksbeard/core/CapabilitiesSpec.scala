@@ -27,4 +27,3 @@ object CapabilitiesSpec extends ZIOSpecDefault:
         assertTrue(before.terminal.isEmpty, after.terminal.contains(true))
       },
     )
-end CapabilitiesSpec

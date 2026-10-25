@@ -57,7 +57,6 @@ final class ChangesTree(sets: () => List[ChangeSet]) extends TreeDataProvider[St
               arguments = js.Array(file.path),
             )
             item
-        end match
 
   def getChildren(element: js.UndefOr[String]): js.Array[String] =
     val current = sets()

@@ -16,7 +16,6 @@ enum PaletteKind:
   case Doctor
   case Theme
   case Voice
-end PaletteKind
 
 final case class PaletteRow(
     id: String,
@@ -117,7 +116,6 @@ object Palette:
     val head = pin.flatMap(id => unique.find(_.id == id))
     val tail = unique.filterNot(r => pin.contains(r.id))
     head ++ tail
-  end rows
 
   def filter(rows: List[PaletteRow], query: String): List[PaletteRow] =
     val q = query.stripPrefix("/").trim.toLowerCase
@@ -132,8 +130,6 @@ object Palette:
         !prefix.contains(r) && !mid.contains(r) && r.description.toLowerCase.contains(q)
       }
       prefix ++ mid ++ desc
-    end if
-  end filter
 
   def slashRow(cmd: SlashCommand): PaletteRow =
     val kind =
@@ -162,7 +158,6 @@ object Palette:
       description = cmd.description,
       kind = kind,
     )
-  end slashRow
 
   private def hay(row: PaletteRow): String =
     s"${row.id} ${row.label} ${row.hint}".toLowerCase

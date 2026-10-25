@@ -46,4 +46,3 @@ object NodeCapture:
         )
       catch case e: Throwable => cb(ZIO.fail(BeardError.system(e)))
     }
-end NodeCapture

@@ -39,7 +39,6 @@ object UiChrome:
       case _                 => None
     }
     UiChrome(theme, compact, vim, keep)
-  end fromToml
 
   def truthy(value: String): Boolean =
     val t = value.trim.toLowerCase

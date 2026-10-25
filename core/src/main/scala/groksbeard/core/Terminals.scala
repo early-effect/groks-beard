@@ -49,7 +49,6 @@ trait Terminals:
   def waitForExit(id: TerminalId): UIO[Option[TerminalExitStatus]]
   def kill(id: TerminalId): UIO[Boolean]
   def release(id: TerminalId): UIO[Boolean]
-end Terminals
 
 object Terminals:
   def capTail(text: String, limit: Int): (String, Boolean) =

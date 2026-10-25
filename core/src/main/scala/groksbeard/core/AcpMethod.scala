@@ -29,7 +29,6 @@ enum AcpMethod(val value: String, val aliases: String*):
       extends AcpMethod("terminal/wait_for_exit", "x.ai/terminal/wait_for_exit", "_x.ai/terminal/wait_for_exit")
   case TerminalKill    extends AcpMethod("terminal/kill", "x.ai/terminal/kill", "_x.ai/terminal/kill")
   case TerminalRelease extends AcpMethod("terminal/release", "x.ai/terminal/release", "_x.ai/terminal/release")
-end AcpMethod
 
 object AcpMethod:
   def parse(raw: String): Option[AcpMethod] =

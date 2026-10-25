@@ -74,4 +74,3 @@ object TerminalsSpec extends ZIOSpecDefault:
         )
       },
     )
-end TerminalsSpec

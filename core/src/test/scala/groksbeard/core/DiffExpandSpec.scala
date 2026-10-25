@@ -92,4 +92,3 @@ object DiffExpandSpec extends ZIOSpecDefault:
         }
       },
     )
-end DiffExpandSpec

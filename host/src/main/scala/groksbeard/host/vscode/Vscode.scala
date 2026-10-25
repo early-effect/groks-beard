@@ -16,6 +16,7 @@ trait Uri extends js.Object:
   /** VS Code `Uri.toString()` is a method. Empty-parens so Scala.js emits a call, not a property read. */
   @js.annotation.JSName("toString")
   def asString(): String = js.native
+end Uri
 
 @js.native
 trait UriNs extends js.Object:
@@ -110,7 +111,6 @@ trait WindowNs extends js.Object:
   def createStatusBarItem(alignment: Int, priority: Int): StatusBarItem                      = js.native
   def registerTreeDataProvider[T](viewId: String, provider: TreeDataProvider[T]): Disposable = js.native
   def activeTextEditor: js.UndefOr[TextEditor]                                               = js.native
-end WindowNs
 
 @js.native
 trait Position extends js.Object:
@@ -187,7 +187,6 @@ trait WorkspaceNs extends js.Object:
       exclude: js.UndefOr[String] = js.undefined,
       maxResults: js.UndefOr[Int] = js.undefined,
   ): js.Promise[js.Array[Uri]] = js.native
-end WorkspaceNs
 
 @js.native
 trait Clipboard extends js.Object:

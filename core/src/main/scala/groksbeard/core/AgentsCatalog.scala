@@ -33,8 +33,6 @@ object AgentsCatalog:
           builtin = false,
         )
       )
-    end if
-  end parseAgent
 
   def parsePersona(path: String, text: String): Option[PersonaDef] =
     val name = fileStem(path)
@@ -74,8 +72,6 @@ object AgentsCatalog:
         if i <= 0 then None
         else Some(line.take(i).trim -> line.drop(i + 1).trim.replaceAll("^['\"]|['\"]$", ""))
       }.toMap
-    end if
-  end frontmatter
 
   private def stripFrontmatter(text: String): String =
     val t = text.trim
@@ -99,5 +95,4 @@ object AgentsCatalog:
         raw.stripPrefix("\"").stripSuffix("\"").stripPrefix("'").stripSuffix("'")
       }
       .filter(_.nonEmpty)
-  end tomlString
 end AgentsCatalog

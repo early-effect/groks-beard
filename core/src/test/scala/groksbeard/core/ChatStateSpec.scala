@@ -128,4 +128,3 @@ object ChatStateSpec extends ZIOSpecDefault:
         )
       },
     )
-end ChatStateSpec

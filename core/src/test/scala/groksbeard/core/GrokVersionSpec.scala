@@ -29,4 +29,3 @@ object GrokVersionSpec extends ZIOSpecDefault:
         )
       },
     )
-end GrokVersionSpec

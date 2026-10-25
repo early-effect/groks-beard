@@ -18,4 +18,3 @@ object MentionSearchSpec extends ZIOSpecDefault:
         assertTrue(ranked.head.path == "docs/Foo.md")
       },
     )
-end MentionSearchSpec
